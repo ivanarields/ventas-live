@@ -171,8 +171,72 @@ app.post("/api/pedidos", async (req, res) => {
 app.patch("/api/pedidos/:id", async (req, res) => {
   const userId = req.headers["x-user-id"];
   if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
-  const { data, error } = await supabase.from("pedidos").update({ ...req.body, updated_at: new Date() }).eq("id", req.params.id).eq("user_id", userId).select().single();
+
+  const { data, error } = await supabase.from("pedidos")
+    .update({ ...req.body, updated_at: new Date() })
+    .eq("id", req.params.id).eq("user_id", userId).select().single();
   if (error) return res.status(500).json({ error: error.message });
+
+  // Si el pedido pasa a "listo", asignar etiqueta automáticamente
+  if (req.body.status === "listo" && data.customer_id) {
+    try {
+      const { data: customer } = await supabase.from("customers")
+        .select("full_name, normalized_name, phone").eq("id", data.customer_id).single();
+
+      // Upsert cliente en sistema de etiquetas
+      const { data: custId } = await supabase.rpc("fn_upsert_customer", {
+        p_firebase_id: String(data.customer_id),
+        p_full_name: customer?.full_name ?? data.customer_name ?? "",
+        p_normalized_name: customer?.normalized_name ?? cleanName(data.customer_name ?? ""),
+        p_whatsapp_number: customer?.phone ?? null,
+      });
+
+      // Upsert pedido y asignar casillero
+      const { data: labelData } = await supabase.rpc("fn_upsert_order_and_assign", {
+        p_firebase_id: String(data.id),
+        p_customer_id: custId,
+        p_total_bags: data.bag_count ?? 1,
+        p_total_items: data.item_count ?? 0,
+        p_total_amount: data.total_amount ?? 0,
+        p_assigned_by: "app",
+      });
+
+      const row = Array.isArray(labelData) ? labelData[0] : labelData;
+      if (row?.out_container_code) {
+        const labelType = /^\d+$/.test(row.out_container_code) ? "number" : "letter";
+        // Guardar etiqueta en pedido
+        await supabase.from("pedidos").update({ label: row.out_container_code, label_type: labelType })
+          .eq("id", data.id);
+        // Guardar etiqueta en cliente
+        await supabase.from("customers").update({
+          active_label: row.out_container_code,
+          active_label_type: labelType,
+          label_updated_at: new Date(),
+        }).eq("id", data.customer_id);
+
+        data.label = row.out_container_code;
+        data.label_type = labelType;
+      }
+    } catch (labelErr) {
+      console.error("[etiqueta] error asignando etiqueta:", labelErr);
+    }
+  }
+
+  // Si el pedido pasa a "entregado", liberar etiqueta
+  if (req.body.status === "entregado" && data.customer_id) {
+    try {
+      await supabase.rpc("fn_release_order_by_firebase_id", {
+        p_firebase_id: String(data.id),
+        p_released_by: "app",
+        p_reason: "DELIVERED",
+      });
+      await supabase.from("customers").update({ active_label: "", active_label_type: "", label_updated_at: new Date() })
+        .eq("id", data.customer_id);
+    } catch (releaseErr) {
+      console.error("[etiqueta] error liberando etiqueta:", releaseErr);
+    }
+  }
+
   res.json(data);
 });
 
