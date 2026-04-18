@@ -177,8 +177,11 @@ app.patch("/api/pedidos/:id", async (req, res) => {
     .eq("id", req.params.id).eq("user_id", userId).select().single();
   if (error) return res.status(500).json({ error: error.message });
 
-  // Si el pedido pasa a "listo", asignar etiqueta automáticamente
-  if (req.body.status === "listo" && data.customer_id) {
+  // Si el pedido pasa a "listo" O si ya está en "listo" y cambia bag_count → reasignar etiqueta
+  const effectiveStatus = data.status ?? req.body.status ?? "";
+  const shouldAssignLabel = data.customer_id &&
+    (req.body.status === "listo" || (effectiveStatus === "listo" && req.body.bag_count !== undefined));
+  if (shouldAssignLabel) {
     try {
       const { data: customer } = await supabase.from("customers")
         .select("full_name, normalized_name, phone").eq("id", data.customer_id).single();
