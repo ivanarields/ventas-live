@@ -235,8 +235,21 @@ Variables `@theme` en `src/index.css`:
 - **Después de cada mutación:** llamar `onRefresh()` o `loadData()` para re-sincronizar estado local
 - **`firebase-compat.ts`:** shim temporal — los nuevos call-sites deben usar `pagosApi`, `clientesApi`, etc. directamente
 
+## Fase 3 — Flujo de Pago→Pedido y correcciones (completado)
+
+**Lo que se hizo:**
+- Al registrar un pago, se crea automáticamente un pedido en estado `"procesar"` → aparece tarjeta azul en el perfil
+- Botón "PEDIDO LISTO" ahora actualiza correctamente el estado a `"listo"` vía `pedidosApi.update()`
+- Corregido: `handleSmartAction` ahora envía `bag_count` y `item_count` en snake_case (Supabase requiere snake_case)
+- `syncLabelsForCustomer` se ejecuta automáticamente y asigna etiqueta (1-4 o A-D) según cantidad de bolsas
+- Flujo completo verificado con pruebas HTTP:
+  1. Registrar pago → crea pedido en "procesar"
+  2. Abrir Mesa de Preparación → contar prendas/bolsas
+  3. Tocar "PEDIDO LISTO" → estado cambia a "listo" + etiqueta asignada
+  4. Opcionalmente marcar como "entregado" → libera casillero
+
 ## Pendiente
 
 - RLS (Row Level Security) en PostgreSQL — actualmente filtrado solo por `user_id` en el servidor
-- Despliegue en Vercel (Fase 3)
+- Despliegue en Vercel
 - Realtime con Supabase Realtime (reemplazar el polling manual de `loadData`)
