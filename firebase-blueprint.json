@@ -1,0 +1,145 @@
+{
+  "entities": {
+    "LiveSession": {
+      "title": "Live Session",
+      "description": "Scheduled TikTok live sessions",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the live" },
+        "scheduledAt": { "type": "string", "format": "date-time", "description": "When the live starts" },
+        "duration": { "type": "number", "description": "Estimated duration in minutes" },
+        "status": { "type": "string", "enum": ["scheduled", "live", "completed"], "description": "Current status" },
+        "notes": { "type": "string", "description": "Planning notes" }
+      },
+      "required": ["title", "scheduledAt", "status"]
+    },
+    "Giveaway": {
+      "title": "Giveaway",
+      "description": "Sorteos managed during lives",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Name of the giveaway" },
+        "liveId": { "type": "string", "description": "Reference to the LiveSession" },
+        "prize": { "type": "string", "description": "What is being given away" },
+        "status": { "type": "string", "enum": ["active", "closed"], "description": "Status" },
+        "winnerId": { "type": "string", "description": "UID of the winner" }
+      },
+      "required": ["title", "status"]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "Participants in a giveaway",
+      "type": "object",
+      "properties": {
+        "giveawayId": { "type": "string", "description": "Reference to Giveaway" },
+        "name": { "type": "string", "description": "Name of participant" },
+        "whatsapp": { "type": "string", "description": "WhatsApp number" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["giveawayId", "name"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Sales records",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "total": { "type": "number" },
+        "items": { "type": "string", "description": "JSON string of items" },
+        "status": { "type": "string", "enum": ["pending", "paid", "shipped", "delivered"] },
+        "paymentMethod": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerName", "total", "status"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial records (Income/Expenses)",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "isOcr": { "type": "boolean", "description": "If generated via bank screenshot OCR" },
+        "account": { "type": "string" },
+        "beneficiary": { "type": "string" },
+        "tags": { "type": "string" },
+        "status": { "type": "string", "enum": ["paid", "pending"] },
+        "isRecurring": { "type": "boolean" }
+      },
+      "required": ["type", "amount", "date"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Client profile for CRM and logistics",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string", "description": "WhatsApp number (unique identifier)" },
+        "activeLabel": { "type": "string", "description": "Current bag label (A, B, C...)" },
+        "totalSpent": { "type": "number" },
+        "totalItems": { "type": "number" },
+        "pendingItems": { "type": "number" },
+        "deliveredItems": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "phone", "activeLabel"]
+    },
+    "Pedido": {
+      "title": "Order/Bag",
+      "description": "Group of items (prendas) for a customer",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "itemCount": { "type": "number", "description": "Number of prendas" },
+        "bagCount": { "type": "number", "description": "Number of bags" },
+        "label": { "type": "string", "description": "A, B, C..." },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "ready", "delivered"] },
+        "paymentIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["customerId", "itemCount", "label", "status"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Client payment records",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "pago": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" },
+        "method": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "customerId": { "type": "string", "description": "Link to Customer profile" }
+      },
+      "required": ["nombre", "pago", "date"]
+    },
+    "Idea": {
+      "title": "Idea",
+      "description": "Saved viral ideas for lives",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "category": { "type": "string" }
+      },
+      "required": ["content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "live_sessions": { "schema": "LiveSession", "description": "Calendar of lives" },
+    "giveaways": { "schema": "Giveaway", "description": "Sorteos" },
+    "giveaways/{giveawayId}/participants": { "schema": "Participant", "description": "Giveaway participants" },
+    "orders": { "schema": "Order", "description": "Sales" },
+    "transactions": { "schema": "Transaction", "description": "Finance" },
+    "pagos": { "schema": "Payment", "description": "Client payments" },
+    "customers": { "schema": "Customer", "description": "Client Directory" },
+    "pedidos": { "schema": "Pedido", "description": "Logistics and Bag labels" },
+    "ideas": { "schema": "Idea", "description": "Saved ideas" }
+  }
+}
