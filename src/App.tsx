@@ -6259,53 +6259,35 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const handleSmartAction = async () => {
     if (!selectedPedido) return;
     const status = selectedPedido.status.toUpperCase();
-    let nextStatus = 'listo';
 
-    if (status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING') {
-      nextStatus = 'listo';
-    } else {
-      nextStatus = status.toLowerCase();
+    // Solo desde la Mesa de Preparación: PROCESAR → LISTO
+    // La entrega se confirma desde el perfil del cliente
+    if (status !== 'PROCESAR' && status !== 'VERIFICADO' && status !== 'PENDING') return;
+
+    if (!person.customerId) {
+      alert("Error: No se puede procesar un pedido sin perfil de cliente.");
+      return;
+    }
+    if (selectedPedido.id.startsWith('temp-')) {
+      setView('detail');
+      setSelectedPedido(null);
+      return;
     }
 
     try {
-      if (!person.customerId) {
-        alert("Error: No se puede crear un pedido sin un perfil de cliente válido.");
-        return;
-      }
-
-      if (selectedPedido.id.startsWith('temp-')) {
-        console.warn("Blocked persistence of temporary payment group as order.");
-        setView('detail');
-        setSelectedPedido(null);
-        return;
-      }
-
-      const updateData = {
-        status: nextStatus,
-        bag_count: bolsaCount,
-        item_count: selectedPrenda,
-      };
-
+      const updateData = { status: 'listo', bag_count: bolsaCount, item_count: selectedPrenda };
       await pedidosApi.update(selectedPedido.id, updateData);
-
       const updatedPedidos = allPedidos.map(p =>
         p.id === selectedPedido.id ? { ...p, ...updateData } : p
       );
-
       await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
       await loadData();
-
-      if (nextStatus === 'entregado' && status !== 'ENTREGADO') {
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#2E7D32', '#E8F5E9', '#10B981']
-        });
-      }
+      // Regresar automáticamente al perfil
+      setView('detail');
+      setSelectedPedido(null);
     } catch (error) {
-      console.error('Error in smart action:', error);
-      alert('Error al cambiar estado del pedido');
+      console.error('Error al marcar pedido listo:', error);
+      alert('Error al guardar el pedido');
     }
   };
 
@@ -6313,7 +6295,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     if (!selectedPedido) return '';
     const status = selectedPedido.status.toUpperCase();
     if (status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING') return 'PEDIDO LISTO';
-    return 'GUARDAR CAMBIOS';
+    if (status === 'LISTO' || status === 'PREPARADO' || status === 'READY') return 'YA ESTÁ LISTO';
+    return 'ENTREGADO';
   };
 
   const handleDeletePedido = async (pedidoId: string) => {
@@ -6323,26 +6306,12 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const executeDeletePedido = async () => {
     if (!confirmDeletePedido) return;
     try {
-      const batch = writeBatch(db);
-      batch.delete(doc(db, 'pedidos', confirmDeletePedido));
-
+      try { await releasePedidoLabel(confirmDeletePedido, 'DELETED'); } catch (e) { /* sin etiqueta asignada */ }
+      await pedidosApi.delete(confirmDeletePedido);
       const updatedPedidos = allPedidos.filter(p => p.id !== confirmDeletePedido);
-
-      try {
-        await releasePedidoLabel(confirmDeletePedido, 'DELETED');
-      } catch (e) {
-        console.warn('[labels] release on delete failed', confirmDeletePedido, e);
-      }
-
-      await batch.commit();
       await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
-
-      if (forceDetailView) {
-        onClose();
-      } else {
-        setView('detail');
-        setSelectedPedido(null);
-      }
+      await loadData();
+      if (forceDetailView) { onClose(); } else { setView('detail'); setSelectedPedido(null); }
     } catch (error) {
       console.error('Error deleting pedido:', error);
     } finally {
@@ -6387,78 +6356,34 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
 
   const handleStatusTransition = async (orderIds: string[], currentStatus: string) => {
     const status = currentStatus.toUpperCase();
-    
-    // If it's ready, we trigger the delivery confirmation (only from profile)
+    // LISTO → mostrar confirmación de entrega
     if (status === 'LISTO' || status === 'PREPARADO' || status === 'READY') {
       setConfirmDelivery({ ids: orderIds, status: currentStatus });
       return;
     }
-
-    const nextStatusMap: { [key: string]: string } = {
-      'PROCESAR': 'listo',
-      'VERIFICADO': 'listo',
-      'PENDING': 'listo',
-      'ENTREGADO': 'procesar'
-    };
-    
-    const nextStatus = nextStatusMap[status] || 'procesar';
-    
-    try {
-      const batch = writeBatch(db);
-      orderIds.forEach(id => {
-        if (!id.startsWith('temp-')) {
-          const ref = doc(db, 'pedidos', id);
-          batch.update(ref, { status: nextStatus.toLowerCase() });
-        }
-      });
-
-      const updatedPedidos = allPedidos.map(p =>
-        orderIds.includes(p.id) ? { ...p, status: nextStatus.toLowerCase() } : p
-      );
-
-      await batch.commit();
-      await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
-
-      if (nextStatus === 'entregado') {
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#2E7D32', '#E8F5E9', '#10B981']
-        });
-      }
-    } catch (error) {
-      console.error('Error updating status:', error);
-    }
+    // ENTREGADO → no hacer nada desde el perfil
+    if (status === 'ENTREGADO') return;
   };
 
   const executeDelivery = async () => {
     if (!confirmDelivery) return;
     const { ids } = confirmDelivery;
-    
     try {
-      const batch = writeBatch(db);
-      ids.forEach(id => {
-        if (!id.startsWith('temp-')) {
-          batch.update(doc(db, 'pedidos', id), { status: 'entregado' });
-        }
-      });
-
+      // Actualizar todos los pedidos del grupo a "entregado"
+      await Promise.all(
+        ids.filter(id => !id.startsWith('temp-')).map(id =>
+          pedidosApi.update(id, { status: 'entregado' })
+        )
+      );
       const updatedPedidos = allPedidos.map(p =>
         ids.includes(p.id) ? { ...p, status: 'entregado' } : p
       );
-
-      await batch.commit();
       await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
-
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#2E7D32', '#E8F5E9', '#10B981']
-      });
+      await loadData();
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#2E7D32', '#E8F5E9', '#10B981'] });
     } catch (error) {
       console.error('Error delivering order:', error);
+      alert('Error al confirmar la entrega');
     } finally {
       setConfirmDelivery(null);
     }
