@@ -6258,47 +6258,49 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     }
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+
   const handleSmartAction = async () => {
-    if (!selectedPedido) return;
+    if (!selectedPedido || isSaving) return;
     const status = selectedPedido.status.toUpperCase();
+    const isProcesar = status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING';
+    const isListo = status === 'LISTO' || status === 'PREPARADO' || status === 'READY';
 
-    // Solo desde la Mesa de Preparación: PROCESAR → LISTO
-    // La entrega se confirma desde el perfil del cliente
-    if (status !== 'PROCESAR' && status !== 'VERIFICADO' && status !== 'PENDING') return;
+    if (!person.customerId) return;
+    if (selectedPedido.id.startsWith('temp-')) { setView('detail'); setSelectedPedido(null); return; }
 
-    if (!person.customerId) {
-      alert("Error: No se puede procesar un pedido sin perfil de cliente.");
-      return;
-    }
-    if (selectedPedido.id.startsWith('temp-')) {
+    setIsSaving(true);
+    if (isProcesar) {
+      // PROCESAR → LISTO: regresar al perfil inmediatamente (actualización optimista)
       setView('detail');
       setSelectedPedido(null);
-      return;
+      try {
+        await pedidosApi.update(selectedPedido.id, { status: 'listo', bag_count: bolsaCount, item_count: selectedPrenda });
+        loadData(); // en background, sin await
+      } catch (error) {
+        console.error('Error al marcar pedido listo:', error);
+        loadData();
+      }
+    } else if (isListo) {
+      // LISTO → guardar cambios de prendas/bolsas (edición)
+      try {
+        await pedidosApi.update(selectedPedido.id, { bag_count: bolsaCount, item_count: selectedPrenda });
+        setView('detail');
+        setSelectedPedido(null);
+        loadData();
+      } catch (error) {
+        console.error('Error al guardar cambios:', error);
+      }
     }
-
-    try {
-      const updateData = { status: 'listo', bag_count: bolsaCount, item_count: selectedPrenda };
-      await pedidosApi.update(selectedPedido.id, updateData);
-      const updatedPedidos = allPedidos.map(p =>
-        p.id === selectedPedido.id ? { ...p, ...updateData } : p
-      );
-      await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
-      await loadData();
-      // Regresar automáticamente al perfil
-      setView('detail');
-      setSelectedPedido(null);
-    } catch (error) {
-      console.error('Error al marcar pedido listo:', error);
-      alert('Error al guardar el pedido');
-    }
+    setIsSaving(false);
   };
 
   const getSmartButtonText = () => {
     if (!selectedPedido) return '';
     const status = selectedPedido.status.toUpperCase();
-    if (status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING') return 'PEDIDO LISTO';
-    if (status === 'LISTO' || status === 'PREPARADO' || status === 'READY') return 'YA ESTÁ LISTO';
-    return 'ENTREGADO';
+    if (status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING') return 'MARCAR COMO LISTO';
+    if (status === 'LISTO' || status === 'PREPARADO' || status === 'READY') return 'GUARDAR CAMBIOS';
+    return 'PEDIDO ENTREGADO';
   };
 
   const handleDeletePedido = async (pedidoId: string) => {
@@ -6594,25 +6596,30 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             </div>
           </div>
 
-          <button 
-            onClick={handleSmartAction}
-            className={cn(
-              "w-full py-5 rounded-[24px] font-black uppercase tracking-[0.1em] flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg text-[14px]",
-              selectedPedido.status.toUpperCase() === 'PROCESAR' || selectedPedido.status.toUpperCase() === 'VERIFICADO' || selectedPedido.status.toUpperCase() === 'PENDING' ? "bg-[#FFF9C4] text-[#F57F17] shadow-[#FFF9C4]/20" :
-              selectedPedido.status.toUpperCase() === 'LISTO' || selectedPedido.status.toUpperCase() === 'PREPARADO' || selectedPedido.status.toUpperCase() === 'READY' ? "bg-[#E3F2FD] text-[#1976D2] shadow-[#E3F2FD]/20" :
-              "bg-[#E8F5E9] text-[#2E7D32] shadow-[#E8F5E9]/20"
-            )}
-          >
-            <span>{getSmartButtonText()}</span>
-            <div className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center border-2",
-              selectedPedido.status.toUpperCase() === 'PROCESAR' || selectedPedido.status.toUpperCase() === 'VERIFICADO' || selectedPedido.status.toUpperCase() === 'PENDING' ? "border-[#F57F17]/30" :
-              selectedPedido.status.toUpperCase() === 'LISTO' || selectedPedido.status.toUpperCase() === 'PREPARADO' || selectedPedido.status.toUpperCase() === 'READY' ? "border-[#1976D2]/30" :
-              "border-[#2E7D32]/30"
-            )}>
-              <Check size={16} strokeWidth={4} />
-            </div>
-          </button>
+          {(() => {
+            const st = selectedPedido.status.toUpperCase();
+            const isProcesar = st === 'PROCESAR' || st === 'VERIFICADO' || st === 'PENDING';
+            const isListo = st === 'LISTO' || st === 'PREPARADO' || st === 'READY';
+            if (!isProcesar && !isListo) return null;
+            return (
+              <button
+                onClick={handleSmartAction}
+                disabled={isSaving}
+                className={cn(
+                  "w-full py-5 rounded-[24px] font-black uppercase tracking-[0.1em] flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg text-[14px] disabled:opacity-60",
+                  isProcesar ? "bg-[#FFF9C4] text-[#F57F17] shadow-[#FFF9C4]/20" : "bg-[#E3F2FD] text-[#1976D2] shadow-[#E3F2FD]/20"
+                )}
+              >
+                <span>{isSaving ? '...' : getSmartButtonText()}</span>
+                <div className={cn(
+                  "w-7 h-7 rounded-full flex items-center justify-center border-2",
+                  isProcesar ? "border-[#F57F17]/30" : "border-[#1976D2]/30"
+                )}>
+                  <Check size={16} strokeWidth={4} />
+                </div>
+              </button>
+            );
+          })()}
         </div>
       </motion.div>
     );
