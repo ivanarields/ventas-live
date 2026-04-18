@@ -1798,12 +1798,13 @@ export default function App() {
           />
         )}
         {selectedPerson && (
-          <PersonDetailModal 
-            person={selectedPerson} 
+          <PersonDetailModal
+            person={selectedPerson}
             pedidos={pedidos}
             customers={customers}
-            onClose={() => setSelectedPersonId(null)} 
+            onClose={() => setSelectedPersonId(null)}
             forceDetailView={hideCompletedWork}
+            onRefresh={loadData}
             onEditPayment={(p: any) => {
               setEditingPayment(p);
               setShowAddModal('payment');
@@ -6058,7 +6059,8 @@ const OrderItemCard: React.FC<OrderItemCardProps> = ({
   );
 };
 
-function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, onEditPayment, onLinkNumber, forceDetailView }: any) {
+function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, onEditPayment, onLinkNumber, forceDetailView, onRefresh }: any) {
+  const loadData = onRefresh ?? (() => Promise.resolve());
   const [quickPhone, setQuickPhone] = useState('');
   const [isLinking, setIsLinking] = useState(false);
   const [showQuickLink, setShowQuickLink] = useState(false);
