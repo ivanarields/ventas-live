@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Plus, Edit2, Trash2, Package, ShoppingBag, Check, X, Image as ImageIcon, Tag, ChevronDown, ChevronUp, CheckCircle, Clock, XCircle, Send } from 'lucide-react';
+import {
+  ExternalLink, Plus, Edit2, Trash2, Package, ShoppingBag,
+  Check, X, Image as ImageIcon, ChevronDown, ChevronUp,
+  CheckCircle, Clock, XCircle, Send, AlertCircle, RefreshCw,
+} from 'lucide-react';
 
 interface StoreProduct {
   id: number;
@@ -29,23 +33,23 @@ const CATEGORIAS = ['General', 'Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos', '
 const TALLAS_COMUNES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '34', '36', '38', '40', '42', 'Único'];
 const BRAND = '#ff2d78';
 
-const EMPTY_PRODUCT = {
+const catColor = (cat: string) => {
+  const colors: Record<string, string> = {
+    'Blusas': '#e879f9', 'Vestidos': '#818cf8', 'Chaquetas': '#38bdf8',
+    'Conjuntos': '#34d399', 'Accesorios': '#fbbf24', 'Pantalones': '#f97316',
+    'Faldas': '#ec4899', 'General': '#94a3b8',
+  };
+  return colors[cat] ?? '#94a3b8';
+};
+
+const EMPTY_FORM = {
   name: '',
   price: '',
   description: '',
   category: 'General',
   sizes: [] as string[],
-  image_url: '',
   images: [] as string[],
   available: true,
-};
-
-const catColor = (cat: string) => {
-  const colors: Record<string, string> = {
-    'Blusas': '#e879f9', 'Vestidos': '#818cf8', 'Chaquetas': '#38bdf8',
-    'Conjuntos': '#34d399', 'Accesorios': '#fbbf24', 'Pantalones': '#f97316', 'Faldas': '#ec4899', 'General': '#94a3b8',
-  };
-  return colors[cat] ?? '#94a3b8';
 };
 
 export function AdminTiendaView({ userId, authToken }: { userId: string; authToken: string }) {
@@ -55,23 +59,25 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState({ ...EMPTY_PRODUCT });
+  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [talla, setTalla] = useState('');
+  const [urlInput, setUrlInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLDivElement>(null);
 
   const loadAll = async () => {
     setLoading(true);
     try {
       const [pRes, oRes] = await Promise.all([
-        fetch('/api/products'),
+        fetch('/api/products?admin=true', { headers: { 'x-user-id': userId } }),
         fetch('/api/store-orders', { headers: { Authorization: `Bearer ${authToken}` } }),
       ]);
       if (pRes.ok) setProducts(await pRes.json());
       if (oRes.ok) setOrders(await oRes.json());
     } catch (e) {
-      console.error(e);
+      console.error('Error cargando tienda:', e);
     } finally {
       setLoading(false);
     }
@@ -80,29 +86,31 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   useEffect(() => { loadAll(); }, []);
 
   const openNew = () => {
-    setForm({ ...EMPTY_PRODUCT });
+    setForm({ ...EMPTY_FORM });
     setEditingId(null);
-    setShowForm(true);
+    setSaveError('');
+    setUrlInput('');
     setTalla('');
+    setShowForm(true);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
   const openEdit = (p: StoreProduct) => {
     setForm({
       name: p.name,
       price: String(p.price),
-      description: p.description,
+      description: p.description ?? '',
       category: p.category,
-      sizes: [...(p.sizes || [])],
-      image_url: p.image_url,
-      images: [...(p.images || [])],
+      sizes: [...(p.sizes ?? [])],
+      images: [...(p.images ?? [])],
       available: p.available,
     });
     setEditingId(p.id);
-    setShowForm(true);
+    setSaveError('');
+    setUrlInput('');
     setTalla('');
-    setTimeout(() => {
-      document.getElementById('product-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 100);
+    setShowForm(true);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
   const addTalla = (t: string) => {
@@ -112,22 +120,21 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   };
 
   const removeTalla = (t: string) => setForm(f => ({ ...f, sizes: f.sizes.filter(s => s !== t) }));
-  const removeImage = (idx: number) => setForm(f => ({ ...f, images: f.images.filter((_, i) => i !== idx) }));
 
-  const handleFileUpload = async (files: FileList) => {
-    for (const file of Array.from(files)) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64 = e.target?.result as string;
-        setForm(f => ({ ...f, images: [...f.images, base64] }));
-      };
-      reader.readAsDataURL(file);
+  const addImageUrl = () => {
+    const url = urlInput.trim();
+    if (url && !form.images.includes(url) && form.images.length < 5) {
+      setForm(f => ({ ...f, images: [...f.images, url] }));
+      setUrlInput('');
     }
   };
+
+  const removeImage = (idx: number) => setForm(f => ({ ...f, images: f.images.filter((_, i) => i !== idx) }));
 
   const handleSave = async () => {
     if (!form.name.trim() || !form.price) return;
     setSaving(true);
+    setSaveError('');
     try {
       const body = {
         name: form.name.trim(),
@@ -135,21 +142,27 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         description: form.description.trim(),
         category: form.category,
         sizes: form.sizes,
-        image_url: form.images[0] || form.image_url,
+        image_url: form.images[0] ?? '',
         images: form.images,
         available: form.available,
       };
       const url = editingId ? `/api/products/${editingId}` : '/api/products';
       const method = editingId ? 'PATCH' : 'POST';
-      await fetch(url, {
+      const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `Error ${res.status}` }));
+        throw new Error(err.error ?? `Error ${res.status}`);
+      }
       setShowForm(false);
       setEditingId(null);
-      setForm({ ...EMPTY_PRODUCT });
+      setForm({ ...EMPTY_FORM });
       await loadAll();
+    } catch (err: any) {
+      setSaveError(err.message ?? 'Error al guardar');
     } finally {
       setSaving(false);
     }
@@ -157,17 +170,21 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
 
   const handleDelete = async (id: number, name: string) => {
     if (!confirm(`¿Eliminar "${name}"?`)) return;
-    await fetch(`/api/products/${id}`, { method: 'DELETE', headers: { 'x-user-id': userId } });
-    await loadAll();
+    const res = await fetch(`/api/products/${id}`, {
+      method: 'DELETE',
+      headers: { 'x-user-id': userId },
+    });
+    if (res.ok) await loadAll();
+    else alert('Error al eliminar');
   };
 
   const updateOrder = async (id: number, body: object) => {
-    await fetch(`/api/store-orders/${id}`, {
+    const res = await fetch(`/api/store-orders/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
       body: JSON.stringify(body),
     });
-    await loadAll();
+    if (res.ok) await loadAll();
   };
 
   return (
@@ -186,7 +203,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
           style={{ borderColor: BRAND, color: BRAND, background: '#fff0f5' }}
         >
           <ExternalLink size={12} />
-          Ver tienda en vivo
+          Ver tienda
         </a>
       </div>
 
@@ -195,7 +212,9 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         <button
           onClick={() => setSubTab('productos')}
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-black transition-all"
-          style={subTab === 'productos' ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' } : { color: '#9ca3af' }}
+          style={subTab === 'productos'
+            ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' }
+            : { color: '#9ca3af' }}
         >
           <Package size={14} />
           Productos
@@ -206,7 +225,9 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         <button
           onClick={() => setSubTab('pedidos')}
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-black transition-all"
-          style={subTab === 'pedidos' ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' } : { color: '#9ca3af' }}
+          style={subTab === 'pedidos'
+            ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' }
+            : { color: '#9ca3af' }}
         >
           <ShoppingBag size={14} />
           Pedidos
@@ -221,20 +242,37 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       {/* ─── PRODUCTOS ─── */}
       {subTab === 'productos' && (
         <div className="space-y-3">
-          {/* Botón nuevo */}
-          <button
-            onClick={showForm && !editingId ? () => setShowForm(false) : openNew}
-            className="w-full flex items-center justify-center gap-2 h-11 rounded-xl font-black text-sm text-white transition-all active:scale-[0.98]"
-            style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
-          >
-            <Plus size={16} />
-            Nuevo Producto
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={showForm ? () => { setShowForm(false); setEditingId(null); } : openNew}
+              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl font-black text-sm text-white transition-all active:scale-[0.98]"
+              style={{ background: showForm ? '#6b7280' : `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
+            >
+              {showForm ? <X size={15} /> : <Plus size={15} />}
+              {showForm ? 'Cancelar' : 'Nuevo Producto'}
+            </button>
+            <button
+              onClick={loadAll}
+              className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors"
+            >
+              <RefreshCw size={15} />
+            </button>
+          </div>
 
           {/* Formulario */}
           {showForm && (
-            <div id="product-form" className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-              <p className="text-sm font-black text-gray-800">{editingId ? 'Editar producto' : 'Nuevo producto'}</p>
+            <div ref={formRef} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+              <p className="text-sm font-black text-gray-800">
+                {editingId ? '✏️ Editar producto' : '➕ Nuevo producto'}
+              </p>
+
+              {/* Error */}
+              {saveError && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  <AlertCircle size={14} className="text-red-500 flex-shrink-0" />
+                  <p className="text-xs font-bold text-red-600">{saveError}</p>
+                </div>
+              )}
 
               {/* Nombre */}
               <div>
@@ -294,12 +332,12 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   {TALLAS_COMUNES.map(t => (
                     <button
                       key={t}
+                      type="button"
                       onClick={() => form.sizes.includes(t) ? removeTalla(t) : addTalla(t)}
                       className="px-2.5 py-1 rounded-full text-[11px] font-black transition-all"
                       style={form.sizes.includes(t)
                         ? { background: BRAND, color: 'white' }
-                        : { background: '#f5f5f5', color: '#888' }
-                      }
+                        : { background: '#f5f5f5', color: '#888' }}
                     >
                       {t}
                     </button>
@@ -308,30 +346,23 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Talla personalizada..."
+                    placeholder="Talla personalizada + Enter"
                     className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium outline-none focus:border-pink-400"
                     value={talla}
                     onChange={e => setTalla(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') addTalla(talla); }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTalla(talla); } }}
                   />
-                  <button
-                    onClick={() => addTalla(talla)}
-                    className="px-3 py-2 rounded-xl font-black text-white text-sm"
+                  <button type="button" onClick={() => addTalla(talla)}
+                    className="px-3 py-2 rounded-xl font-black text-white text-sm flex-shrink-0"
                     style={{ background: BRAND }}
-                  >
-                    +
-                  </button>
+                  >+</button>
                 </div>
                 {form.sizes.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {form.sizes.map(s => (
-                      <span
-                        key={s}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black text-white"
-                        style={{ background: BRAND }}
-                      >
+                      <span key={s} className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black text-white" style={{ background: BRAND }}>
                         {s}
-                        <button onClick={() => removeTalla(s)} className="opacity-70 hover:opacity-100">
+                        <button type="button" onClick={() => removeTalla(s)} className="opacity-70 hover:opacity-100">
                           <X size={10} />
                         </button>
                       </span>
@@ -340,64 +371,69 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 )}
               </div>
 
-              {/* Fotos */}
+              {/* Fotos por URL */}
               <div>
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">
-                  Fotos ({form.images.length}/5)
+                  Fotos por URL ({form.images.length}/5)
                 </label>
-                <div className="mt-1 flex gap-2 flex-wrap">
-                  {form.images.map((img, idx) => (
-                    <div key={idx} className="relative group">
-                      <img src={img} alt="" className="w-16 h-16 rounded-xl object-cover border-2 border-gray-100" />
-                      <button
-                        onClick={() => removeImage(idx)}
-                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X size={10} />
-                      </button>
-                      {idx === 0 && (
-                        <span className="absolute -bottom-1.5 left-0 right-0 text-center text-[9px] font-black text-gray-400">Principal</span>
-                      )}
-                    </div>
-                  ))}
-                  {form.images.length < 5 && (
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-1 hover:border-pink-300 transition-colors"
-                    >
-                      <ImageIcon size={16} className="text-gray-300" />
-                      <span className="text-[9px] font-black text-gray-300">Subir</span>
-                    </button>
-                  )}
+                <p className="text-[10px] text-gray-400 ml-1 mb-1">
+                  Pega el enlace de una imagen (Pinterest, Instagram, etc.)
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="https://..."
+                    className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium outline-none focus:border-pink-400"
+                    value={urlInput}
+                    onChange={e => setUrlInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addImageUrl(); } }}
+                  />
+                  <button
+                    type="button"
+                    onClick={addImageUrl}
+                    disabled={!urlInput.trim() || form.images.length >= 5}
+                    className="px-3 py-2 rounded-xl font-black text-white text-sm flex-shrink-0 disabled:opacity-40"
+                    style={{ background: BRAND }}
+                  >
+                    +
+                  </button>
                 </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={e => { if (e.target.files) handleFileUpload(e.target.files); }}
-                />
-                {/* También por URL */}
-                <input
-                  type="text"
-                  placeholder="O pegar URL de imagen..."
-                  className="w-full mt-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium outline-none focus:border-pink-400"
-                  value={form.image_url}
-                  onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))}
-                  onBlur={e => {
-                    const url = e.target.value.trim();
-                    if (url && !form.images.includes(url)) {
-                      setForm(f => ({ ...f, images: [...f.images, url], image_url: '' }));
-                    }
-                  }}
-                />
+
+                {/* Miniaturas */}
+                {form.images.length > 0 && (
+                  <div className="flex gap-2 flex-wrap mt-2">
+                    {form.images.map((img, idx) => (
+                      <div key={idx} className="relative group">
+                        <img
+                          src={img}
+                          alt=""
+                          className="w-16 h-16 rounded-xl object-cover border-2"
+                          style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}
+                          onError={e => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/64?text=Error'; }}
+                        />
+                        {idx === 0 && (
+                          <span className="absolute -top-1.5 left-0 right-0 text-center text-[8px] font-black" style={{ color: BRAND }}>
+                            principal
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeImage(idx)}
+                          className="absolute -bottom-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Disponible */}
+              {/* Toggle disponible */}
               <button
+                type="button"
                 onClick={() => setForm(f => ({ ...f, available: !f.available }))}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2.5"
               >
                 <div
                   className="w-10 h-5 rounded-full transition-all flex items-center px-0.5"
@@ -409,50 +445,38 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   />
                 </div>
                 <span className="text-sm font-bold text-gray-700">
-                  {form.available ? 'Disponible en tienda' : 'No disponible (oculto)'}
+                  {form.available ? '✓ Disponible en tienda' : '✗ Oculto (no disponible)'}
                 </span>
               </button>
 
-              {/* Botones */}
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={handleSave}
-                  disabled={saving || !form.name.trim() || !form.price}
-                  className="flex-1 h-11 rounded-xl font-black text-sm text-white transition-all active:scale-95 disabled:opacity-40"
-                  style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
-                >
-                  {saving ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear Producto'}
-                </button>
-                <button
-                  onClick={() => { setShowForm(false); setEditingId(null); }}
-                  className="px-4 h-11 rounded-xl font-black text-sm bg-gray-100 text-gray-600 transition-all active:scale-95"
-                >
-                  Cancelar
-                </button>
-              </div>
+              {/* Botón guardar */}
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !form.name.trim() || !form.price}
+                className="w-full h-11 rounded-xl font-black text-sm text-white transition-all active:scale-95 disabled:opacity-40"
+                style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
+              >
+                {saving ? 'Guardando...' : editingId ? '✓ Actualizar Producto' : '✓ Crear Producto'}
+              </button>
             </div>
           )}
 
-          {/* Lista de productos */}
+          {/* Lista */}
           {loading ? (
             <div className="space-y-2">
-              {[1, 2, 3].map(n => (
-                <div key={n} className="h-20 rounded-2xl bg-gray-100 animate-pulse" />
-              ))}
+              {[1, 2, 3].map(n => <div key={n} className="h-20 rounded-2xl bg-gray-100 animate-pulse" />)}
             </div>
           ) : products.length === 0 ? (
             <div className="text-center py-10 text-gray-400">
               <Package size={40} className="mx-auto mb-3 opacity-30" />
               <p className="font-black text-sm">Sin productos aún</p>
-              <p className="text-xs">Crea tu primer producto</p>
+              <p className="text-xs mt-1">Crea tu primer producto arriba</p>
             </div>
           ) : (
             <div className="space-y-2">
               {products.map(p => (
-                <div
-                  key={p.id}
-                  className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex gap-3"
-                >
+                <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex gap-3">
                   {/* Foto */}
                   <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
                     {p.images?.[0] || p.image_url ? (
@@ -466,32 +490,28 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="font-black text-sm text-gray-900 leading-tight line-clamp-1">{p.name}</p>
+                    <div className="flex items-start gap-1 mb-0.5">
+                      <p className="font-black text-sm text-gray-900 leading-tight flex-1 truncate">{p.name}</p>
                       <span
-                        className="flex-shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full text-white"
+                        className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
                         style={{ background: p.available ? '#10b981' : '#9ca3af' }}
                       >
                         {p.available ? 'Activo' : 'Oculto'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-1.5">
                       <span
                         className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
                         style={{ background: catColor(p.category) }}
                       >
                         {p.category}
                       </span>
-                      <span className="text-sm font-black" style={{ color: BRAND }}>
-                        {p.price} Bs
-                      </span>
+                      <span className="text-sm font-black" style={{ color: BRAND }}>{p.price} Bs</span>
                     </div>
                     {p.sizes?.length > 0 && (
-                      <div className="flex gap-1 mt-1.5 flex-wrap">
+                      <div className="flex gap-1 mt-1 flex-wrap">
                         {p.sizes.map(s => (
-                          <span key={s} className="text-[9px] font-black bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
-                            {s}
-                          </span>
+                          <span key={s} className="text-[9px] font-black bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{s}</span>
                         ))}
                       </div>
                     )}
@@ -504,13 +524,13 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   <div className="flex flex-col gap-1.5 flex-shrink-0">
                     <button
                       onClick={() => openEdit(p)}
-                      className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                      className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 transition-colors"
                     >
                       <Edit2 size={13} />
                     </button>
                     <button
                       onClick={() => handleDelete(p.id, p.name)}
-                      className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
+                      className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -525,6 +545,10 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       {/* ─── PEDIDOS ─── */}
       {subTab === 'pedidos' && (
         <div className="space-y-2">
+          <button onClick={loadAll} className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-gray-100 text-gray-600 text-sm font-bold">
+            <RefreshCw size={14} /> Actualizar pedidos
+          </button>
+
           {loading ? (
             <div className="space-y-2">
               {[1, 2].map(n => <div key={n} className="h-24 rounded-2xl bg-gray-100 animate-pulse" />)}
@@ -533,14 +557,14 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
             <div className="text-center py-10 text-gray-400">
               <ShoppingBag size={40} className="mx-auto mb-3 opacity-30" />
               <p className="font-black text-sm">Sin pedidos aún</p>
-              <p className="text-xs">Aparecerán cuando lleguen desde la tienda</p>
+              <p className="text-xs mt-1">Aparecerán cuando lleguen desde la tienda</p>
             </div>
           ) : (
             orders.map(order => {
               const statusConfig = {
-                pending:   { icon: Clock, label: 'Pendiente', bg: '#fef3c7', text: '#92400e', dot: '#f59e0b' },
-                confirmed: { icon: CheckCircle, label: 'Confirmado', bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
-                cancelled: { icon: XCircle, label: 'Cancelado', bg: '#f3f4f6', text: '#6b7280', dot: '#9ca3af' },
+                pending:   { label: 'Pendiente',  bg: '#fef3c7', text: '#92400e', dot: '#f59e0b' },
+                confirmed: { label: 'Confirmado', bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
+                cancelled: { label: 'Cancelado',  bg: '#f3f4f6', text: '#6b7280', dot: '#9ca3af' },
               };
               const cfg = statusConfig[order.status];
               const isExpanded = expandedOrder === order.id;
@@ -551,56 +575,40 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                     onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
                     className="w-full p-3 flex items-start gap-3 text-left"
                   >
-                    {/* Status dot */}
-                    <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: cfg.dot }} />
-
-                    {/* Info */}
+                    <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ background: cfg.dot }} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <p className="text-sm font-black text-gray-800">Pedido #{order.id}</p>
-                        <span
-                          className="text-[10px] font-black px-2 py-0.5 rounded-full"
-                          style={{ background: cfg.bg, color: cfg.text }}
-                        >
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: cfg.bg, color: cfg.text }}>
                           {cfg.label}
                         </span>
                         {order.wa_sent && (
                           <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-50 text-green-600 flex items-center gap-0.5">
-                            <Send size={9} /> WA
+                            <Send size={9} /> WA enviado
                           </span>
                         )}
                       </div>
                       <p className="text-[11px] text-gray-400 font-medium">
-                        {new Date(order.created_at).toLocaleString('es-ES', {
-                          day: '2-digit', month: '2-digit', year: '2-digit',
-                          hour: '2-digit', minute: '2-digit'
-                        })}
+                        {new Date(order.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <p className="text-[12px] font-black" style={{ color: BRAND }}>{order.total.toFixed(2)} Bs</p>
-                        <span className="text-[11px] text-gray-400 font-medium">
-                          {order.items.length} producto{order.items.length !== 1 ? 's' : ''}
-                        </span>
-                        {order.customer_name && (
-                          <span className="text-[11px] text-gray-500 font-medium">· {order.customer_name}</span>
-                        )}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-[13px] font-black" style={{ color: BRAND }}>{Number(order.total).toFixed(2)} Bs</p>
+                        <span className="text-[11px] text-gray-400">{order.items.length} prod.</span>
+                        {order.customer_name && <span className="text-[11px] text-gray-500">· {order.customer_name}</span>}
                       </div>
                     </div>
-
                     {isExpanded ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
                   </button>
 
-                  {/* Detalle expandible */}
                   {isExpanded && (
                     <div className="px-3 pb-3 border-t border-gray-50 pt-2 space-y-3">
-                      {/* Items */}
-                      <div className="space-y-1.5">
+                      <div className="space-y-1">
                         {order.items.map((item, idx) => (
                           <div key={idx} className="flex items-center justify-between text-[12px]">
-                            <span className="font-medium text-gray-700 flex-1 truncate">
+                            <span className="text-gray-700 flex-1 truncate">
                               {item.productName}
                               {item.size && <span className="text-gray-400"> · {item.size}</span>}
-                              <span className="text-gray-400"> × {item.quantity}</span>
+                              <span className="text-gray-400"> ×{item.quantity}</span>
                             </span>
                             <span className="font-black text-gray-800 ml-2 flex-shrink-0">
                               {(item.price * item.quantity).toFixed(2)} Bs
@@ -608,35 +616,27 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                           </div>
                         ))}
                       </div>
-
-                      {/* Acciones */}
                       {order.status === 'pending' && (
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => updateOrder(order.id, { status: 'confirmed' })}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[12px] bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
-                          >
+                          <button onClick={() => updateOrder(order.id, { status: 'confirmed' })}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[12px] bg-green-50 text-green-700">
                             <Check size={13} /> Confirmar
                           </button>
-                          <button
-                            onClick={() => updateOrder(order.id, { status: 'cancelled' })}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[12px] bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
-                          >
+                          <button onClick={() => updateOrder(order.id, { status: 'cancelled' })}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[12px] bg-red-50 text-red-600">
                             <X size={13} /> Cancelar
                           </button>
-                          <button
-                            onClick={() => updateOrder(order.id, { wa_sent: true })}
-                            className="px-3 py-2 rounded-xl font-black text-[12px] bg-[#25D366]/10 text-[#128C7E] hover:bg-[#25D366]/20 transition-colors"
-                          >
-                            <Send size={13} />
-                          </button>
+                          {!order.wa_sent && (
+                            <button onClick={() => updateOrder(order.id, { wa_sent: true })}
+                              className="px-3 py-2 rounded-xl font-black text-[12px] bg-green-50 text-green-700">
+                              <Send size={13} />
+                            </button>
+                          )}
                         </div>
                       )}
                       {order.status === 'confirmed' && (
-                        <button
-                          onClick={() => updateOrder(order.id, { status: 'cancelled' })}
-                          className="w-full py-2 rounded-xl font-black text-[12px] bg-red-50 text-red-600"
-                        >
+                        <button onClick={() => updateOrder(order.id, { status: 'cancelled' })}
+                          className="w-full py-2 rounded-xl font-black text-[12px] bg-red-50 text-red-600">
                           Cancelar pedido
                         </button>
                       )}

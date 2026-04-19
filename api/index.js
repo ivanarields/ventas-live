@@ -429,11 +429,11 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.get("/api/products", async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("available", true)
-      .order("priority_order", { ascending: true });
+    // admin=true muestra todos; por defecto solo los disponibles (tienda pública)
+    const showAll = req.query.admin === "true" && req.headers["x-user-id"];
+    let query = supabase.from("products").select("*").order("priority_order", { ascending: true });
+    if (!showAll) query = query.eq("available", true);
+    const { data, error } = await query;
     if (error) throw error;
     res.json(data ?? []);
   } catch (err) {
