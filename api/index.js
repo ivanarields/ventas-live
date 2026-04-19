@@ -425,6 +425,87 @@ app.get("/api/auth/me", async (req, res) => {
   res.json({ user: data.user });
 });
 
+// ── PRODUCTS (TIENDA) ─────────────────────────────────────────────────────────
+
+app.get("/api/products", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("available", true)
+      .order("priority_order", { ascending: true });
+    if (error) throw error;
+    res.json(data ?? []);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? "Error interno" });
+  }
+});
+
+app.post("/api/products", async (req, res) => {
+  try {
+    const userId = req.headers["x-user-id"];
+    if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+    const { name, price, description, category, sizes, image_url, images, available } = req.body;
+    if (!name || price === undefined) {
+      return res.status(400).json({ error: "name y price requeridos" });
+    }
+    const { data, error } = await supabase
+      .from("products")
+      .insert({
+        user_id: userId,
+        name,
+        price: Number(price),
+        description: description ?? "",
+        category: category ?? "General",
+        sizes: Array.isArray(sizes) ? sizes : [],
+        image_url: image_url ?? "",
+        images: Array.isArray(images) ? images : [],
+        available: available ?? true,
+        priority_order: 0,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? "Error interno" });
+  }
+});
+
+app.patch("/api/products/:id", async (req, res) => {
+  try {
+    const userId = req.headers["x-user-id"];
+    if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+    const { data, error } = await supabase
+      .from("products")
+      .update(req.body)
+      .eq("id", Number(req.params.id))
+      .eq("user_id", userId)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? "Error interno" });
+  }
+});
+
+app.delete("/api/products/:id", async (req, res) => {
+  try {
+    const userId = req.headers["x-user-id"];
+    if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", Number(req.params.id))
+      .eq("user_id", userId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? "Error interno" });
+  }
+});
+
 // ── TIENDA (STORE ORDERS) ─────────────────────────────────────────────────────
 
 app.post("/api/store-orders", async (req, res) => {
