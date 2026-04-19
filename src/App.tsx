@@ -472,6 +472,7 @@ const formatTransactionDate = (dateValue: any): string => {
 };
 
 import { DetailedAnalysis, type CategoryData } from './components/DetailedAnalysis';
+import StorefrontApp from './storefront/StorefrontApp';
 import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, setAuthContext, clearAuthContext } from './lib/api';
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs,
@@ -1565,6 +1566,11 @@ export default function App() {
       setOcrLoading(false);
     }
   };
+
+  // Routing: Tienda pública (sin autenticación)
+  if (window.location.pathname.startsWith('/tienda')) {
+    return <StorefrontApp />;
+  }
 
   if (loading) {
     return (

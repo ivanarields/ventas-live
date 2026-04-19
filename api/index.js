@@ -425,4 +425,71 @@ app.get("/api/auth/me", async (req, res) => {
   res.json({ user: data.user });
 });
 
+// ── TIENDA (STORE ORDERS) ─────────────────────────────────────────────────────
+
+app.post("/api/store-orders", async (req, res) => {
+  try {
+    const { items, total, customerName, customerPhone } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "items requerido (array no vacío)" });
+    }
+    const { data, error } = await supabase
+      .from("store_orders")
+      .insert({
+        items: items,
+        total: total ?? 0,
+        customer_name: customerName ?? "",
+        customer_phone: customerPhone ?? "",
+        status: "pending",
+        wa_sent: false,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? "Error interno" });
+  }
+});
+
+app.get("/api/store-orders", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) return res.status(401).json({ error: "Token requerido" });
+    const { data: user, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !user.user) return res.status(401).json({ error: "Token inválido" });
+    const { data, error } = await supabase
+      .from("store_orders")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    res.json(data ?? []);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? "Error interno" });
+  }
+});
+
+app.patch("/api/store-orders/:id", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) return res.status(401).json({ error: "Token requerido" });
+    const { data: user, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !user.user) return res.status(401).json({ error: "Token inválido" });
+    const { status, wa_sent } = req.body;
+    const updateData = {};
+    if (status) updateData.status = status;
+    if (wa_sent !== undefined) updateData.wa_sent = wa_sent;
+    const { data, error } = await supabase
+      .from("store_orders")
+      .update(updateData)
+      .eq("id", Number(req.params.id))
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? "Error interno" });
+  }
+});
+
 export default app;
