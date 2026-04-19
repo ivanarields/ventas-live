@@ -1697,7 +1697,7 @@ export default function App() {
               onInstall={handleInstallClick}
             />
           )}
-          {currentTab === 'entrega' && <EntregaView pedidos={pedidos} key="entrega" />}
+          {currentTab === 'entrega' && <EntregaView pedidos={pedidos} customers={customers} onSelectPerson={(id) => setSelectedPersonId(id)} onRefresh={loadData} key="entrega" />}
           {currentTab === 'payments' && (
             <PaymentsView 
               payments={payments} 
@@ -2306,8 +2306,9 @@ function HomeView({ orders, lives, transactions, onAdd, isInstallable, onInstall
 // ─────────────────────────────────────────────────────────────────────────────
 // ENTREGA VIEW — visualización del sistema de casilleros
 // ─────────────────────────────────────────────────────────────────────────────
-function EntregaView({ pedidos }: { pedidos: any[] }) {
+function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedidos: any[]; customers: any[]; onSelectPerson: (id: string) => void; onRefresh: () => void }) {
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
+  const [isDelivering, setIsDelivering] = useState(false);
 
   const activos = pedidos.filter(p => {
     const s = (p.status ?? '').toLowerCase();
@@ -2325,6 +2326,28 @@ function EntregaView({ pedidos }: { pedidos: any[] }) {
     const parts = (name ?? '').trim().split(' ');
     if (parts.length === 1) return parts[0].slice(0, 10);
     return parts[0] + ' ' + parts[1][0] + '.';
+  };
+
+  const handleDeliver = async () => {
+    if (!selectedPedido || isDelivering) return;
+    setIsDelivering(true);
+    try {
+      await pedidosApi.update(selectedPedido.id, { status: 'entregado' });
+      const updatedPedidos = pedidos.map((p: any) =>
+        p.id === selectedPedido.id ? { ...p, status: 'entregado' } : p
+      );
+      if (selectedPedido.customerId) {
+        await syncLabelsForCustomer(selectedPedido.customerId, updatedPedidos, customers);
+      }
+      setSelectedPedido(null);
+      onRefresh();
+      confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 }, colors: ['#2E7D32', '#E8F5E9', '#10B981'] });
+    } catch (e) {
+      console.error('Error al entregar:', e);
+      alert('Error al marcar como entregado');
+    } finally {
+      setIsDelivering(false);
+    }
   };
 
   return (
@@ -2519,12 +2542,31 @@ function EntregaView({ pedidos }: { pedidos: any[] }) {
               </div>
             </div>
 
-            <button
-              onClick={() => setSelectedPedido(null)}
-              className="mt-4 w-full py-3 rounded-2xl bg-gray-100 text-gray-600 font-black text-sm"
-            >
-              Cerrar
-            </button>
+            <div className="mt-4 flex flex-col gap-2">
+              {selectedPedido.customerId && (
+                <button
+                  onClick={() => { setSelectedPedido(null); onSelectPerson(selectedPedido.customerId); }}
+                  className="w-full py-3 rounded-2xl font-black text-sm"
+                  style={{ background: '#fff0f5', color: '#ff2d78' }}
+                >
+                  Ver perfil
+                </button>
+              )}
+              <button
+                onClick={handleDeliver}
+                disabled={isDelivering}
+                className="w-full py-3 rounded-2xl font-black text-sm text-white disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg, #10B981, #059669)' }}
+              >
+                {isDelivering ? 'Entregando...' : '✓ Marcar como entregado'}
+              </button>
+              <button
+                onClick={() => setSelectedPedido(null)}
+                className="w-full py-3 rounded-2xl bg-gray-100 text-gray-600 font-black text-sm"
+              >
+                Cerrar
+              </button>
+            </div>
           </motion.div>
         </div>
       )}
@@ -6521,7 +6563,12 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       setSelectedPedido(null);
       try {
         await pedidosApi.update(selectedPedido.id, { status: 'listo', bag_count: bolsaCount, item_count: selectedPrenda });
-        loadData(); // en background, sin await
+        // Forzar asignación de casillero desde el frontend también (belt & suspenders)
+        const updatedPedidos = allPedidos.map((p: any) =>
+          p.id === selectedPedido.id ? { ...p, status: 'listo', bagCount: bolsaCount, itemCount: selectedPrenda } : p
+        );
+        await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+        loadData();
       } catch (error) {
         console.error('Error al marcar pedido listo:', error);
         loadData();
