@@ -75,17 +75,35 @@ function parseAmount(text: string): number | null {
 }
 
 // Parser de nombre del pagador: patrones comunes de bancos bolivianos + billeteras
+// NOTA: Android a veces envía tildes corruptas (U+FFFD). Los regex toleran
+// cualquier carácter no-letra donde debería ir una vocal con tilde.
 function parsePayerName(text: string): string | null {
+  // Normalizar: reemplazar caracteres corruptos por espacios para que los regex funcionen
+  const t = text.replace(/[^\w\sÁÉÍÓÚÑáéíóúñ.,|:;$-]/g, ' ').replace(/\s+/g, ' ');
+
   const patterns = [
+    // Yape BO: "NOMBRE, te envió/yapeó/pagó Bs. X" — tolerante a "envi?"
+    /(?:^|\|\s*)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,80}?)\s*,\s*te\s+(?:envi\S*|yape\S*|pag\S*|transf\S*)/im,
+    // Bancos clásicos: "RECIBISTE ... DE NOMBRE por/con/Bs/..."
     /RECIBISTE\s+(?:Bs\.?\s*[\d.,]+\s+)?DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+(?:por|con|Bs|en|el|a\s+las)|$)/i,
-    /(?:transferencia|pago|envi[oó]|dep[oó]sito)\s+(?:recibid[oa]\s+)?de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+por|\s+Bs|\s*$)/i,
+    // "Transferencia/pago/envío/depósito recibido de NOMBRE"
+    /(?:transferencia|pago|envi\S+|dep\S+sito)\s+(?:recibid[oa]\s+)?de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+por|\s+Bs|\s*$)/i,
+    // "de NOMBRE ..."
     /\bde\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+por|\s+con|\s+Bs|\s*$)/,
+    // "enviado por NOMBRE"
     /enviado\s+por\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60})/i,
+    // "nombre: NOMBRE"
     /nombre\s*:?\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60})/i,
   ];
   for (const rx of patterns) {
-    const m = text.match(rx);
-    if (m) return m[1].trim().replace(/\s+/g, ' ');
+    const m = t.match(rx);
+    if (m) {
+      const name = m[1].trim().replace(/\s+/g, ' ');
+      // Filtros de falso positivo: muy corto, o contiene palabras comunes no-nombres
+      if (name.length < 3) continue;
+      if (/^(TE|EL|LA|UN|UNA|DE|POR|CON|ENVI|YAPE|PAGO|BS)$/i.test(name)) continue;
+      return name;
+    }
   }
   return null;
 }

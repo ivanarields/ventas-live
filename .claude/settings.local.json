@@ -68,7 +68,14 @@
       "Bash(awk 'NR>=35 && NR<=40')",
       "Bash(git reset *)",
       "Bash(vercel --prod)",
-      "Bash(\"C:/Users/IVAN/bin/supabase.exe\" migration *)"
+      "Bash(\"C:/Users/IVAN/bin/supabase.exe\" migration *)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")",
+      "Bash(cat)",
+      "Bash(node /tmp/verify.mjs)",
+      "Bash(cp /tmp/verify.mjs scripts/verify-ingest.mjs)",
+      "Bash(node scripts/verify-ingest.mjs)",
+      "Bash(node scripts/verify-real-payment.mjs)",
+      "Bash(node *)"
     ]
   }
 }
