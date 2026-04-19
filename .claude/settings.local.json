@@ -46,7 +46,29 @@
       "Bash(git init *)",
       "Bash(git config *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git remote *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(vercel link *)",
+      "Bash(vercel --version)",
+      "Bash(vercel whoami *)",
+      "Bash(vercel env *)",
+      "Bash(xargs -I {} bash -c 'test {} -eq 0 && echo \"✅ Sin cambios pendientes\" || echo \"⚠️ {} cambios sin commitear\"')",
+      "Bash(git stash *)",
+      "Bash(vercel deploy *)",
+      "Bash(tee deploy.log)",
+      "Bash(vercel logs *)",
+      "Bash(git diff *)",
+      "Bash(git status *)",
+      "Bash(python -m json.tool)",
+      "Bash(node -e ' *)",
+      "Bash(\"C:/Users/IVAN/bin/supabase.exe\" db *)",
+      "Bash(node -c \"src/storefront/StorefrontApp.tsx\")",
+      "Bash(awk 'NR>=35 && NR<=40')",
+      "Bash(git reset *)",
+      "Bash(vercel --prod)",
+      "Bash(\"C:/Users/IVAN/bin/supabase.exe\" migration *)"
     ]
   }
 }
