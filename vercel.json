@@ -1,4 +1,5 @@
 {
+  "name": "ventas-live",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
