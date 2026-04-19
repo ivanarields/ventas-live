@@ -473,6 +473,7 @@ const formatTransactionDate = (dateValue: any): string => {
 
 import { DetailedAnalysis, type CategoryData } from './components/DetailedAnalysis';
 import StorefrontApp from './storefront/StorefrontApp';
+import { AdminTiendaView } from './components/AdminTiendaView';
 import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, setAuthContext, clearAuthContext } from './lib/api';
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs,
@@ -955,8 +956,6 @@ export default function App() {
   const [selectedPaymentDates, setSelectedPaymentDates] = useState<Date[]>([new Date()]);
   const [selectedPaymentTime, setSelectedPaymentTime] = useState<string>("");
   const [isPaymentCalendarOpen, setIsPaymentCalendarOpen] = useState(false);
-  const [tiendaSubTab, setTiendaSubTab] = useState<'productos' | 'pedidos'>('productos');
-
   // Data States
   const [lives, setLives] = useState<LiveSession[]>([]);
   const [giveaways, setGiveaways] = useState<Giveaway[]>([]);
@@ -986,22 +985,6 @@ export default function App() {
   const [isInstallable, setIsInstallable] = useState(false);
   const [showAllPayments, setShowAllPayments] = useState(false);
   const [hideCompletedWork, setHideCompletedWork] = useState(false);
-
-  // Tienda States
-  const [storeProducts, setStoreProducts] = useState<any[]>([]);
-  const [storeOrders, setStoreOrders] = useState<any[]>([]);
-  const [editingProduct, setEditingProduct] = useState<any>(null);
-  const [showProductForm, setShowProductForm] = useState(false);
-  const [newProduct, setNewProduct] = useState({
-    name: '',
-    price: '',
-    description: '',
-    category: 'General',
-    sizes: '',
-    image_url: '',
-    images: [] as string[],
-    available: true,
-  });
 
   useEffect(() => {
     const handler = (e: any) => {
@@ -1174,17 +1157,6 @@ export default function App() {
       setOrders([]);
       setGiveaways([]);
 
-      // Cargar productos y pedidos de tienda
-      try {
-        const productsRes = await fetch('/api/products');
-        const ordersRes = await fetch('/api/store-orders', {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        if (productsRes.ok) setStoreProducts(await productsRes.json());
-        if (ordersRes.ok) setStoreOrders(await ordersRes.json());
-      } catch (err) {
-        console.error('[loadData] Error cargando tienda:', err);
-      }
     } catch (err) {
       console.error('[loadData] Error cargando datos:', err);
     }
@@ -1193,96 +1165,6 @@ export default function App() {
   useEffect(() => {
     if (user) loadData();
   }, [user]);
-
-  // Funciones para Tienda
-  const handleSaveProduct = async () => {
-    if (!newProduct.name || !newProduct.price) {
-      alert('Nombre y precio son requeridos');
-      return;
-    }
-    try {
-      const payload = {
-        name: newProduct.name,
-        price: Number(newProduct.price),
-        description: newProduct.description,
-        category: newProduct.category,
-        sizes: newProduct.sizes.split(',').filter((s: string) => s.trim()),
-        image_url: newProduct.images[0] || newProduct.image_url,
-        images: newProduct.images,
-        available: newProduct.available,
-      };
-
-      if (editingProduct) {
-        await fetch(`/api/products/${editingProduct.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        await fetch('/api/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
-          body: JSON.stringify(payload),
-        });
-      }
-
-      setNewProduct({
-        name: '',
-        price: '',
-        description: '',
-        category: 'General',
-        sizes: '',
-        image_url: '',
-        images: [],
-        available: true,
-      });
-      setEditingProduct(null);
-      setShowProductForm(false);
-      await loadData();
-    } catch (err) {
-      console.error('Error guardando producto:', err);
-      alert('Error al guardar el producto');
-    }
-  };
-
-  const handleDeleteProduct = async (productId: number) => {
-    if (!confirm('¿Eliminar este producto?')) return;
-    try {
-      await fetch(`/api/products/${productId}`, {
-        method: 'DELETE',
-        headers: { 'x-user-id': user?.id || '' },
-      });
-      await loadData();
-    } catch (err) {
-      console.error('Error eliminando producto:', err);
-      alert('Error al eliminar el producto');
-    }
-  };
-
-  const handleUploadImage = async (file: File) => {
-    if (!user) return;
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('https://api.supabase.com/storage/v1/b/product-images/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const imageUrl = `https://${process.env.VITE_SUPABASE_URL?.split('//')[1]}/storage/v1/object/public/product-images/${data.path}`;
-        setNewProduct((prev) => ({
-          ...prev,
-          images: [...prev.images, imageUrl],
-        }));
-      }
-    } catch (err) {
-      console.error('Error subiendo imagen:', err);
-    }
-  };
 
   const people = useMemo(() => {
     const groups: { [key: string]: any } = {};
@@ -1852,242 +1734,9 @@ export default function App() {
             />
           )}
           {currentTab === 'tienda' && (
-            <div className="space-y-4" key="tienda">
-              <div className="flex gap-2 mb-4">
-                <button
-                  onClick={() => setTiendaSubTab('productos')}
-                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${
-                    tiendaSubTab === 'productos' ? 'bg-brand text-white' : 'bg-gray-100 text-gray-600'
-                  }`}
-                >
-                  📦 Productos
-                </button>
-                <button
-                  onClick={() => setTiendaSubTab('pedidos')}
-                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${
-                    tiendaSubTab === 'pedidos' ? 'bg-brand text-white' : 'bg-gray-100 text-gray-600'
-                  }`}
-                >
-                  🛒 Pedidos
-                </button>
-              </div>
-
-              {tiendaSubTab === 'productos' && (
-                <div className="space-y-4">
-                  <button
-                    onClick={() => {
-                      setNewProduct({
-                        name: '',
-                        price: '',
-                        description: '',
-                        category: 'General',
-                        sizes: '',
-                        image_url: '',
-                        images: [],
-                        available: true,
-                      });
-                      setEditingProduct(null);
-                      setShowProductForm(!showProductForm);
-                    }}
-                    className="w-full btn-pill-primary py-3"
-                  >
-                    + Nuevo Producto
-                  </button>
-
-                  {showProductForm && (
-                    <div className="card-modern p-4 space-y-3 bg-blue-50">
-                      <input
-                        type="text"
-                        placeholder="Nombre del producto"
-                        className="input-modern"
-                        value={newProduct.name}
-                        onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                      />
-                      <input
-                        type="number"
-                        placeholder="Precio (Bs)"
-                        className="input-modern"
-                        value={newProduct.price}
-                        onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-                      />
-                      <textarea
-                        placeholder="Descripción"
-                        className="input-modern"
-                        value={newProduct.description}
-                        onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
-                      />
-                      <select
-                        className="input-modern"
-                        value={newProduct.category}
-                        onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
-                      >
-                        <option>General</option>
-                        <option>Blusas</option>
-                        <option>Vestidos</option>
-                        <option>Chaquetas</option>
-                        <option>Conjuntos</option>
-                        <option>Accesorios</option>
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="Tallas (separadas por coma: S, M, L)"
-                        className="input-modern"
-                        value={newProduct.sizes}
-                        onChange={(e) => setNewProduct({ ...newProduct, sizes: e.target.value })}
-                      />
-                      <input
-                        type="text"
-                        placeholder="URL imagen principal"
-                        className="input-modern"
-                        value={newProduct.image_url}
-                        onChange={(e) => setNewProduct({ ...newProduct, image_url: e.target.value })}
-                      />
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-600 uppercase">Fotos adicionales:</label>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) handleUploadImage(e.target.files[0]);
-                          }}
-                          className="input-modern"
-                        />
-                        {newProduct.images.length > 0 && (
-                          <div className="flex gap-2 flex-wrap">
-                            {newProduct.images.map((img, idx) => (
-                              <div key={idx} className="relative">
-                                <img src={img} alt="" className="w-12 h-12 rounded object-cover border border-gray-300" />
-                                <button
-                                  onClick={() => setNewProduct({
-                                    ...newProduct,
-                                    images: newProduct.images.filter((_, i) => i !== idx),
-                                  })}
-                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={newProduct.available}
-                          onChange={(e) => setNewProduct({ ...newProduct, available: e.target.checked })}
-                        />
-                        <span className="text-sm font-medium">Disponible</span>
-                      </label>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleSaveProduct}
-                          className="flex-1 btn-pill-primary py-3"
-                        >
-                          {editingProduct ? 'Actualizar' : 'Crear'} Producto
-                        </button>
-                        <button
-                          onClick={() => setShowProductForm(false)}
-                          className="flex-1 bg-gray-200 text-gray-700 font-bold py-3 rounded-lg"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    {storeProducts.map((p: any) => (
-                      <div key={p.id} className="card-modern p-3 flex gap-3 items-start">
-                        {p.images?.[0] || p.image_url ? (
-                          <img src={p.images?.[0] || p.image_url} alt="" className="w-16 h-16 rounded object-cover" />
-                        ) : (
-                          <div className="w-16 h-16 rounded bg-gray-100 flex items-center justify-center text-gray-400">Sin foto</div>
-                        )}
-                        <div className="flex-1">
-                          <p className="font-bold text-sm">{p.name}</p>
-                          <p className="text-xs text-gray-500">{p.category} • {p.price} Bs</p>
-                          {p.images?.length > 1 && <p className="text-xs text-blue-600">{p.images.length} fotos</p>}
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => {
-                              setNewProduct({
-                                name: p.name,
-                                price: String(p.price),
-                                description: p.description,
-                                category: p.category,
-                                sizes: (p.sizes || []).join(', '),
-                                image_url: p.image_url,
-                                images: p.images || [],
-                                available: p.available,
-                              });
-                              setEditingProduct(p);
-                              setShowProductForm(true);
-                            }}
-                            className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => handleDeleteProduct(p.id)}
-                            className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded font-bold"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {tiendaSubTab === 'pedidos' && (
-                <div className="space-y-2">
-                  {storeOrders.length === 0 ? (
-                    <div className="text-center py-8 text-gray-400">
-                      <p>No hay pedidos aún</p>
-                    </div>
-                  ) : (
-                    storeOrders.map((order: any) => (
-                      <div key={order.id} className="card-modern p-3 space-y-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-bold text-sm"># Pedido {order.id}</p>
-                            <p className="text-xs text-gray-500">{new Date(order.created_at).toLocaleString('es-ES')}</p>
-                          </div>
-                          <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                            order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                            order.status === 'confirmed' ? 'bg-green-100 text-green-700' :
-                            'bg-gray-100 text-gray-700'
-                          }`}>
-                            {order.status === 'pending' ? 'Pendiente' : order.status === 'confirmed' ? 'Confirmado' : 'Cancelado'}
-                          </span>
-                        </div>
-                        <div className="text-xs">
-                          <p className="font-bold">{order.items.length} producto(s) • <span style={{ color: '#ff2d78' }}>{order.total} Bs</span></p>
-                          {order.customer_name && <p className="text-gray-600">Cliente: {order.customer_name}</p>}
-                        </div>
-                        {order.status === 'pending' && (
-                          <button
-                            onClick={() => fetch(`/api/store-orders/${order.id}`, {
-                              method: 'PATCH',
-                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-                              body: JSON.stringify({ status: 'confirmed' }),
-                            }).then(() => loadData())}
-                            className="w-full text-xs bg-green-100 text-green-700 py-1 rounded font-bold"
-                          >
-                            Confirmar Pedido
-                          </button>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
+            <AdminTiendaView key='tienda' userId={user?.id ?? ''} authToken={authToken ?? ''} />
           )}
-          {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} key="settings" />}
+                    {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} key="settings" />}
         </AnimatePresence>
       </main>
 
