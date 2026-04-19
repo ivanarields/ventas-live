@@ -2,8 +2,36 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ExternalLink, Plus, Edit2, Trash2, Package, ShoppingBag,
   Check, X, Image as ImageIcon, ChevronDown, ChevronUp,
-  CheckCircle, Clock, XCircle, Send, AlertCircle, RefreshCw,
+  Send, AlertCircle, RefreshCw, Camera, Loader2,
 } from 'lucide-react';
+
+const MAX_SIDE = 1200;
+const JPEG_QUALITY = 0.80;
+const MAX_PHOTOS = 3;
+
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
+      };
+      img.onerror = reject;
+      img.src = e.target!.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 interface StoreProduct {
   id: number;
@@ -63,9 +91,28 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [talla, setTalla] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const remaining = MAX_PHOTOS - form.images.length;
+    const toProcess = files.slice(0, remaining);
+    setCompressing(true);
+    try {
+      const compressed = await Promise.all(toProcess.map(compressImage));
+      setForm(f => ({ ...f, images: [...f.images, ...compressed] }));
+    } catch {
+      setSaveError('Error al procesar una imagen. Intenta con otra.');
+    } finally {
+      setCompressing(false);
+      e.target.value = '';
+    }
+  };
 
   const loadAll = async () => {
     setLoading(true);
@@ -371,19 +418,75 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 )}
               </div>
 
-              {/* Fotos por URL */}
+              {/* Fotos */}
               <div>
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">
-                  Fotos por URL ({form.images.length}/5)
+                  Fotos ({form.images.length}/{MAX_PHOTOS}) · se comprimen automáticamente
                 </label>
-                <p className="text-[10px] text-gray-400 ml-1 mb-1">
-                  Pega el enlace de una imagen (Pinterest, Instagram, etc.)
-                </p>
-                <div className="flex gap-2">
+
+                {/* Miniaturas + botón subir */}
+                <div className="flex gap-2 flex-wrap mt-2">
+                  {form.images.map((img, idx) => (
+                    <div key={idx} className="relative">
+                      <img
+                        src={img}
+                        alt=""
+                        className="w-20 h-20 rounded-xl object-cover border-2"
+                        style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}
+                      />
+                      {idx === 0 && (
+                        <span className="absolute top-1 left-1 text-[8px] font-black bg-white/80 rounded px-1" style={{ color: BRAND }}>
+                          principal
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(idx)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+
+                  {form.images.length < MAX_PHOTOS && (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={compressing}
+                      className="w-20 h-20 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                      style={{ borderColor: BRAND, background: '#fff0f5' }}
+                    >
+                      {compressing ? (
+                        <Loader2 size={20} className="animate-spin" style={{ color: BRAND }} />
+                      ) : (
+                        <>
+                          <Camera size={20} style={{ color: BRAND }} />
+                          <span className="text-[9px] font-black" style={{ color: BRAND }}>
+                            {form.images.length === 0 ? 'Agregar foto' : 'Otra foto'}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
+
+                {/* También por URL */}
+                <div className="flex gap-2 mt-2">
                   <input
                     type="text"
-                    placeholder="https://..."
-                    className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium outline-none focus:border-pink-400"
+                    placeholder="O pegar URL de imagen..."
+                    className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400"
                     value={urlInput}
                     onChange={e => setUrlInput(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addImageUrl(); } }}
@@ -391,42 +494,11 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   <button
                     type="button"
                     onClick={addImageUrl}
-                    disabled={!urlInput.trim() || form.images.length >= 5}
-                    className="px-3 py-2 rounded-xl font-black text-white text-sm flex-shrink-0 disabled:opacity-40"
+                    disabled={!urlInput.trim() || form.images.length >= MAX_PHOTOS}
+                    className="px-3 py-2 rounded-xl font-black text-white text-sm disabled:opacity-40"
                     style={{ background: BRAND }}
-                  >
-                    +
-                  </button>
+                  >+</button>
                 </div>
-
-                {/* Miniaturas */}
-                {form.images.length > 0 && (
-                  <div className="flex gap-2 flex-wrap mt-2">
-                    {form.images.map((img, idx) => (
-                      <div key={idx} className="relative group">
-                        <img
-                          src={img}
-                          alt=""
-                          className="w-16 h-16 rounded-xl object-cover border-2"
-                          style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}
-                          onError={e => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/64?text=Error'; }}
-                        />
-                        {idx === 0 && (
-                          <span className="absolute -top-1.5 left-0 right-0 text-center text-[8px] font-black" style={{ color: BRAND }}>
-                            principal
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => removeImage(idx)}
-                          className="absolute -bottom-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
 
               {/* Toggle disponible */}
