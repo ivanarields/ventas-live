@@ -6191,8 +6191,12 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const [selectedPedido, setSelectedPedido] = useState<any>(forceDetailView ? initialOrder.selectedPedido : initialOrder.selectedPedido);
   const [showAddPedido, setShowAddPedido] = useState(false);
   const [expandedPayments, setExpandedPayments] = useState<string[]>([]);
-  const [selectedPrenda, setSelectedPrenda] = useState(initialOrder.selectedPedido?.itemCount || 0);
-  const [bolsaCount, setBolsaCount] = useState(initialOrder.selectedPedido?.bagCount || 0);
+  // Para PROCESAR: empieza en 0 (el operador cuenta desde cero).
+  // Para LISTO: empieza en el valor guardado (modo edición).
+  const _initStatus = (initialOrder.selectedPedido?.status ?? '').toUpperCase();
+  const _isEditing = _initStatus === 'LISTO' || _initStatus === 'PREPARADO' || _initStatus === 'READY';
+  const [selectedPrenda, setSelectedPrenda] = useState(_isEditing ? (initialOrder.selectedPedido?.itemCount || 0) : 0);
+  const [bolsaCount, setBolsaCount] = useState(_isEditing ? (initialOrder.selectedPedido?.bagCount || 0) : 0);
   const [confirmDeletePedido, setConfirmDeletePedido] = useState<string | null>(null);
   const [confirmDeleteProfile, setConfirmDeleteProfile] = useState(false);
   const [confirmDelivery, setConfirmDelivery] = useState<{ ids: string[], status: string } | null>(null);
@@ -6268,6 +6272,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
 
     if (!person.customerId) return;
     if (selectedPedido.id.startsWith('temp-')) { setView('detail'); setSelectedPedido(null); return; }
+    if (bolsaCount === 0) { alert('Debes registrar al menos 1 bolsa antes de marcar el pedido como listo.'); setIsSaving(false); return; }
 
     setIsSaving(true);
     if (isProcesar) {
@@ -6744,8 +6749,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                       paymentAmount: order.paymentAmount,
                       paymentCount: order.paymentCount 
                     });
-                    setBolsaCount(pedidoData.bagCount || 0);
-                    setSelectedPrenda(pedidoData.itemCount || 0);
+                    const isEditingListo = (pedidoData.status ?? '').toUpperCase() === 'LISTO' || (pedidoData.status ?? '').toUpperCase() === 'PREPARADO' || (pedidoData.status ?? '').toUpperCase() === 'READY';
+                    setBolsaCount(isEditingListo ? (pedidoData.bagCount || 0) : 0);
+                    setSelectedPrenda(isEditingListo ? (pedidoData.itemCount || 0) : 0);
                     setView('verify');
                   }}
                 />
