@@ -5,29 +5,12 @@ import {
   Send, AlertCircle, RefreshCw, Camera, Loader2,
 } from 'lucide-react';
 
-const MAX_SIDE = 1200;
-const JPEG_QUALITY = 0.80;
 const MAX_PHOTOS = 3;
 
-function compressImage(file: File): Promise<string> {
+function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
-      };
-      img.onerror = reject;
-      img.src = e.target!.result as string;
-    };
+    reader.onload = (e) => resolve(e.target!.result as string);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -100,14 +83,13 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-    const remaining = MAX_PHOTOS - form.images.length;
-    const toProcess = files.slice(0, remaining);
+    const toProcess = files.slice(0, MAX_PHOTOS - form.images.length);
     setCompressing(true);
     try {
-      const compressed = await Promise.all(toProcess.map(compressImage));
-      setForm(f => ({ ...f, images: [...f.images, ...compressed] }));
+      const encoded = await Promise.all(toProcess.map(readAsBase64));
+      setForm(f => ({ ...f, images: [...f.images, ...encoded] }));
     } catch {
-      setSaveError('Error al procesar una imagen. Intenta con otra.');
+      setSaveError('Error al leer una imagen. Intenta con otra.');
     } finally {
       setCompressing(false);
       e.target.value = '';

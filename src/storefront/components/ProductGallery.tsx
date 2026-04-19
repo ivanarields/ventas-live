@@ -140,13 +140,6 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
                       </span>
                     </div>
                   )}
-                  {p.available && (
-                    <div className="absolute top-2.5 right-2.5">
-                      <span className="bg-white text-[10px] font-black px-2 py-1 rounded-full shadow-sm" style={{ color: '#ff2d78' }}>
-                        {p.category}
-                      </span>
-                    </div>
-                  )}
                 </div>
 
                 <div className="p-3 flex-1 flex flex-col">
