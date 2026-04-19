@@ -458,7 +458,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
+
                   className="hidden"
                   onChange={handleFileSelect}
                 />

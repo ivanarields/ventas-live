@@ -129,50 +129,46 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
               <div
                 key={p.id}
                 onClick={() => p.available && onProductSelect(p)}
-                className="bg-white rounded-[20px] overflow-hidden flex flex-col border border-gray-100 shadow-sm cursor-pointer active:scale-[0.98] transition-transform"
+                className="bg-white rounded-2xl overflow-hidden flex flex-col cursor-pointer active:scale-[0.97] transition-transform"
+                style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}
               >
-                <div className="aspect-[3/4] bg-gray-50 relative">
+                {/* Imagen */}
+                <div className="aspect-[3/4] bg-gray-100 relative overflow-hidden">
                   <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover" />
                   {!p.available && (
-                    <div className="absolute inset-0 bg-white/75 backdrop-blur-[2px] flex items-center justify-center">
-                      <span className="bg-gray-800 text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider">
+                    <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] flex items-center justify-center">
+                      <span className="bg-gray-900 text-white text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">
                         Agotado
                       </span>
                     </div>
                   )}
                 </div>
 
-                <div className="p-3 flex-1 flex flex-col">
-                  <p className="font-bold text-[12px] text-gray-800 leading-snug line-clamp-2 mb-1">
+                {/* Info */}
+                <div className="px-3 pt-2 pb-3 flex flex-col gap-1">
+                  <p className="font-black text-[12px] text-gray-800 leading-snug line-clamp-2">
                     {p.title}
                   </p>
-                  <p className="font-black text-[16px] mb-3" style={{ color: '#ff2d78' }}>
-                    {p.price} <span className="text-[11px] text-gray-400 font-bold">Bs</span>
-                  </p>
-
-                  <button
-                    disabled={!p.available}
-                    onClick={e => {
-                      e.stopPropagation();
-                      onAddToCart(p, p.sizes[0] ?? '');
-                    }}
-                    className="mt-auto w-full h-9 rounded-xl font-black text-[11px] transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-1.5"
-                    style={p.available
-                      ? { background: '#fff0f5', color: '#ff2d78' }
-                      : { background: '#f0f0f0', color: '#bbb' }
-                    }
-                  >
-                    {p.available ? (
-                      <>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <circle cx="9" cy="21" r="1" />
-                          <circle cx="20" cy="21" r="1" />
-                          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-                        </svg>
-                        Agregar
-                      </>
-                    ) : 'Agotado'}
-                  </button>
+                  <div className="flex items-center justify-between gap-1">
+                    <p className="font-black text-[15px]" style={{ color: '#ff2d78' }}>
+                      {p.price} <span className="text-[10px] text-gray-400 font-bold">Bs</span>
+                    </p>
+                    <button
+                      disabled={!p.available}
+                      onClick={e => {
+                        e.stopPropagation();
+                        onAddToCart(p, p.sizes[0] ?? '');
+                      }}
+                      className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all active:scale-90 disabled:opacity-30"
+                      style={{ background: '#fff0f5' }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5">
+                        <circle cx="9" cy="21" r="1" />
+                        <circle cx="20" cy="21" r="1" />
+                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
