@@ -246,9 +246,31 @@ app.patch("/api/pedidos/:id", async (req, res) => {
 app.delete("/api/pedidos/:id", async (req, res) => {
   const userId = req.headers["x-user-id"];
   if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+  // Liberar etiqueta SIEMPRE antes de borrar el pedido
+  // Si falla (el pedido nunca tuvo etiqueta), se ignora y se sigue con el borrado
+  try {
+    await supabase.rpc("fn_release_order_by_firebase_id", {
+      p_firebase_id: String(req.params.id),
+      p_released_by: "app",
+      p_reason: "DELETED",
+    });
+  } catch (releaseErr) {
+    console.error("[etiqueta] error liberando al borrar pedido:", releaseErr);
+  }
+
   const { error } = await supabase.from("pedidos").delete().eq("id", req.params.id).eq("user_id", userId);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
+});
+
+// Reparación manual del sistema de etiquetas (recalcula contadores desde asignaciones reales)
+app.post("/api/labels/repair", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+  const { error } = await supabase.rpc("fn_rebuild_container_counters");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, message: "Contadores reparados correctamente" });
 });
 
 // ── TRANSACCIONES ─────────────────────────────────────────────────────────────
