@@ -950,7 +950,7 @@ export default function App() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentTab, setCurrentTab] = useState<'home' | 'calendar' | 'payments' | 'finance' | 'settings'>('home');
+  const [currentTab, setCurrentTab] = useState<'home' | 'entrega' | 'payments' | 'finance' | 'settings'>('home');
   const [selectedPaymentDates, setSelectedPaymentDates] = useState<Date[]>([new Date()]);
   const [selectedPaymentTime, setSelectedPaymentTime] = useState<string>("");
   const [isPaymentCalendarOpen, setIsPaymentCalendarOpen] = useState(false);
@@ -1690,7 +1690,7 @@ export default function App() {
               onInstall={handleInstallClick}
             />
           )}
-          {currentTab === 'calendar' && <CalendarView lives={lives} key="calendar" onAdd={() => setShowAddModal('live')} />}
+          {currentTab === 'entrega' && <EntregaView pedidos={pedidos} key="entrega" />}
           {currentTab === 'payments' && (
             <PaymentsView 
               payments={payments} 
@@ -1733,7 +1733,7 @@ export default function App() {
       {/* Bottom Nav */}
       <nav className="glass-nav fixed bottom-0 w-full max-w-[480px] px-4 py-1 flex justify-between items-center z-50">
         <TabButton active={currentTab === 'home'} icon={Home} onClick={() => setCurrentTab('home')} />
-        <TabButton active={currentTab === 'calendar'} icon={CalendarIcon} onClick={() => setCurrentTab('calendar')} />
+        <TabButton active={currentTab === 'entrega'} icon={Package} onClick={() => setCurrentTab('entrega')} />
         <TabButton active={currentTab === 'payments'} icon={Wallet} onClick={() => setCurrentTab('payments')} />
         <TabButton active={currentTab === 'finance'} icon={TrendingUp} onClick={() => setCurrentTab('finance')} />
         <TabButton active={currentTab === 'settings'} icon={Settings} onClick={() => setCurrentTab('settings')} />
@@ -2288,6 +2288,235 @@ function HomeView({ orders, lives, transactions, onAdd, isInstallable, onInstall
           ))}
         </div>
       </div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTREGA VIEW — visualización del sistema de casilleros
+// ─────────────────────────────────────────────────────────────────────────────
+function EntregaView({ pedidos }: { pedidos: any[] }) {
+  const [selectedPedido, setSelectedPedido] = useState<any>(null);
+
+  const activos = pedidos.filter(p => {
+    const s = (p.status ?? '').toLowerCase();
+    return s === 'listo' || s === 'preparado' || s === 'ready';
+  });
+
+  const NUMERIC = ['1', '2', '3', '4'];
+  const ALPHA   = ['A', 'B', 'C', 'D'];
+  const MAX_SIMPLE = 4;
+
+  const byLabel = (code: string) => activos.filter(p => p.label === code);
+  const alphaOccupant = (code: string) => activos.find(p => p.label === code) ?? null;
+
+  const abrev = (name: string) => {
+    const parts = (name ?? '').trim().split(' ');
+    if (parts.length === 1) return parts[0].slice(0, 10);
+    return parts[0] + ' ' + parts[1][0] + '.';
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 10 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -10 }}
+      transition={{ duration: 0.1, ease: 'linear' }}
+      className="space-y-6 pb-6"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-1">
+        <div>
+          <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Casilleros</h2>
+          <p className="text-[11px] text-gray-400 font-medium mt-0.5">
+            {activos.length} pedido{activos.length !== 1 ? 's' : ''} activo{activos.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="flex gap-1.5">
+          <div className="flex items-center gap-1 bg-gray-100 rounded-full px-2.5 py-1">
+            <div className="w-2 h-2 rounded-full bg-blue-400" />
+            <span className="text-[10px] font-bold text-gray-500">1 bolsa</span>
+          </div>
+          <div className="flex items-center gap-1 bg-gray-100 rounded-full px-2.5 py-1">
+            <div className="w-2 h-2 rounded-full bg-brand" />
+            <span className="text-[10px] font-bold text-gray-500">2+ bolsas</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── NUMÉRICOS ── */}
+      <section className="space-y-3">
+        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
+          Casilleros numéricos — 1 bolsa
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          {NUMERIC.map(code => {
+            const occupants = byLabel(code);
+            const free = MAX_SIMPLE - occupants.length;
+            const isFull = free === 0;
+            return (
+              <div key={code}
+                className={cn(
+                  'rounded-[20px] p-4 border-2 transition-all',
+                  isFull
+                    ? 'bg-blue-50 border-blue-200'
+                    : occupants.length > 0
+                      ? 'bg-blue-50/50 border-blue-100'
+                      : 'bg-gray-50 border-gray-100'
+                )}
+              >
+                {/* Número del casillero */}
+                <div className="flex items-center justify-between mb-3">
+                  <span className={cn(
+                    'text-3xl font-black leading-none',
+                    occupants.length > 0 ? 'text-blue-500' : 'text-gray-300'
+                  )}>{code}</span>
+                  <span className={cn(
+                    'text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full',
+                    isFull ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-500'
+                  )}>
+                    {occupants.length}/{MAX_SIMPLE}
+                  </span>
+                </div>
+                {/* 4 slots */}
+                <div className="space-y-1.5">
+                  {Array.from({ length: MAX_SIMPLE }).map((_, i) => {
+                    const p = occupants[i];
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => p && setSelectedPedido(p)}
+                        className={cn(
+                          'w-full rounded-xl px-2.5 py-1.5 text-left transition-all',
+                          p
+                            ? 'bg-blue-500 text-white active:scale-95'
+                            : 'bg-white/70 border border-dashed border-gray-200'
+                        )}
+                      >
+                        {p ? (
+                          <span className="text-[11px] font-bold block truncate">{abrev(p.customerName)}</span>
+                        ) : (
+                          <span className="text-[10px] text-gray-300 font-medium">libre</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── ALFABÉTICOS ── */}
+      <section className="space-y-3">
+        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
+          Casilleros alfabéticos — 2+ bolsas
+        </p>
+        <div className="space-y-2.5">
+          {ALPHA.map(code => {
+            const occupant = alphaOccupant(code);
+            return (
+              <button
+                key={code}
+                onClick={() => occupant && setSelectedPedido(occupant)}
+                className={cn(
+                  'w-full rounded-[20px] p-4 border-2 flex items-center gap-4 transition-all text-left',
+                  occupant
+                    ? 'bg-[#FFF0F5] border-brand/20 active:scale-[0.98]'
+                    : 'bg-gray-50 border-gray-100'
+                )}
+              >
+                {/* Letra */}
+                <div className={cn(
+                  'w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0',
+                  occupant ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'
+                )}>
+                  <span className="text-2xl font-black">{code}</span>
+                </div>
+
+                {/* Info */}
+                {occupant ? (
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-[15px] text-gray-900 truncate">{occupant.customerName}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[11px] font-bold text-brand">
+                        {occupant.bagCount} bolsa{occupant.bagCount !== 1 ? 's' : ''}
+                      </span>
+                      <span className="text-gray-300">·</span>
+                      <span className="text-[11px] font-bold text-gray-400">
+                        {occupant.itemCount ?? 0} prendas
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1">
+                    <p className="text-[13px] font-bold text-gray-300">Libre</p>
+                  </div>
+                )}
+
+                {occupant && (
+                  <ChevronRight size={16} className="text-brand/40 flex-shrink-0" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Modal detalle del pedido */}
+      {selectedPedido && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/40 flex items-end"
+          onClick={() => setSelectedPedido(null)}
+        >
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-[480px] mx-auto bg-white rounded-t-[28px] p-6 pb-10"
+          >
+            {/* Handle */}
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+
+            {/* Etiqueta grande */}
+            <div className="flex items-center gap-4 mb-5">
+              <div className={cn(
+                'w-16 h-16 rounded-2xl flex items-center justify-center',
+                selectedPedido.labelType === 'letter' ? 'bg-brand' : 'bg-blue-500'
+              )}>
+                <span className="text-3xl font-black text-white">{selectedPedido.label}</span>
+              </div>
+              <div>
+                <p className="font-black text-xl text-gray-900">{selectedPedido.customerName}</p>
+                <p className="text-[12px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">
+                  Casillero {selectedPedido.labelType === 'letter' ? 'exclusivo' : 'compartido'}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-50 rounded-2xl p-3 text-center">
+                <p className="text-2xl font-black text-gray-800">{selectedPedido.bagCount}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Bolsas</p>
+              </div>
+              <div className="bg-gray-50 rounded-2xl p-3 text-center">
+                <p className="text-2xl font-black text-gray-800">{selectedPedido.itemCount ?? 0}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Prendas</p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSelectedPedido(null)}
+              className="mt-4 w-full py-3 rounded-2xl bg-gray-100 text-gray-600 font-black text-sm"
+            >
+              Cerrar
+            </button>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
   );
 }
