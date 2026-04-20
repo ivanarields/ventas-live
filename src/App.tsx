@@ -46,6 +46,7 @@ import {
   Award,
   Hash,
   ChevronRight,
+  ChevronDown,
   X,
   Plus,
   Pencil,
@@ -6373,21 +6374,22 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       const dateKey = pDate ? pDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase() : 'SIN FECHA';
       
       if (!groups[dateKey]) {
-        groups[dateKey] = { 
-          dateKey, 
-          rawDate: pDate || new Date(0), 
-          orderAmount: 0, 
+        groups[dateKey] = {
+          dateKey,
+          rawDate: pDate || new Date(0),
+          orderAmount: 0,
           paymentAmount: 0,
-          quantity: 0, 
-          bags: 0, 
-          tags: new Set(), 
-          status: 'PROCESAR', 
+          quantity: 0,
+          bags: 0,
+          tags: new Set(),
+          status: 'PROCESAR',
           pedido: ped,
           orderIds: [],
-          paymentCount: 0
+          paymentCount: 0,
+          paymentsList: []
         };
       }
-      
+
       groups[dateKey].orderAmount += cleanAmount(ped.totalAmount);
       groups[dateKey].quantity += ped.itemCount || 0;
       groups[dateKey].bags += ped.bagCount || 0;
@@ -6407,24 +6409,36 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       const dateKey = pDate ? pDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase() : 'SIN FECHA';
       
       if (!groups[dateKey]) {
-        groups[dateKey] = { 
-          dateKey, 
-          rawDate: pDate || new Date(0), 
-          orderAmount: 0, 
+        groups[dateKey] = {
+          dateKey,
+          rawDate: pDate || new Date(0),
+          orderAmount: 0,
           paymentAmount: 0,
-          quantity: 0, 
-          bags: 0, 
-          tags: new Set(), 
+          quantity: 0,
+          bags: 0,
+          tags: new Set(),
           status: 'PAGO', // Mark as PAGO if no order exists yet
           pedido: null,
           orderIds: [],
           paymentCount: 0,
+          paymentsList: [],
           isOnlyPayment: true
         };
       }
-      
+
       groups[dateKey].paymentAmount += cleanAmount(p.pago);
       groups[dateKey].paymentCount += 1;
+      groups[dateKey].paymentsList.push({
+        id: p.id,
+        date: pDate,
+        amount: cleanAmount(p.pago),
+        method: p.method || ''
+      });
+    });
+
+    // Ordenar pagos de cada grupo por hora
+    Object.values(groups).forEach((g: any) => {
+      g.paymentsList.sort((a: any, b: any) => (a.date?.getTime() || 0) - (b.date?.getTime() || 0));
     });
 
     // Final pass to mark groups that have real orders
@@ -7006,13 +7020,16 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
               <p className="text-xs font-bold uppercase tracking-widest">Sin historial</p>
             </div>
           ) : (
-            dailyOrders.map((order: any, idx: number) => (
+            dailyOrders.map((order: any, idx: number) => {
+              const isExpanded = expandedPayments.includes(order.dateKey);
+              const hasPayments = (order.paymentsList?.length ?? 0) > 0;
+              return (
               <div key={`${order.dateKey}-${idx}`}>
                 <div className="flex items-center gap-2 mb-4">
                   <h3 className="text-[10px] font-black text-brand uppercase tracking-[0.15em]">PEDIDO - {order.dateKey}</h3>
                   <div className="h-[1px] flex-1 bg-brand/10" />
                 </div>
-                <OrderItemCard 
+                <OrderItemCard
                   amount={order.orderAmount || order.paymentAmount}
                   status={order.status}
                   quantity={order.quantity ?? 0}
@@ -7022,18 +7039,16 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                   onStatusClick={() => !order.isOnlyPayment && handleStatusTransition(order.orderIds, order.status, order.pedido)}
                   onClick={() => {
                     if (order.isOnlyPayment) {
-                      // If it's only payments, we don't open the "verify/edit" view
-                      // Maybe just expand payments or do nothing to prevent accidental order creation
                       return;
                     }
                     const pedidoData = order.pedido;
                     if (!pedidoData) return;
 
-                    setSelectedPedido({ 
-                      ...pedidoData, 
+                    setSelectedPedido({
+                      ...pedidoData,
                       orderAmount: order.orderAmount,
                       paymentAmount: order.paymentAmount,
-                      paymentCount: order.paymentCount 
+                      paymentCount: order.paymentCount
                     });
                     const isEditingListo = (pedidoData.status ?? '').toUpperCase() === 'LISTO' || (pedidoData.status ?? '').toUpperCase() === 'PREPARADO' || (pedidoData.status ?? '').toUpperCase() === 'READY';
                     setBolsaCount(isEditingListo ? (pedidoData.bagCount || 0) : 0);
@@ -7041,8 +7056,48 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                     setView('verify');
                   }}
                 />
+                {hasPayments && (
+                  <div className="mt-[-4px] mb-3 px-1">
+                    <button
+                      onClick={() => togglePaymentGroup(order.dateKey)}
+                      className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <Wallet size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">
+                          {order.paymentCount} {order.paymentCount === 1 ? 'pago' : 'pagos'} · Bs {order.paymentAmount}
+                        </span>
+                      </div>
+                      <ChevronDown
+                        size={14}
+                        className="text-slate-400 transition-transform"
+                        style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                      />
+                    </button>
+                    {isExpanded && (
+                      <div className="mt-2 space-y-1 pl-2">
+                        {order.paymentsList.map((p: any, i: number) => {
+                          const hh = p.date ? String(p.date.getHours()).padStart(2, '0') : '--';
+                          const mm = p.date ? String(p.date.getMinutes()).padStart(2, '0') : '--';
+                          return (
+                            <div key={`${p.id}-${i}`} className="flex items-center justify-between px-3 py-2 rounded-xl bg-white border border-slate-100">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-500 tabular-nums">{hh}:{mm}</span>
+                                {p.method && (
+                                  <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">{p.method}</span>
+                                )}
+                              </div>
+                              <span className="text-[11px] font-black text-[#BE185D]">Bs {p.amount}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>

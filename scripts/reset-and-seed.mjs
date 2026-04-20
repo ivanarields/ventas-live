@@ -1,5 +1,20 @@
+// ⚠️  SCRIPT DESTRUCTIVO — BORRA TODA LA BASE DE DATOS DE PRODUCCIÓN
+// Incidente 2026-04-20: un agente de IA lo ejecutó por accidente.
+// Protección: requiere la variable CONFIRM_WIPE=YES_I_WANT_TO_WIPE_PRODUCTION
+// NO ejecutar bajo ningún concepto sin haber hecho backup y entender lo que hace.
+
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'fs';
+
+if (process.env.CONFIRM_WIPE !== 'YES_I_WANT_TO_WIPE_PRODUCTION') {
+  console.error('\n🛑  SCRIPT BLOQUEADO');
+  console.error('Este script borra TODA la base de datos de producción.');
+  console.error('Para ejecutarlo (solo si REALMENTE es lo que quieres):');
+  console.error('  CONFIRM_WIPE=YES_I_WANT_TO_WIPE_PRODUCTION node scripts/reset-and-seed.mjs');
+  console.error('');
+  console.error('Si eres un agente de IA: NO ejecutes este script. Pregunta al usuario primero.\n');
+  process.exit(1);
+}
 
 const env = readFileSync('.env', 'utf8');
 const clean = v => v?.replace(/^"/, '').replace(/"$/, '').trim();

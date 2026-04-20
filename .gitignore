@@ -7,3 +7,9 @@ coverage/
 .env*
 !.env.example
 .vercel
+
+# Datos sensibles / PII (nunca subir)
+MacroDroidLog.txt
+logs.txt
+capturas/
+scripts/check-vanesa.mjs
