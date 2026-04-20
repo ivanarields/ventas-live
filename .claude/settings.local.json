@@ -75,7 +75,12 @@
       "Bash(cp /tmp/verify.mjs scripts/verify-ingest.mjs)",
       "Bash(node scripts/verify-ingest.mjs)",
       "Bash(node scripts/verify-real-payment.mjs)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(cat .vercel/project.json)",
+      "Bash(ls turbo.json pnpm-workspace.yaml)",
+      "Bash(grep -v \"^$\")",
+      "Bash(awk -F= '{print $1}')",
+      "Bash(grep -n \"QR\\\\\\\\\\\\\\\\s\\\\\\\\+DE\\\\\\\\|parsePayerName\" supabase/functions/ingest-notification/index.ts)"
     ]
   }
 }

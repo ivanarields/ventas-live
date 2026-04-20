@@ -277,7 +277,11 @@ async function syncLabelsForCustomer(
   const customer = allCustomers.find(c => c.id === customerId);
   if (!customer) return;
 
-  const customerPedidos = updatedPedidos.filter(p => p.customerId === customerId);
+  const customerPedidos = updatedPedidos.filter(p =>
+    p.customerId === customerId ||
+    (p.customerId === '' || p.customerId == null) &&
+    cleanName(p.customerName ?? '') === cleanName(customer.name ?? '')
+  );
   const deliveredPedidos = customerPedidos.filter(p => p.status.toLowerCase() === 'entregado');
   const activePedidos = customerPedidos.filter(p => p.status.toLowerCase() !== 'entregado');
 
@@ -472,7 +476,7 @@ const formatTransactionDate = (dateValue: any): string => {
 };
 
 import { DetailedAnalysis, type CategoryData } from './components/DetailedAnalysis';
-import StorefrontApp from './storefront/StorefrontApp';
+const StorefrontApp = React.lazy(() => import('./storefront/StorefrontApp'));
 import { AdminTiendaView } from './components/AdminTiendaView';
 import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, setAuthContext, clearAuthContext } from './lib/api';
 import {
@@ -1570,7 +1574,11 @@ export default function App() {
 
   // Routing: Tienda pública (sin autenticación)
   if (window.location.pathname.startsWith('/tienda')) {
-    return <StorefrontApp />;
+    return (
+      <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#fdf5f7]"><div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin" /></div>}>
+        <StorefrontApp />
+      </React.Suspense>
+    );
   }
 
   if (loading) {
@@ -1684,20 +1692,23 @@ export default function App() {
   return (
     <div className="app-container">
       {/* Content */}
-      <main className="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-6 pb-24 pt-4 bg-white">
-        <AnimatePresence>
+      <main className="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-6 pb-24 pt-4" style={{ background: '#f8f9fa' }}>
+        <AnimatePresence mode="wait" initial={false}>
           {currentTab === 'home' && (
-            <HomeView 
-              orders={orders} 
-              lives={lives} 
-              transactions={transactions} 
-              key="home" 
-              onAdd={() => setShowAddModal('order')} 
+            <HomeView
+              orders={orders}
+              lives={lives}
+              transactions={transactions}
+              payments={payments}
+              pedidos={pedidos}
+              key="home"
+              onAdd={() => setShowAddModal('order')}
               isInstallable={isInstallable}
               onInstall={handleInstallClick}
             />
           )}
           {currentTab === 'entrega' && <EntregaView pedidos={pedidos} customers={customers} onSelectPerson={(id) => setSelectedPersonId(id)} onRefresh={loadData} key="entrega" />}
+
           {currentTab === 'payments' && (
             <PaymentsView 
               payments={payments} 
@@ -1734,9 +1745,11 @@ export default function App() {
             />
           )}
           {currentTab === 'tienda' && (
-            <AdminTiendaView key='tienda' userId={user?.id ?? ''} authToken={authToken ?? ''} />
+            <motion.div key="tienda" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.12 }}>
+              <AdminTiendaView userId={user?.id ?? ''} authToken={authToken ?? ''} />
+            </motion.div>
           )}
-                    {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} key="settings" />}
+          {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} key="settings" />}
         </AnimatePresence>
       </main>
 
@@ -2192,112 +2205,134 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
 
 // --- Views ---
 
-function HomeView({ orders, lives, transactions, onAdd, isInstallable, onInstall }: any) {
-  const totalSales = orders.reduce((acc: number, o: any) => acc + o.total, 0);
-  const nextLive = lives.find((l: any) => l.status === 'scheduled');
+function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall }: any) {
+  const today = new Date();
+  const todayStr = today.toDateString();
+
+  // Métricas de pagos
+  const pagosHoy = (payments ?? []).filter((p: any) => new Date(p.date || p.fecha).toDateString() === todayStr);
+  const ingresosHoy = pagosHoy.reduce((acc: number, p: any) => acc + (cleanAmount(p.pago) || 0), 0);
+  const totalIngresos = (payments ?? []).reduce((acc: number, p: any) => acc + (cleanAmount(p.pago) || 0), 0);
+
+  // Métricas de pedidos
+  const pedidosProcesar = (pedidos ?? []).filter((p: any) => (p.status ?? '').toLowerCase() === 'procesar').length;
+  const pedidosListos   = (pedidos ?? []).filter((p: any) => (p.status ?? '').toLowerCase() === 'listo').length;
+  const pedidosTotal    = (pedidos ?? []).length;
+
+  // Próximo live
+  const nextLive = (lives ?? []).find((l: any) => l.status === 'scheduled');
+
+  // Ingresos del mes desde transacciones
+  const thisMonth = today.getMonth();
+  const thisYear  = today.getFullYear();
+  const ingresosMes = (transactions ?? [])
+    .filter((t: any) => t.type === 'income' && new Date(t.fecha || t.date).getMonth() === thisMonth && new Date(t.fecha || t.date).getFullYear() === thisYear)
+    .reduce((acc: number, t: any) => acc + (t.amount || 0), 0);
+
+  // Pagos recientes
+  const pagosRecientes = [...(payments ?? [])].sort((a: any, b: any) => new Date(b.date || b.fecha).getTime() - new Date(a.date || a.fecha).getTime()).slice(0, 5);
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.1, ease: "linear" }}
-      className="space-y-8"
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.15, ease: 'easeOut' }}
+      className="space-y-5 -mx-4 -mt-4 px-4 pt-4 pb-4"
+      style={{ background: 'linear-gradient(180deg, #fff0f5 0%, #f8f9fa 140px)' }}
     >
-      {/* PWA Install Banner */}
+      {/* PWA Banner */}
       {isInstallable && (
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="card-modern bg-brand/10 border-brand/20 flex items-center justify-between p-4"
-        >
+        <div className="flex items-center justify-between bg-white/80 backdrop-blur rounded-2xl px-4 py-3 border border-brand/10 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-brand flex items-center justify-center text-white">
-              <Rocket className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-brand flex items-center justify-center">
+              <Rocket className="w-4 h-4 text-white" />
             </div>
             <div>
-              <p className="text-sm font-bold text-base-text">Instalar Aplicación</p>
-              <p className="text-[10px] text-base-text-muted">Úsala sin barra de navegación</p>
+              <p className="text-[13px] font-bold text-gray-900">Instalar app</p>
+              <p className="text-[10px] text-gray-400">Sin barra de navegador</p>
             </div>
           </div>
-          <button 
-            onClick={onInstall}
-            className="btn-pill-primary py-2 px-4 text-xs"
-          >
-            Instalar
-          </button>
-        </motion.div>
+          <button onClick={onInstall} className="btn-pill-primary py-1.5 px-3 text-xs">Instalar</button>
+        </div>
       )}
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="card-modern bg-brand text-white border-none shadow-[0_12px_30px_rgba(255,45,120,0.25)]">
-          <p className="text-[11px] font-bold uppercase opacity-80 mb-2 tracking-wider">Ventas Totales</p>
-          <h3 className="text-3xl font-extrabold leading-none">Bs {totalSales.toLocaleString()}</h3>
-        </div>
-        <div className="card-modern">
-          <p className="text-[11px] font-bold uppercase text-base-text-muted mb-2 tracking-wider">Pedidos Hoy</p>
-          <h3 className="text-3xl font-extrabold text-base-text leading-none">{orders.length}</h3>
+      {/* Hero card: Ingresos hoy */}
+      <div className="rounded-[24px] p-5 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #ff2d78 0%, #ff6fa3 100%)', boxShadow: '0 16px 40px rgba(255,45,120,0.28)' }}>
+        <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full bg-white/10" />
+        <div className="absolute -right-2 bottom-0 w-16 h-16 rounded-full bg-white/5" />
+        <p className="text-[11px] font-black uppercase tracking-widest opacity-80 mb-1">Ingresos hoy</p>
+        <h2 className="text-4xl font-black leading-none mb-3">Bs {ingresosHoy.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</h2>
+        <div className="flex items-center gap-4">
+          <div>
+            <p className="text-[10px] opacity-70 font-bold uppercase tracking-wide">Pagos hoy</p>
+            <p className="text-xl font-black">{pagosHoy.length}</p>
+          </div>
+          <div className="w-px h-8 bg-white/20" />
+          <div>
+            <p className="text-[10px] opacity-70 font-bold uppercase tracking-wide">Total acumulado</p>
+            <p className="text-xl font-black">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
+          </div>
+          <div className="w-px h-8 bg-white/20" />
+          <div>
+            <p className="text-[10px] opacity-70 font-bold uppercase tracking-wide">Mes</p>
+            <p className="text-xl font-black">Bs {ingresosMes.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
+          </div>
         </div>
       </div>
 
-      {/* Next Live Card */}
+      {/* Stats grid: pedidos */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white rounded-2xl p-3.5 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+          <p className="text-2xl font-black text-amber-500">{pedidosProcesar}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Procesar</p>
+        </div>
+        <div className="bg-white rounded-2xl p-3.5 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+          <p className="text-2xl font-black text-blue-500">{pedidosListos}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Listos</p>
+        </div>
+        <div className="bg-white rounded-2xl p-3.5 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+          <p className="text-2xl font-black text-gray-700">{pedidosTotal}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Total</p>
+        </div>
+      </div>
+
+      {/* Próximo live */}
       {nextLive && (
-        <div className="card-modern-pink relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <Video className="w-20 h-20" />
+        <div className="bg-white rounded-2xl p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#fff0f5' }}>
+            <Video className="w-5 h-5" style={{ color: '#ff2d78' }} />
           </div>
-          <div className="relative z-10 flex justify-between items-center">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 rounded-full bg-brand animate-pulse" />
-                <p className="text-[11px] font-bold text-brand uppercase tracking-wider">Próximo Live</p>
-              </div>
-              <h4 className="text-lg font-extrabold text-base-text">{nextLive.title}</h4>
-              <div className="flex items-center gap-2 text-base-text-muted text-xs font-medium mt-2">
-                <Clock className="w-3.5 h-3.5" />
-                {formatAppDate(nextLive.scheduledAt)}
-              </div>
-            </div>
-            <button className="w-12 h-12 rounded-full bg-white flex items-center justify-center text-brand shadow-sm">
-              <ChevronRight className="w-6 h-6" />
-            </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#ff2d78' }}>Próximo Live</p>
+            <p className="font-black text-[14px] text-gray-900 truncate">{nextLive.title}</p>
+            <p className="text-[11px] text-gray-400 font-medium">{formatAppDate(nextLive.scheduledAt)}</p>
           </div>
+          <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#ff2d78' }} />
         </div>
       )}
 
-      {/* Recent Activity */}
-      <div className="space-y-3">
-        <div className="flex justify-between items-center px-1">
-          <h3 className="text-[11px] font-bold text-base-text-muted uppercase tracking-[0.15em]">Actividad Reciente</h3>
-          <button onClick={onAdd} className="btn-tertiary-brand text-xs">
-            <Plus className="w-4 h-4" />
-            Nuevo Pedido
-          </button>
-        </div>
-        <div className="space-y-2">
-          {orders.slice(0, 5).map((order: any, idx: number) => (
-            <div key={`${order.id || idx}-${idx}`} className="card-modern py-3 flex items-center justify-between hover:scale-[1.02] active:scale-100 cursor-pointer">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-2xl bg-brand/5 flex items-center justify-center text-brand font-bold text-sm">
-                  {cleanName(order.customerName)[0]}
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-base-text">{cleanName(order.customerName)}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <p className="text-[10px] font-medium text-base-text-muted uppercase">{order.status}</p>
-                    <span className="text-[10px] text-gray-300">•</span>
-                    <p className="text-[10px] font-bold text-gray-400">{formatAppDate(order.date)}</p>
-                  </div>
-                </div>
+      {/* Pagos recientes */}
+      <div className="space-y-2.5">
+        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">Pagos recientes</p>
+        {pagosRecientes.length === 0 ? (
+          <div className="bg-white rounded-2xl p-6 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+            <p className="text-[13px] font-bold text-gray-300">Sin pagos registrados</p>
+          </div>
+        ) : (
+          pagosRecientes.map((p: any, i: number) => (
+            <div key={p.id ?? i} className="bg-white rounded-2xl px-4 py-3 flex items-center gap-3" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 font-black text-[13px] text-white" style={{ background: 'linear-gradient(135deg,#ff2d78,#ff6fa3)' }}>
+                {(p.nombre ?? '?')[0]}
               </div>
-              <div className="text-right">
-                <p className="text-sm font-extrabold text-brand">Bs {order.total}</p>
-                <ChevronRight className="w-4 h-4 text-gray-300 ml-auto mt-1" />
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-[13px] text-gray-900 truncate">{p.nombre}</p>
+                <p className="text-[10px] text-gray-400 font-medium">{new Date(p.date || p.fecha).toLocaleDateString('es-BO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
               </div>
+              <p className="font-black text-[15px]" style={{ color: '#ff2d78' }}>Bs {cleanAmount(p.pago)}</p>
             </div>
-          ))}
-        </div>
+          ))
+        )}
       </div>
     </motion.div>
   );
@@ -2352,16 +2387,17 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.1, ease: 'linear' }}
+      key="entrega"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.12 }}
       className="space-y-6 pb-6"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-1">
         <div>
-          <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Casilleros</h2>
+          <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Entrega</h2>
           <p className="text-[11px] text-gray-400 font-medium mt-0.5">
             {activos.length} pedido{activos.length !== 1 ? 's' : ''} activo{activos.length !== 1 ? 's' : ''}
           </p>
@@ -2378,125 +2414,75 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
         </div>
       </div>
 
-      {/* ── NUMÉRICOS ── */}
-      <section className="space-y-3">
-        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
-          Casilleros numéricos — 1 bolsa
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          {NUMERIC.map(code => {
-            const occupants = byLabel(code);
-            const free = MAX_SIMPLE - occupants.length;
-            const isFull = free === 0;
-            return (
-              <div key={code}
-                className={cn(
-                  'rounded-[20px] p-4 border-2 transition-all',
-                  isFull
-                    ? 'bg-blue-50 border-blue-200'
-                    : occupants.length > 0
-                      ? 'bg-blue-50/50 border-blue-100'
-                      : 'bg-gray-50 border-gray-100'
-                )}
-              >
-                {/* Número del casillero */}
-                <div className="flex items-center justify-between mb-3">
-                  <span className={cn(
-                    'text-3xl font-black leading-none',
-                    occupants.length > 0 ? 'text-blue-500' : 'text-gray-300'
-                  )}>{code}</span>
-                  <span className={cn(
-                    'text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full',
-                    isFull ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-500'
-                  )}>
-                    {occupants.length}/{MAX_SIMPLE}
-                  </span>
-                </div>
-                {/* 4 slots */}
-                <div className="space-y-1.5">
-                  {Array.from({ length: MAX_SIMPLE }).map((_, i) => {
-                    const p = occupants[i];
-                    return (
+      {/* ── NUMÉRICOS activos ── */}
+      {NUMERIC.some(code => byLabel(code).length > 0) && (
+        <section className="space-y-2">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
+            Numéricos — 1 bolsa
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {NUMERIC.filter(code => byLabel(code).length > 0).map(code => {
+              const occupants = byLabel(code);
+              return (
+                <div key={code} className="rounded-2xl p-3 border-2 bg-blue-50/50 border-blue-100 transition-all">
+                  <p className="text-[9px] font-black text-blue-300 uppercase tracking-widest mb-1.5 px-0.5">Casillero {code}</p>
+                  <div className="space-y-1">
+                    {occupants.map((p: any, i: number) => (
                       <button
-                        key={i}
-                        onClick={() => p && setSelectedPedido(p)}
-                        className={cn(
-                          'w-full rounded-xl px-2.5 py-1.5 text-left transition-all',
-                          p
-                            ? 'bg-blue-500 text-white active:scale-95'
-                            : 'bg-white/70 border border-dashed border-gray-200'
-                        )}
+                        key={p.id ?? i}
+                        onClick={() => setSelectedPedido(p)}
+                        className="w-full rounded-xl px-2.5 py-2 text-left bg-blue-500 text-white active:scale-95 transition-all"
                       >
-                        {p ? (
-                          <span className="text-[11px] font-bold block truncate">{abrev(p.customerName)}</span>
-                        ) : (
-                          <span className="text-[10px] text-gray-300 font-medium">libre</span>
-                        )}
+                        <span className="text-[11px] font-bold block leading-tight">{p.customerName}</span>
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
-      {/* ── ALFABÉTICOS ── */}
-      <section className="space-y-3">
-        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
-          Casilleros alfabéticos — 2+ bolsas
-        </p>
-        <div className="space-y-2.5">
-          {ALPHA.map(code => {
-            const occupant = alphaOccupant(code);
-            return (
-              <button
-                key={code}
-                onClick={() => occupant && setSelectedPedido(occupant)}
-                className={cn(
-                  'w-full rounded-[20px] p-4 border-2 flex items-center gap-4 transition-all text-left',
-                  occupant
-                    ? 'bg-[#FFF0F5] border-brand/20 active:scale-[0.98]'
-                    : 'bg-gray-50 border-gray-100'
-                )}
-              >
-                {/* Letra */}
-                <div className={cn(
-                  'w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0',
-                  occupant ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'
-                )}>
-                  <span className="text-2xl font-black">{code}</span>
-                </div>
-
-                {/* Info */}
-                {occupant ? (
+      {/* ── ALFABÉTICOS activos ── */}
+      {ALPHA.some(code => alphaOccupant(code)) && (
+        <section className="space-y-2">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
+            Alfabéticos — 2+ bolsas
+          </p>
+          <div className="space-y-2">
+            {ALPHA.filter(code => alphaOccupant(code)).map(code => {
+              const occupant = alphaOccupant(code)!;
+              return (
+                <button
+                  key={code}
+                  onClick={() => setSelectedPedido(occupant)}
+                  className="w-full rounded-2xl px-4 py-3 border-2 flex items-center gap-3 transition-all text-left bg-[#FFF0F5] border-brand/20 active:scale-[0.98]"
+                >
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-[15px] text-gray-900 truncate">{occupant.customerName}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[11px] font-bold text-brand">
-                        {occupant.bagCount} bolsa{occupant.bagCount !== 1 ? 's' : ''}
-                      </span>
-                      <span className="text-gray-300">·</span>
-                      <span className="text-[11px] font-bold text-gray-400">
-                        {occupant.itemCount ?? 0} prendas
-                      </span>
-                    </div>
+                    <p className="text-[9px] font-black text-brand/40 uppercase tracking-widest mb-0.5">Casillero {code}</p>
+                    <p className="font-black text-[14px] text-gray-900 leading-tight">{occupant.customerName}</p>
+                    <p className="text-[11px] font-bold text-brand mt-0.5">
+                      {occupant.bagCount} bolsa{occupant.bagCount !== 1 ? 's' : ''} · {occupant.itemCount ?? 0} prendas
+                    </p>
                   </div>
-                ) : (
-                  <div className="flex-1">
-                    <p className="text-[13px] font-bold text-gray-300">Libre</p>
-                  </div>
-                )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
-                {occupant && (
-                  <ChevronRight size={16} className="text-brand/40 flex-shrink-0" />
-                )}
-              </button>
-            );
-          })}
+      {/* Estado vacío */}
+      {activos.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+            <Package className="w-8 h-8 text-gray-300" />
+          </div>
+          <p className="text-[13px] font-bold text-gray-400">Sin pedidos en casilleros</p>
+          <p className="text-[11px] text-gray-300 mt-1">Los casilleros aparecerán cuando haya pedidos listos</p>
         </div>
-      </section>
+      )}
 
       {/* Modal detalle del pedido */}
       {selectedPedido && (
@@ -6552,7 +6538,6 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     const isProcesar = status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING';
     const isListo = status === 'LISTO' || status === 'PREPARADO' || status === 'READY';
 
-    if (!person.customerId) return;
     if (selectedPedido.id.startsWith('temp-')) { setView('detail'); setSelectedPedido(null); return; }
     if (bolsaCount === 0) { alert('Debes registrar al menos 1 bolsa antes de marcar el pedido como listo.'); setIsSaving(false); return; }
 
@@ -6563,11 +6548,12 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       setSelectedPedido(null);
       try {
         await pedidosApi.update(selectedPedido.id, { status: 'listo', bag_count: bolsaCount, item_count: selectedPrenda });
-        // Forzar asignación de casillero desde el frontend también (belt & suspenders)
         const updatedPedidos = allPedidos.map((p: any) =>
           p.id === selectedPedido.id ? { ...p, status: 'listo', bagCount: bolsaCount, itemCount: selectedPrenda } : p
         );
-        await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+        if (person.customerId) {
+          await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+        }
         loadData();
       } catch (error) {
         console.error('Error al marcar pedido listo:', error);
@@ -6650,8 +6636,19 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     }
   };
 
-  const handleStatusTransition = async (orderIds: string[], currentStatus: string) => {
+  const handleStatusTransition = async (orderIds: string[], currentStatus: string, pedido?: any) => {
     const status = currentStatus.toUpperCase();
+    // PROCESAR → abrir Mesa de Preparación
+    if (status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING') {
+      if (pedido) {
+        setSelectedPedido({ ...pedido, orderIds });
+        const isEditing = false;
+        setBolsaCount(isEditing ? (pedido.bagCount || 0) : 0);
+        setSelectedPrenda(isEditing ? (pedido.itemCount || 0) : 0);
+        setView('verify');
+      }
+      return;
+    }
     // LISTO → mostrar confirmación de entrega
     if (status === 'LISTO' || status === 'PREPARADO' || status === 'READY') {
       setConfirmDelivery({ ids: orderIds, status: currentStatus });
@@ -6674,7 +6671,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       const updatedPedidos = allPedidos.map(p =>
         ids.includes(p.id) ? { ...p, status: 'entregado' } : p
       );
-      await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+      if (person.customerId) {
+        await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+      }
       await loadData();
       confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#2E7D32', '#E8F5E9', '#10B981'] });
     } catch (error) {
@@ -7020,7 +7019,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                   bags={order.bags ?? 0}
                   tag={Array.from(order.tags).join(', ') || ''}
                   isOnlyPayment={order.isOnlyPayment}
-                  onStatusClick={() => !order.isOnlyPayment && handleStatusTransition(order.orderIds, order.status)}
+                  onStatusClick={() => !order.isOnlyPayment && handleStatusTransition(order.orderIds, order.status, order.pedido)}
                   onClick={() => {
                     if (order.isOnlyPayment) {
                       // If it's only payments, we don't open the "verify/edit" view

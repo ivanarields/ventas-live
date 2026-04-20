@@ -127,8 +127,24 @@ app.post("/api/pagos", async (req, res) => {
     const { nombre, pago, method, status, fecha, customerId } = req.body;
     const userId = req.headers["x-user-id"] ?? "mobile";
     if (!nombre || !pago) return res.status(400).json({ error: "Nombre y pago son requeridos" });
-    const { data, error } = await supabase.from("pagos").insert({ nombre: cleanName(nombre), pago: Number(pago), method: method ?? "HTTP Request", status: status ?? "pending", date: fecha ? new Date(fecha) : new Date(), customer_id: customerId ?? null, user_id: userId }).select().single();
+    const pagoDate = fecha ? new Date(fecha) : new Date();
+    const { data, error } = await supabase.from("pagos").insert({ nombre: cleanName(nombre), pago: Number(pago), method: method ?? "HTTP Request", status: status ?? "pending", date: pagoDate, customer_id: customerId ?? null, user_id: userId }).select().single();
     if (error) throw error;
+    // Auto-sync a transacciones (ingreso)
+    await supabase.from("transactions").insert({
+      type: "income",
+      amount: Number(pago),
+      category: "Pagos",
+      subcategory: method ?? "HTTP Request",
+      description: `Pago de ${cleanName(nombre)}`,
+      fecha: pagoDate,
+      user_id: userId,
+      account: "principal",
+      tags: ["pago-cliente"],
+      status: "completed",
+      is_recurring: false,
+      source_pago_id: data.id,
+    }).catch(() => {}); // No bloquear si falla
     res.status(201).json({ success: true, id: data.id, data });
   } catch (err) { res.status(500).json({ error: "Error interno del servidor" }); }
 });

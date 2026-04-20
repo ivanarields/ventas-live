@@ -221,7 +221,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-black text-gray-900">Mi Tienda</h2>
+          <h2 className="text-xl font-black text-gray-900">Panel de Tienda</h2>
           <p className="text-xs text-gray-400 font-medium">Leydi American</p>
         </div>
         <a

@@ -248,6 +248,32 @@ Variables `@theme` en `src/index.css`:
   3. Tocar "PEDIDO LISTO" → estado cambia a "listo" + etiqueta asignada
   4. Opcionalmente marcar como "entregado" → libera casillero
 
+## Fase 4 — Ingesta de notificaciones bancarias (completado)
+
+**Flujo:** MacroDroid (Android) → Edge Function `ingest-notification` → `raw_notification_events` / `parsed_payment_candidates` → `pagos` + `pedidos` automáticamente.
+
+**Parseo en cascada** (nunca inventa nombres falsos tipo "PAGO Yape"):
+1. Regex hardcodeados — Yape directo (`NOMBRE, te envió...`), Yape QR (`QR DE NOMBRE te envió...`), bancos clásicos
+2. Patrones aprendidos (`learned_text_patterns`) — auto-aprendizaje del contexto antes/después del nombre por `app_package`
+3. **Gemini 2.5 Flash Lite** con `thinkingConfig.thinkingBudget: 0` — casos nuevos nunca vistos
+4. Sin nombre válido → `manual_review_queue` (nunca placeholder)
+
+**Deploy del Edge Function (Docker NO requerido):**
+```bash
+C:/Users/IVAN/bin/supabase.exe functions deploy ingest-notification --no-verify-jwt --project-ref vhczofpmxzbqzboysoca
+```
+
+**Secrets en Supabase:** `GEMINI_API_KEY`, `INGEST_DEVICE_SECRET`, `INGEST_USER_ID`.
+
+**Idempotencia:** hash SHA-256 de cada notificación (`raw_hash`) evita duplicados.
+
+**Scripts útiles:**
+- `scripts/rescue-with-regex.mjs` — rescata items atascados en `manual_review_queue` con el regex actual
+- `scripts/rescue-with-gemini.mjs` — rescate usando Gemini
+- `scripts/reset-and-seed.mjs` — limpia datos y crea 5 clientes de prueba
+
+**Detalle técnico completo:** ver `docs/notifications-system.md`.
+
 ## Pendiente
 
 - RLS (Row Level Security) en PostgreSQL — actualmente filtrado solo por `user_id` en el servidor

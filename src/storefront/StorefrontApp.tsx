@@ -3,7 +3,7 @@ import { ProductGallery } from './components/ProductGallery';
 import { ProductDetail } from './components/ProductDetail';
 import { Checkout } from './components/Checkout';
 import { CartView } from './components/CartView';
-import { Product } from './services/productsApi';
+import { Product, productsApi } from './services/productsApi';
 
 export interface CartItem {
   product: Product;
@@ -46,14 +46,17 @@ export default function StorefrontApp() {
 
   const addToCart = (product: Product, size: string) => {
     setCart(prev => {
-      const existing = prev.findIndex(i => i.product.id === product.id && i.size === size);
-      if (existing >= 0) {
-        return prev.map((item, idx) =>
-          idx === existing ? { ...item, quantity: item.quantity + 1 } : item
-        );
-      }
+      // Desde galería/detalle: si ya existe, no duplicar ni incrementar
+      const exists = prev.some(i => i.product.id === product.id && i.size === size);
+      if (exists) return prev;
       return [...prev, { product, size, quantity: 1 }];
     });
+  };
+
+  const incrementCartItem = (productId: string, size: string) => {
+    setCart(prev =>
+      prev.map(i => i.product.id === productId && i.size === size ? { ...i, quantity: i.quantity + 1 } : i)
+    );
   };
 
   const removeFromCart = (productId: string, size: string) => {
@@ -126,13 +129,24 @@ export default function StorefrontApp() {
 }
 
 function WelcomeScreen({ onEnter }: { onEnter: () => void }) {
-  return (
-    <div className="flex flex-col min-h-screen relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-[#fff0f5] via-white to-white" />
-      <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-[#ff2d78]/8 blur-3xl" />
-      <div className="absolute top-40 -left-16 w-48 h-48 rounded-full bg-[#ff2d78]/6 blur-2xl" />
+  const mainCategories = ['Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos'];
 
-      <div className="relative flex flex-col items-center justify-center flex-1 px-8 text-center">
+  // 🚀 Pre-carga silenciosa: mientras el usuario lee la pantalla de bienvenida,
+  // los productos ya se descargan. Al hacer clic en "Ver catálogo" llegan al instante.
+  React.useEffect(() => {
+    productsApi.prefetch();
+  }, []);
+
+  return (
+    <div className="flex flex-col min-h-screen relative overflow-hidden bg-white">
+      
+      {/* Fondo rosado original — sin fotos de collage que consuman recursos */}
+      <div className="absolute inset-0 bg-gradient-to-b from-[#fff0f5] via-white to-white z-0" />
+      <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-[#ff2d78]/8 blur-3xl z-0" />
+      <div className="absolute top-40 -left-16 w-48 h-48 rounded-full bg-[#ff2d78]/6 blur-2xl z-0" />
+
+      {/* Contenido Frontal */}
+      <div className="relative flex flex-col items-center justify-center flex-1 px-8 text-center z-10">
         <div className="mb-8">
           <div className="w-20 h-20 rounded-[28px] bg-gradient-to-br from-[#ff2d78] to-[#ff6fa3] flex items-center justify-center mx-auto mb-5 shadow-lg shadow-[#ff2d78]/30">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -150,8 +164,8 @@ function WelcomeScreen({ onEnter }: { onEnter: () => void }) {
           </p>
         </div>
 
-        <div className="flex flex-wrap justify-center gap-2 mb-10">
-          {['Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos'].map(cat => (
+        <div className="flex flex-wrap justify-center gap-2 mb-10 w-full px-4">
+          {mainCategories.map(cat => (
             <span key={cat} className="px-3 py-1.5 bg-[#fff0f5] text-[#ff2d78] text-[11px] font-black rounded-full uppercase tracking-wider">
               {cat}
             </span>
@@ -167,11 +181,11 @@ function WelcomeScreen({ onEnter }: { onEnter: () => void }) {
         </button>
 
         <p className="text-[11px] text-gray-400 mt-4 font-medium">
-          Pago seguro · Envío rápido · 100% original
+          Pago seguro · Envío rápido
         </p>
       </div>
 
-      <div className="relative pb-10 text-center">
+      <div className="relative pb-10 text-center z-10">
         <p className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">
           Leydi American © 2025
         </p>

@@ -37,15 +37,46 @@ function mapRow(row: any): Product {
   };
 }
 
+// Caché en memoria: evita repetir la misma petición durante 5 minutos
+let _cache: { data: Product[]; ts: number } | null = null;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutos en milisegundos
+
+// Promesa compartida para evitar llamadas duplicadas simultáneas
+let _inflight: Promise<Product[]> | null = null;
+
 export const productsApi = {
+  /**
+   * Obtiene los productos. Si hay caché reciente la usa directamente.
+   * Si hay una petición en vuelo la reutiliza (sin hacer dos fetch al mismo tiempo).
+   */
   getProducts: async (): Promise<Product[]> => {
-    const res = await fetch('/api/products');
-    if (!res.ok) return [];
-    const rows = await res.json();
-    return rows.map(mapRow);
+    // 1. Devolver caché si sigue vigente
+    if (_cache && Date.now() - _cache.ts < CACHE_TTL) {
+      return _cache.data;
+    }
+    // 2. Si ya hay una petición en vuelo, reutilizarla
+    if (_inflight) return _inflight;
+    // 3. Nueva petición
+    _inflight = fetch('/api/products')
+      .then(res => (res.ok ? res.json() : []))
+      .then((rows: any[]) => {
+        const data = rows.map(mapRow);
+        _cache = { data, ts: Date.now() };
+        return data;
+      })
+      .catch(() => [])
+      .finally(() => { _inflight = null; });
+    return _inflight;
   },
+
+  /** Pre-carga los productos sin bloquear (fire-and-forget). */
+  prefetch: () => { productsApi.getProducts().catch(() => {}); },
+
   getProduct: async (id: string): Promise<Product | undefined> => {
     const all = await productsApi.getProducts();
     return all.find(p => p.id === id);
   },
+
+  /** Invalida la caché manualmente (útil tras crear/editar productos en el panel). */
+  invalidate: () => { _cache = null; },
 };

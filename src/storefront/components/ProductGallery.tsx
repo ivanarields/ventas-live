@@ -134,7 +134,13 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
               >
                 {/* Imagen */}
                 <div className="aspect-[3/4] bg-gray-100 relative overflow-hidden">
-                  <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover" />
+                <img
+                    src={p.images[0]}
+                    alt={p.title}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-full h-full object-cover"
+                  />
                   {!p.available && (
                     <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] flex items-center justify-center">
                       <span className="bg-gray-900 text-white text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">
