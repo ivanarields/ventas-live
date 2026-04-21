@@ -3,6 +3,7 @@ import { processBankScreenshots, reconcilePayments, type ReconciliationResult, t
 import { syncPedidoLabel, releasePedidoLabel } from './services/labelingService';
 import { FileCheck, ShieldAlert, FileSearch, AlertTriangle } from 'lucide-react';
 import { PaymentHistoryTape } from './components/PaymentHistoryTape';
+import { PanelPedidos } from './components/PanelPedidos';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -957,7 +958,7 @@ export default function App() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentTab, setCurrentTab] = useState<'home' | 'entrega' | 'payments' | 'finance' | 'tienda' | 'settings'>('home');
+  const [currentTab, setCurrentTab] = useState<'home' | 'entrega' | 'payments' | 'finance' | 'tienda' | 'settings' | 'panel_pedidos'>('home');
   const [selectedPaymentDates, setSelectedPaymentDates] = useState<Date[]>([new Date()]);
   const [selectedPaymentTime, setSelectedPaymentTime] = useState<string>("");
   const [isPaymentCalendarOpen, setIsPaymentCalendarOpen] = useState(false);
@@ -1751,6 +1752,7 @@ export default function App() {
             </motion.div>
           )}
           {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} key="settings" />}
+          {currentTab === 'panel_pedidos' && <PanelPedidos />}
         </AnimatePresence>
       </main>
 
@@ -1762,6 +1764,7 @@ export default function App() {
         <TabButton active={currentTab === 'finance'} icon={TrendingUp} onClick={() => setCurrentTab('finance')} />
         <TabButton active={currentTab === 'tienda'} icon={Store} onClick={() => setCurrentTab('tienda')} />
         <TabButton active={currentTab === 'settings'} icon={Settings} onClick={() => setCurrentTab('settings')} />
+        <TabButton active={currentTab === 'panel_pedidos'} icon={ClipboardList} onClick={() => setCurrentTab('panel_pedidos')} />
       </nav>
 
       {/* Add Modals */}

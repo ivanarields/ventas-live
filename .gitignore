@@ -13,3 +13,21 @@ MacroDroidLog.txt
 logs.txt
 capturas/
 scripts/check-vanesa.mjs
+
+# WhatsApp bridge (sesión local)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Scripts temporales de desarrollo
+check-railway.mjs
+check-media.mjs
+cleanup-railway.mjs
+create-main-service.mjs
+deploy-railway.mjs
+fix-rls.mjs
+get-workspace.mjs
+migrate-panel.mjs
+reset-panel.mjs
+test-resumen.mjs
+bridge.zip
+railway.toml
