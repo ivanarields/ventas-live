@@ -96,6 +96,8 @@ export interface Pedido {
   totalAmount: number;
   status: string;
   paymentIds?: string[];
+  source?: string;
+  web_items_list?: any;
 }
 
 export interface Idea {

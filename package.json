@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && mkdir -p dist",
+    "build": "vite build",
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",

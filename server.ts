@@ -1418,7 +1418,8 @@ Reglas críticas:
   }
 
   /**
-   * Marca un pedido como pagado y oculta los productos vendidos
+   * Marca un pedido como pagado, oculta los productos vendidos,
+   * y UNIFICA la identidad para inyectar el pedido a la Mesa de Preparación (Casilleros).
    */
   async function confirmStoreOrder(orderId: number, source: string) {
     const now = new Date().toISOString();
@@ -1438,7 +1439,7 @@ Reglas críticas:
 
     if (error || !data) return false;
 
-    // Ocultar productos vendidos
+    // 1. Ocultar productos vendidos
     try {
       const productIds = (data.items ?? []).map((i: any) => i.productId).filter(Boolean);
       if (productIds.length > 0) {
@@ -1448,7 +1449,69 @@ Reglas críticas:
       console.error('[store-match] Error ocultando productos:', e);
     }
 
-    console.log(`[store-match] ✅ Pedido #${orderId} VERIFICADO via ${source}`);
+    // 2. FUSIÓN DE IDENTIDAD GLOBAL Y ENVÍO A ALMACÉN
+    try {
+      // Intentar obtener el nombre real desde el evento de pago si la fuente es el banco
+      let finalName = '';
+      if (source.includes('bank') || source.includes('macrodroid')) {
+         const { data: bankEvent } = await supabaseServer
+           .from('payment_events')
+           .select('sender_name')
+           .eq('matched_order_id', orderId)
+           .single();
+         if (bankEvent?.sender_name) finalName = bankEvent.sender_name;
+      }
+
+      const waNumber = data.customer_wa;
+      let globalCustomerId = null;
+
+      if (waNumber) {
+        // Buscar si el cliente ya existe en el sistema físico (TikTok)
+        const { data: existingCustomer } = await supabaseServer
+          .from('customers')
+          .select('id, full_name')
+          .eq('phone', waNumber)
+          .single();
+
+        if (existingCustomer) {
+          globalCustomerId = existingCustomer.id;
+          // Actualizar nombre si antes no tenía o era muy corto, y ahora el banco nos dio uno real
+          if (finalName && (!existingCustomer.full_name || existingCustomer.full_name.trim() === '')) {
+            await supabaseServer.from('customers').update({ full_name: finalName }).eq('id', globalCustomerId);
+          }
+        } else {
+          // Crear perfil unificado global
+          const { data: newCust } = await supabaseServer.from('customers').insert({
+            phone: waNumber,
+            full_name: finalName || 'Cliente Tienda Web',
+          } as any).select('id').single();
+          globalCustomerId = newCust?.id;
+        }
+      }
+
+      // Inyectar el pedido en la cola física
+      if (globalCustomerId) {
+        const itemsList = data.items ?? [];
+        await supabaseServer.from('pedidos').insert({
+          customer_id: globalCustomerId,
+          customer_name: finalName || 'Cliente Tienda',
+          status: 'procesar',  // Va directo a la Mesa de Preparación
+          total_amount: data.total,
+          date: now,
+          item_count: itemsList.reduce((acc: number, item: any) => acc + (item.quantity || 1), 0),
+          bag_count: 1, // Por defecto todo en 1 bolsa
+          label: `WEB-${orderId}`,
+          label_type: 'WEB', // Señal clave
+          source: 'WEB',     // Campo nuevo (024_add_web_fields)
+          web_items_list: itemsList, // Campo nuevo
+        } as any);
+      }
+
+    } catch (e) {
+      console.error('[store-match] Error en fusión logística:', e);
+    }
+
+    console.log(`[store-match] ✅ Pedido #${orderId} VERIFICADO y unificado via ${source}`);
     return true;
   }
 

@@ -6018,6 +6018,11 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         </div>
 
         <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5 flex flex-col gap-6 pb-10">
+          {selectedPedido.source === 'WEB' && (
+             <div className="bg-pink-500 text-white text-center py-2 rounded-xl text-xs font-black tracking-widest uppercase shadow-sm">
+               [🛍️ COMPRA WEB - PREPARAR]
+             </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-[#FFF1F2] rounded-[20px] p-4 border border-[#FFE4E6] flex flex-col justify-center">
               <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">Total del Pedido</span>
@@ -6037,9 +6042,34 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           </div>
 
           <div className="clone-kit-container">
-            {/* Botón de Reseteo Maestro */}
-            <button 
-              onClick={() => {
+            {selectedPedido.source === 'WEB' ? (
+              <div className="bg-[#FFF1F2] rounded-[24px] p-5 border border-[#FFE4E6]">
+                <div className="flex items-center gap-2 mb-3">
+                  <ShoppingBag size={20} className="text-[#BE185D]" />
+                  <h3 className="font-black text-[#BE185D] uppercase tracking-widest text-[10px]">Lista de Empaque (Tienda Web)</h3>
+                </div>
+                <ul className="space-y-2 mb-4">
+                  {(selectedPedido.web_items_list || []).map((item: any, idx: number) => (
+                    <li key={idx} className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-pink-50">
+                      <span className="font-bold text-slate-700 text-sm">{item.name}</span>
+                      <span className="bg-pink-100 text-[#BE185D] px-2 py-1 rounded-lg text-xs font-black">x{item.quantity || 1}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-pink-50 shadow-sm mt-4">
+                   <span className="font-bold text-slate-700 text-[11px] uppercase tracking-wider">Bolsas físicas usadas:</span>
+                   <div className="flex items-center gap-3">
+                     <button onClick={() => setBolsaCount(Math.max(1, bolsaCount - 1))} className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold active:scale-95 transition-transform">-</button>
+                     <span className="font-black text-xl text-slate-800 w-4 text-center">{bolsaCount || 1}</span>
+                     <button onClick={() => setBolsaCount((bolsaCount || 1) + 1)} className="w-8 h-8 rounded-full bg-pink-100 text-pink-600 font-bold active:scale-95 transition-transform">+</button>
+                   </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Botón de Reseteo Maestro */}
+                <button 
+                  onClick={() => {
                 setSelectedPrenda(0);
                 setBolsaCount(0);
               }} 
@@ -6130,6 +6160,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                 </p>
               </div>
             </div>
+              </>
+            )}
           </div>
 
           {(() => {
