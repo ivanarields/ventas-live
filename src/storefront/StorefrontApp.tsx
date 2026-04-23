@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ProductGallery } from './components/ProductGallery';
 import { ProductDetail } from './components/ProductDetail';
 import { Checkout } from './components/Checkout';
 import { CartView } from './components/CartView';
+import { StoreProfile } from './components/StoreProfile';
 import { Product, productsApi } from './services/productsApi';
 
 export interface CartItem {
@@ -19,26 +20,82 @@ export function cartCount(items: CartItem[]): number {
   return items.reduce((acc, i) => acc + i.quantity, 0);
 }
 
-type View = 'welcome' | 'gallery' | 'detail' | 'checkout' | 'cart';
+type View = 'welcome' | 'gallery' | 'detail' | 'checkout' | 'cart' | 'profile';
 
 export default function StorefrontApp() {
-  const [view, setView]                     = useState<View>('welcome');
+  const [view, setViewInternal]             = useState<View>('welcome');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSize, setSelectedSize]     = useState<string>('');
   const [cart, setCart]                     = useState<CartItem[]>([]);
 
+  // Sincronización con Hash URL
+  useEffect(() => {
+    const handleHash = async () => {
+      const hash = window.location.hash.replace('#', '');
+      if (!hash) {
+        setViewInternal('welcome');
+        return;
+      }
+
+      if (hash.startsWith('producto/')) {
+        const id = hash.split('/')[1];
+        if (id) {
+          const prod = await productsApi.getProduct(id);
+          if (prod) {
+            setSelectedProduct(prod);
+            setViewInternal('detail');
+            return;
+          }
+        }
+        setViewInternal('gallery'); // fallback
+        return;
+      }
+
+      if (['gallery', 'cart', 'checkout', 'profile'].includes(hash)) {
+        setViewInternal(hash as View);
+        return;
+      }
+      
+      setViewInternal('welcome');
+    };
+
+    window.addEventListener('hashchange', handleHash);
+    handleHash(); // Ejecutar al inicio
+
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  const setView = (newView: View, productId?: string) => {
+    if (newView === 'welcome') window.location.hash = '';
+    else if (newView === 'detail' && productId) window.location.hash = `producto/${productId}`;
+    else window.location.hash = newView;
+  };
+
   const handleProductSelect = (product: Product) => {
     setSelectedProduct(product);
-    setView('detail');
+    setView('detail', product.id);
   };
 
   const handleQuickBuy = (product: Product) => {
+    const size = product.sizes?.[0] || '';
+    // Añadir al carrito con cantidad 1 antes de ir al checkout
+    setCart(prev => {
+      const exists = prev.some(i => i.product.id === product.id && i.size === size);
+      if (exists) return prev;
+      return [...prev, { product, size, quantity: 1 }];
+    });
     setSelectedProduct(product);
-    setSelectedSize(product.sizes[0] || '');
+    setSelectedSize(size);
     setView('checkout');
   };
 
   const handleBuyFromDetail = (product: Product, size: string) => {
+    // Añadir al carrito antes de ir al checkout
+    setCart(prev => {
+      const exists = prev.some(i => i.product.id === product.id && i.size === size);
+      if (exists) return prev;
+      return [...prev, { product, size, quantity: 1 }];
+    });
     setSelectedProduct(product);
     setSelectedSize(size);
     setView('checkout');
@@ -81,7 +138,12 @@ export default function StorefrontApp() {
     <div className="bg-[#fdf5f7] min-h-screen font-sans sm:py-8">
       <div className="max-w-[430px] mx-auto bg-white min-h-screen sm:min-h-[850px] shadow-2xl relative overflow-x-hidden sm:rounded-[40px]">
 
-        {view === 'welcome' && <WelcomeScreen onEnter={() => setView('gallery')} />}
+        {view === 'welcome' && (
+          <WelcomeScreen 
+            onEnter={() => setView('gallery')} 
+            onOpenProfile={() => setView('profile')} 
+          />
+        )}
 
         {view === 'gallery' && (
           <ProductGallery
@@ -90,6 +152,7 @@ export default function StorefrontApp() {
             onBack={() => setView('welcome')}
             onAddToCart={addToCart}
             onOpenCart={() => setView('cart')}
+            onOpenProfile={() => setView('profile')}
             cartCount={cartCount(cart)}
           />
         )}
@@ -123,23 +186,36 @@ export default function StorefrontApp() {
             }}
           />
         )}
+        {view === 'profile' && (
+          <StoreProfile
+            onBack={() => setView('gallery')}
+            onLogout={() => setView('welcome')}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-function WelcomeScreen({ onEnter }: { onEnter: () => void }) {
+function WelcomeScreen({ onEnter, onOpenProfile }: { onEnter: () => void, onOpenProfile: () => void }) {
   const mainCategories = ['Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos'];
 
-  // 🚀 Pre-carga silenciosa: mientras el usuario lee la pantalla de bienvenida,
-  // los productos ya se descargan. Al hacer clic en "Ver catálogo" llegan al instante.
-  React.useEffect(() => {
-    productsApi.prefetch();
-  }, []);
+  // La carga inicial ahora se hace bajo demanda (paginada) en el componente ProductGallery
+  // por lo que no necesitamos prefetch masivo.
 
   return (
     <div className="flex flex-col min-h-screen relative overflow-hidden bg-white">
       
+      {/* Botón de Perfil */}
+      <button 
+        onClick={onOpenProfile}
+        className="absolute top-6 right-6 z-30 p-2.5 bg-white/30 backdrop-blur-md rounded-full shadow-sm hover:scale-105 active:scale-95 transition-all text-white border border-white/50"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+      </button>
       {/* Fondo rosado original — sin fotos de collage que consuman recursos */}
       <div className="absolute inset-0 bg-gradient-to-b from-[#fff0f5] via-white to-white z-0" />
       <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-[#ff2d78]/8 blur-3xl z-0" />

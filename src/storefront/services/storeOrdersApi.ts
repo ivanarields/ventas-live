@@ -1,3 +1,5 @@
+import { supabase } from '../../lib/supabase';
+
 export interface StoreOrderItem {
   productId: string;
   productName: string;
@@ -22,12 +24,21 @@ export interface StoreOrder extends CreateStoreOrderPayload {
 
 export const storeOrdersApi = {
   create: async (payload: CreateStoreOrderPayload): Promise<StoreOrder> => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     const res = await fetch('/api/store-orders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('Error registrando pedido');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Error ${res.status} registrando pedido`);
+    }
     return res.json();
   },
 

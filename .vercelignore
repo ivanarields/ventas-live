@@ -1,0 +1,18 @@
+.wwebjs_auth/
+.wwebjs_cache/
+node_modules/
+*.log
+check-railway.mjs
+check-media.mjs
+cleanup-railway.mjs
+create-main-service.mjs
+deploy-railway.mjs
+fix-rls.mjs
+get-workspace.mjs
+migrate-panel.mjs
+reset-panel.mjs
+test-resumen.mjs
+vercel-deploy.mjs
+bridge.zip
+railway.toml
+Faces panel de pedido/

@@ -20,6 +20,11 @@ const INGEST_DEVICE_SECRET = Deno.env.get('INGEST_DEVICE_SECRET')!;
 const INGEST_USER_ID       = Deno.env.get('INGEST_USER_ID')!;
 const GEMINI_API_KEY       = Deno.env.get('GEMINI_API_KEY') ?? '';
 
+// ── Tienda Online — reenvío al motor de cuadrangulación ──────────────────────
+// URL del cliente de la tienda (Supabase de TiendaOnline)
+const STORE_SUPABASE_URL = Deno.env.get('STORE_SUPABASE_URL') ?? '';
+const STORE_SERVICE_KEY  = Deno.env.get('STORE_SERVICE_ROLE_KEY') ?? '';
+
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const AUTHORIZED_DEVICES: string[]  = ['android-caja-01'];
@@ -497,6 +502,82 @@ Deno.serve(async (req) => {
           const sourceForLearning = payload.big_text || payload.text || '';
           await learnPattern(payload.app_package, sourceForLearning, payerNameRaw);
         }
+
+        // ── REENVÍO A TIENDA ONLINE (Opción C — Híbrida Inteligente) ────────
+        // Si hay una tienda configurada, cruzamos el pago con pedidos pendientes
+        if (STORE_SUPABASE_URL && STORE_SERVICE_KEY && amount) {
+          try {
+            const storeClient = createClient(STORE_SUPABASE_URL, STORE_SERVICE_KEY);
+            const windowStart = new Date(Date.now() - 2 * 60 * 1000).toISOString(); // 2 min
+
+            // Buscar TODOS los pedidos pendientes con ese monto en los últimos 2 min
+            const { data: candidates } = await storeClient
+              .from('store_orders')
+              .select('id, total, customer_wa, items')
+              .eq('status', 'pending')
+              .eq('total', amount)
+              .gt('created_at', windowStart)
+              .order('created_at', { ascending: false });
+
+            let matched: (typeof candidates extends (infer T)[] | null ? T : never) | null = null;
+            let confidence = 'none';
+
+            if (candidates && candidates.length === 1) {
+              // MONTO ÚNICO → verificación automática (confianza ALTA)
+              matched = candidates[0];
+              confidence = 'alta';
+            } else if (candidates && candidates.length > 1) {
+              // MÚLTIPLES candidatos → NO verificar automáticamente
+              // Esperar WA con código o verificación manual del admin
+              console.log(`[tienda-store] ⚠️ ${candidates.length} pedidos de ${amount} Bs — esperando WA/manual`);
+            }
+
+            if (matched) {
+              // Confirmar el pedido en la tienda
+              const { data: updatedOrder } = await storeClient
+                .from('store_orders')
+                .update({
+                  status: 'paid',
+                  payment_verified_at: new Date().toISOString(),
+                  payment_method: 'qr',
+                  payment_ref: `chehi:${rawHash}:${confidence}`,
+                })
+                .eq('id', matched.id)
+                .eq('status', 'pending')
+                .select()
+                .single();
+
+              if (updatedOrder) {
+                // Ocultar productos vendidos automáticamente
+                const productIds = (updatedOrder.items ?? [])
+                  .map((i: { productId: unknown }) => i.productId)
+                  .filter(Boolean);
+                if (productIds.length > 0) {
+                  await storeClient.from('products').update({ available: false }).in('id', productIds);
+                }
+
+                // Guardar el evento de pago en la tienda
+                await storeClient.from('payment_events').insert({
+                  source: 'chehi_ingest',
+                  raw_text: candidateText.slice(0, 300),
+                  amount,
+                  sender_name: payerNameRaw,
+                  sender_wa: '',
+                  processed: true,
+                  match_confidence: confidence,
+                  hash: rawHash,
+                  matched_order_id: matched.id,
+                });
+
+                console.log(`[tienda-store] ✅ Pedido #${matched.id} verificado (${confidence}). Monto: ${amount} Bs`);
+              }
+            }
+          } catch (storeErr) {
+            // El error de la tienda NO debe bloquear el flujo de ChehiApp
+            console.error('[tienda-store] Error en reenvío a tienda:', storeErr);
+          }
+        }
+        // ── FIN REENVÍO A TIENDA ONLINE ───────────────────────────────────────
       }
     }
 

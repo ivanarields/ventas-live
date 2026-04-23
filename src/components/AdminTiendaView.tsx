@@ -7,13 +7,59 @@ import {
 
 const MAX_PHOTOS = 3;
 
-function readAsBase64(file: File): Promise<string> {
+// 🚀 Función para comprimir imagen usando Canvas antes de subirla
+async function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target!.result as string);
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        // Reducimos al maximo de 800px para web
+        const MAX_SIZE = 800;
+        if (width > height && width > MAX_SIZE) {
+          height *= MAX_SIZE / width;
+          width = MAX_SIZE;
+        } else if (height > MAX_SIZE) {
+          width *= MAX_SIZE / height;
+          height = MAX_SIZE;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject('No canvas context');
+        ctx.drawImage(img, 0, 0, width, height);
+        // Calidad 80% en formato WEBP, retornamos el string en base64 comprimido
+        resolve(canvas.toDataURL('image/webp', 0.8));
+      };
+      img.onerror = reject;
+      img.src = e.target?.result as string;
+    };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// 🚀 Sube la imagen comprimida vía el backend seguro para evadir políticas RLS restrictivas
+async function uploadToStorage(base64Data: string, originalName: string): Promise<string> {
+  const ext = 'webp';
+  const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+  
+  const res = await fetch('/api/upload-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64Data, fileName, contentType: 'image/webp' })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Error al subir la imagen al servidor');
+  }
+
+  const { publicUrl } = await res.json();
+  return publicUrl;
 }
 
 interface StoreProduct {
@@ -34,10 +80,13 @@ interface StoreOrder {
   items: Array<{ productId: string; productName: string; price: number; size: string; quantity: number }>;
   total: number;
   customer_name: string;
-  customer_phone: string;
-  status: 'pending' | 'confirmed' | 'cancelled';
+  customer_wa: string;
+  status: 'pending' | 'paid' | 'ready' | 'delivered' | 'cancelled';
+  payment_verified_at: string | null;
+  payment_method: string | null;
   wa_sent: boolean;
   created_at: string;
+  expires_at: string | null;
 }
 
 const CATEGORIAS = ['General', 'Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos', 'Accesorios', 'Pantalones', 'Faldas'];
@@ -75,25 +124,100 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [urlInput, setUrlInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [compressing, setCompressing] = useState(false);
+  const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [aiError, setAiError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
+  const [orderFilter, setOrderFilter] = useState<'all' | 'pending' | 'paid' | 'cancelled'>('all');
+  const [verifyingId, setVerifyingId] = useState<number | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-refresco de pedidos cada 15 segundos cuando se está en la pestaña
+  useEffect(() => {
+    if (subTab !== 'pedidos') return;
+    const interval = setInterval(() => loadOrders(), 15000);
+    return () => clearInterval(interval);
+  }, [subTab]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     const toProcess = files.slice(0, MAX_PHOTOS - form.images.length);
     setCompressing(true);
+    setSaveError('');
     try {
-      const encoded = await Promise.all(toProcess.map(readAsBase64));
-      setForm(f => ({ ...f, images: [...f.images, ...encoded] }));
-    } catch {
-      setSaveError('Error al leer una imagen. Intenta con otra.');
+      // Comprimir y subir en paralelo (vía backend)
+      const urls = await Promise.all(toProcess.map(async (file) => {
+        const compressedBase64 = await compressImage(file);
+        return await uploadToStorage(compressedBase64, file.name);
+      }));
+      setForm(f => ({ ...f, images: [...f.images, ...urls] }));
+    } catch (err: any) {
+      setSaveError('Error al subir imagen. Revisa tu conexión.');
+      console.error(err);
     } finally {
       setCompressing(false);
       e.target.value = '';
     }
+  };
+
+  const handleAiFill = async () => {
+    if (form.images.length === 0) return;
+    setAiStatus('loading');
+    setAiError('');
+
+    try {
+      const res = await fetch('/api/ai/product-from-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ imageUrls: form.images }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json.ok) {
+        setAiError(json.error || 'No se pudo analizar las imágenes.');
+        setAiStatus('error');
+        return;
+      }
+
+      const ai = json.data;
+
+      // Mapear categoría contra las opciones disponibles
+      const catMatch = CATEGORIAS.includes(ai.categoria) ? ai.categoria : 'General';
+
+      // Mapear tallas: solo las que coincidan con las opciones disponibles
+      const tallasValidas = (ai.tallas as string[]).filter(
+        (t: string) => TALLAS_COMUNES.includes(t.toUpperCase()) || t.length <= 5
+      );
+
+      setForm(f => ({
+        ...f,
+        name: ai.nombre || f.name,
+        description: ai.descripcion || f.description,
+        category: catMatch,
+        sizes: tallasValidas.length > 0 ? tallasValidas : f.sizes,
+      }));
+
+      setAiStatus('success');
+      // Resetear el badge de éxito después de 6 segundos
+      setTimeout(() => setAiStatus('idle'), 6000);
+
+    } catch (err: any) {
+      console.error('[AI fill]', err);
+      setAiError('Error de conexión. Intenta de nuevo.');
+      setAiStatus('error');
+    }
+  };
+
+  const loadOrders = async (silent = true) => {
+    if (!silent) setLoading(true);
+    try {
+      const oRes = await fetch('/api/store-orders/admin', { headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` } });
+      if (oRes.ok) setOrders(await oRes.json());
+    } catch (e) { console.error('Error cargando pedidos:', e); }
+    finally { if (!silent) setLoading(false); }
   };
 
   const loadAll = async () => {
@@ -101,9 +225,12 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     try {
       const [pRes, oRes] = await Promise.all([
         fetch('/api/products?admin=true', { headers: { 'x-user-id': userId } }),
-        fetch('/api/store-orders', { headers: { Authorization: `Bearer ${authToken}` } }),
+        fetch('/api/store-orders/admin', { headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` } }),
       ]);
-      if (pRes.ok) setProducts(await pRes.json());
+      if (pRes.ok) {
+        const json = await pRes.json();
+        setProducts(Array.isArray(json) ? json : json.data || []);
+      }
       if (oRes.ok) setOrders(await oRes.json());
     } catch (e) {
       console.error('Error cargando tienda:', e);
@@ -112,12 +239,27 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     }
   };
 
+  const verifyOrderManual = async (orderId: number) => {
+    setVerifyingId(orderId);
+    try {
+      const res = await fetch(`/api/store/verify-order/${orderId}`, {
+        method: 'POST',
+        headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` }
+      });
+      if (res.ok) await loadOrders(true);
+      else { const e = await res.json(); alert(e.error || 'Error al verificar'); }
+    } catch (e) { console.error(e); }
+    finally { setVerifyingId(null); }
+  };
+
   useEffect(() => { loadAll(); }, []);
 
   const openNew = () => {
     setForm({ ...EMPTY_FORM });
     setEditingId(null);
     setSaveError('');
+    setAiStatus('idle');
+    setAiError('');
     setUrlInput('');
     setTalla('');
     setShowForm(true);
@@ -189,6 +331,8 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       setShowForm(false);
       setEditingId(null);
       setForm({ ...EMPTY_FORM });
+      setAiStatus('idle');
+      setAiError('');
       await loadAll();
     } catch (err: any) {
       setSaveError(err.message ?? 'Error al guardar');
@@ -303,204 +447,86 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 </div>
               )}
 
-              {/* Nombre */}
-              <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">Nombre *</label>
-                <input
-                  type="text"
-                  placeholder="Ej. Blusa floral manga larga"
-                  className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-400"
-                  value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                />
-              </div>
-
-              {/* Precio + Categoría */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">Precio *</label>
-                  <div className="relative mt-1">
-                    <input
-                      type="number"
-                      placeholder="0"
-                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 pr-9 text-sm font-medium outline-none focus:border-pink-400"
-                      value={form.price}
-                      onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-gray-400">Bs</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">Categoría</label>
-                  <select
-                    className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-400 bg-white"
-                    value={form.category}
-                    onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                  >
-                    {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Descripción */}
-              <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">Descripción</label>
-                <textarea
-                  placeholder="Describe el producto..."
-                  rows={2}
-                  className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-400 resize-none"
-                  value={form.description}
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                />
-              </div>
-
-              {/* Tallas */}
-              <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">Tallas</label>
-                <div className="flex flex-wrap gap-1.5 mt-1 mb-2">
-                  {TALLAS_COMUNES.map(t => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => form.sizes.includes(t) ? removeTalla(t) : addTalla(t)}
-                      className="px-2.5 py-1 rounded-full text-[11px] font-black transition-all"
-                      style={form.sizes.includes(t)
-                        ? { background: BRAND, color: 'white' }
-                        : { background: '#f5f5f5', color: '#888' }}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Talla personalizada + Enter"
-                    className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium outline-none focus:border-pink-400"
-                    value={talla}
-                    onChange={e => setTalla(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTalla(talla); } }}
-                  />
-                  <button type="button" onClick={() => addTalla(talla)}
-                    className="px-3 py-2 rounded-xl font-black text-white text-sm flex-shrink-0"
-                    style={{ background: BRAND }}
-                  >+</button>
-                </div>
-                {form.sizes.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {form.sizes.map(s => (
-                      <span key={s} className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black text-white" style={{ background: BRAND }}>
-                        {s}
-                        <button type="button" onClick={() => removeTalla(s)} className="opacity-70 hover:opacity-100">
-                          <X size={10} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Fotos */}
-              <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider ml-1">
-                  Fotos ({form.images.length}/{MAX_PHOTOS}) · se comprimen automáticamente
+              {/* 1. Fotos y Botón IA */}
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 space-y-3">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-wider">
+                  1. Sube fotos ({form.images.length}/{MAX_PHOTOS})
                 </label>
-
-                {/* Miniaturas + botón subir */}
-                <div className="flex gap-2 flex-wrap mt-2">
+                
+                <div className="flex gap-2 flex-wrap">
                   {form.images.map((img, idx) => (
-                    <div key={idx} className="relative">
-                      <img
-                        src={img}
-                        alt=""
-                        className="w-20 h-20 rounded-xl object-cover border-2"
-                        style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}
-                      />
-                      {idx === 0 && (
-                        <span className="absolute top-1 left-1 text-[8px] font-black bg-white/80 rounded px-1" style={{ color: BRAND }}>
-                          principal
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removeImage(idx)}
-                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow"
-                      >
-                        <X size={10} />
+                    <div key={idx} className="relative w-16 h-16 rounded-xl overflow-hidden border-2" style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}>
+                      <img src={img} alt="" className="w-full h-full object-cover" />
+                      <button type="button" onClick={() => removeImage(idx)} className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center shadow">
+                        <X size={8} />
                       </button>
                     </div>
                   ))}
 
                   {form.images.length < MAX_PHOTOS && (
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={compressing}
-                      className="w-20 h-20 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50"
-                      style={{ borderColor: BRAND, background: '#fff0f5' }}
-                    >
-                      {compressing ? (
-                        <Loader2 size={20} className="animate-spin" style={{ color: BRAND }} />
-                      ) : (
-                        <>
-                          <Camera size={20} style={{ color: BRAND }} />
-                          <span className="text-[9px] font-black" style={{ color: BRAND }}>
-                            {form.images.length === 0 ? 'Agregar foto' : 'Otra foto'}
-                          </span>
-                        </>
-                      )}
+                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={compressing} className="w-16 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50" style={{ borderColor: BRAND, background: 'white' }}>
+                      {compressing ? <Loader2 size={16} className="animate-spin" style={{ color: BRAND }} /> : <Camera size={16} style={{ color: BRAND }} />}
                     </button>
                   )}
                 </div>
 
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
+                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
 
-                  className="hidden"
-                  onChange={handleFileSelect}
-                />
+                {/* Botón IA */}
+                <button
+                  type="button"
+                  onClick={handleAiFill}
+                  disabled={form.images.length === 0 || aiStatus === 'loading' || compressing}
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl font-black text-[13px] transition-all disabled:opacity-50"
+                  style={form.images.length === 0 || aiStatus === 'loading'
+                    ? { background: '#e5e7eb', color: '#9ca3af' }
+                    : { background: 'linear-gradient(135deg, #a855f7, #ec4899)', color: 'white', boxShadow: '0 2px 8px rgba(168,85,247,0.3)' }
+                  }
+                >
+                  {aiStatus === 'loading' ? <><Loader2 size={14} className="animate-spin" /> Analizando...</> : <><span>✨</span> 2. Rellenar con IA</>}
+                </button>
+                {aiStatus === 'success' && <p className="text-[10px] font-bold text-green-600 text-center">¡Listo! Revisa los datos abajo ↓</p>}
+                {aiStatus === 'error' && <p className="text-[10px] font-bold text-red-500 text-center">{aiError}</p>}
+              </div>
 
-                {/* También por URL */}
-                <div className="flex gap-2 mt-2">
-                  <input
-                    type="text"
-                    placeholder="O pegar URL de imagen..."
-                    className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400"
-                    value={urlInput}
-                    onChange={e => setUrlInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addImageUrl(); } }}
-                  />
-                  <button
-                    type="button"
-                    onClick={addImageUrl}
-                    disabled={!urlInput.trim() || form.images.length >= MAX_PHOTOS}
-                    className="px-3 py-2 rounded-xl font-black text-white text-sm disabled:opacity-40"
-                    style={{ background: BRAND }}
-                  >+</button>
+              {/* 2. Datos del Producto */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Nombre *</label>
+                  <input type="text" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[13px] font-medium outline-none focus:border-pink-400" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Precio (Bs)*</label>
+                  <input type="number" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[13px] font-medium outline-none focus:border-pink-400" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
                 </div>
               </div>
 
-              {/* Toggle disponible */}
-              <button
-                type="button"
-                onClick={() => setForm(f => ({ ...f, available: !f.available }))}
-                className="flex items-center gap-2.5"
-              >
-                <div
-                  className="w-10 h-5 rounded-full transition-all flex items-center px-0.5"
-                  style={{ background: form.available ? BRAND : '#e5e7eb' }}
-                >
-                  <div
-                    className="w-4 h-4 rounded-full bg-white shadow-sm transition-all"
-                    style={{ transform: form.available ? 'translateX(20px)' : 'translateX(0)' }}
-                  />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Categoría</label>
+                  <select className="w-full mt-1 rounded-lg border border-gray-200 px-2 py-1.5 text-[12px] font-medium outline-none bg-white" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+                    {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
+                  </select>
                 </div>
-                <span className="text-sm font-bold text-gray-700">
-                  {form.available ? '✓ Disponible en tienda' : '✗ Oculto (no disponible)'}
-                </span>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Tallas</label>
+                  <div className="mt-1 flex items-center">
+                    <input type="text" placeholder="Ej: S, M" className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-[12px] font-medium outline-none" value={form.sizes.join(', ')} onChange={e => setForm(f => ({ ...f, sizes: e.target.value.split(',').map(s=>s.trim()).filter(Boolean) }))} />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase">Descripción</label>
+                <textarea rows={2} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] font-medium outline-none resize-none" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+              </div>
+
+              {/* Toggle disponible */}
+              <button type="button" onClick={() => setForm(f => ({ ...f, available: !f.available }))} className="flex items-center gap-2">
+                <div className="w-8 h-4 rounded-full transition-all flex items-center px-0.5" style={{ background: form.available ? BRAND : '#e5e7eb' }}>
+                  <div className="w-3 h-3 rounded-full bg-white shadow-sm transition-all" style={{ transform: form.available ? 'translateX(16px)' : 'translateX(0)' }} />
+                </div>
+                <span className="text-[12px] font-bold text-gray-600">{form.available ? 'Visible en tienda' : 'Oculto'}</span>
               </button>
 
               {/* Botón guardar */}
@@ -546,12 +572,20 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-1 mb-0.5">
                       <p className="font-black text-sm text-gray-900 leading-tight flex-1 truncate">{p.name}</p>
-                      <span
-                        className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
-                        style={{ background: p.available ? '#10b981' : '#9ca3af' }}
-                      >
-                        {p.available ? 'Activo' : 'Oculto'}
-                      </span>
+                      {(() => {
+                        const isReserved = orders.some(o => o.status === 'pending' && o.items.some(i => String(i.productId) === String(p.id)));
+                        if (isReserved) {
+                          return <span className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white bg-blue-500">Reservado</span>;
+                        }
+                        return (
+                          <span
+                            className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
+                            style={{ background: p.available ? '#10b981' : '#9ca3af' }}
+                          >
+                            {p.available ? 'Activo' : 'Oculto'}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span
@@ -582,6 +616,25 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                     >
                       <Edit2 size={13} />
                     </button>
+                    {/* Toggle disponibilidad: un toque oculta/muestra en tienda */}
+                    <button
+                      title={p.available ? 'Ocultar de la tienda' : 'Mostrar en la tienda'}
+                      onClick={async () => {
+                        await fetch(`/api/products/${p.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+                          body: JSON.stringify({ available: !p.available })
+                        });
+                        setProducts(ps => ps.map(x => x.id === p.id ? { ...x, available: !x.available } : x));
+                      }}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
+                      style={{ background: p.available ? '#dcfce7' : '#f3f4f6', color: p.available ? '#16a34a' : '#9ca3af' }}
+                    >
+                      {p.available
+                        ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                      }
+                    </button>
                     <button
                       onClick={() => handleDelete(p.id, p.name)}
                       className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors"
@@ -598,10 +651,37 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
 
       {/* ─── PEDIDOS ─── */}
       {subTab === 'pedidos' && (
-        <div className="space-y-2">
-          <button onClick={loadAll} className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-gray-100 text-gray-600 text-sm font-bold">
-            <RefreshCw size={14} /> Actualizar pedidos
-          </button>
+        <div className="space-y-3">
+
+          {/* Stats rápidas */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: 'Hoy', value: orders.filter(o => new Date(o.created_at).toDateString() === new Date().toDateString()).length, color: '#6366f1' },
+              { label: 'Pendientes', value: orders.filter(o => o.status === 'pending').length, color: '#f59e0b' },
+              { label: 'Verificados', value: orders.filter(o => o.status === 'paid' || o.status === 'delivered').length, color: '#10b981' },
+            ].map(s => (
+              <div key={s.label} className="bg-white rounded-2xl p-3 text-center border border-gray-100">
+                <p className="text-[22px] font-black" style={{ color: s.color }}>{s.value}</p>
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Filtro + refresh */}
+          <div className="flex gap-2">
+            <div className="flex bg-gray-100 rounded-xl p-0.5 flex-1">
+              {(['all', 'pending', 'paid', 'cancelled'] as const).map(f => (
+                <button key={f} onClick={() => setOrderFilter(f)}
+                  className="flex-1 py-1.5 rounded-lg text-[10px] font-black transition-all"
+                  style={orderFilter === f ? { background: 'white', color: BRAND, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' } : { color: '#9ca3af' }}>
+                  {f === 'all' ? 'Todos' : f === 'pending' ? 'Pend.' : f === 'paid' ? 'Pagados' : 'Canc.'}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => loadOrders(false)} className="w-10 h-10 flex items-center justify-center rounded-xl bg-gray-100 text-gray-600">
+              <RefreshCw size={14} />
+            </button>
+          </div>
 
           {loading ? (
             <div className="space-y-2">
@@ -613,93 +693,112 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               <p className="font-black text-sm">Sin pedidos aún</p>
               <p className="text-xs mt-1">Aparecerán cuando lleguen desde la tienda</p>
             </div>
-          ) : (
-            orders.map(order => {
-              const statusConfig = {
-                pending:   { label: 'Pendiente',  bg: '#fef3c7', text: '#92400e', dot: '#f59e0b' },
-                confirmed: { label: 'Confirmado', bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
-                cancelled: { label: 'Cancelado',  bg: '#f3f4f6', text: '#6b7280', dot: '#9ca3af' },
-              };
-              const cfg = statusConfig[order.status];
+          ) : (() => {
+            const STATUS_CFG = {
+              pending:   { label: 'Esperando pago', bg: '#e0f2fe', text: '#0369a1', dot: '#0ea5e9' },
+              paid:      { label: '✅ Pago Verificado', bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
+              ready:     { label: '📦 Listo para entrega', bg: '#ede9fe', text: '#6d28d9', dot: '#8b5cf6' },
+              delivered: { label: '🎉 Entregado', bg: '#f0fdf4', text: '#166534', dot: '#22c55e' },
+              cancelled: { label: 'Cancelado', bg: '#f3f4f6', text: '#6b7280', dot: '#9ca3af' },
+            };
+            const filtered = orderFilter === 'all' ? orders
+              : orders.filter(o => orderFilter === 'paid' ? (o.status === 'paid' || o.status === 'ready' || o.status === 'delivered') : o.status === orderFilter);
+
+            return filtered.map(order => {
+              const cfg = STATUS_CFG[order.status] ?? STATUS_CFG.pending;
               const isExpanded = expandedOrder === order.id;
+              const isExpired = order.expires_at && new Date(order.expires_at) < new Date() && order.status === 'pending';
 
               return (
                 <div key={order.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                  <button
-                    onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
-                    className="w-full p-3 flex items-start gap-3 text-left"
-                  >
-                    <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ background: cfg.dot }} />
+                  <button onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
+                    className="w-full p-3 flex items-start gap-3 text-left">
+                    <div className="w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: cfg.dot }} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                        <p className="text-sm font-black text-gray-800">Pedido #{order.id}</p>
+                      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                        <p className="text-sm font-black text-gray-800">#{order.id}</p>
                         <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: cfg.bg, color: cfg.text }}>
                           {cfg.label}
                         </span>
-                        {order.wa_sent && (
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-50 text-green-600 flex items-center gap-0.5">
-                            <Send size={9} /> WA enviado
-                          </span>
-                        )}
+                        {isExpired && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-500">EXPIRADO</span>}
                       </div>
-                      <p className="text-[11px] text-gray-400 font-medium">
-                        {new Date(order.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      <p className="text-[11px] text-gray-400">
+                        {new Date(order.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        {order.customer_wa && <span className="ml-1 text-gray-500">· {order.customer_wa}</span>}
                       </p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-[13px] font-black" style={{ color: BRAND }}>{Number(order.total).toFixed(2)} Bs</p>
-                        <span className="text-[11px] text-gray-400">{order.items.length} prod.</span>
-                        {order.customer_name && <span className="text-[11px] text-gray-500">· {order.customer_name}</span>}
-                      </div>
+                      <p className="text-[14px] font-black mt-0.5" style={{ color: BRAND }}>{Number(order.total).toFixed(2)} Bs
+                        <span className="text-[10px] text-gray-400 font-medium ml-1">{order.items?.length ?? 0} prenda{(order.items?.length ?? 0) !== 1 ? 's' : ''}</span>
+                      </p>
+                      {order.payment_verified_at && (
+                        <p className="text-[10px] text-green-600 font-bold mt-0.5">
+                          ✓ Verificado {new Date(order.payment_verified_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
                     </div>
                     {isExpanded ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
                   </button>
 
                   {isExpanded && (
-                    <div className="px-3 pb-3 border-t border-gray-50 pt-2 space-y-3">
-                      <div className="space-y-1">
-                        {order.items.map((item, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-[12px]">
-                            <span className="text-gray-700 flex-1 truncate">
-                              {item.productName}
-                              {item.size && <span className="text-gray-400"> · {item.size}</span>}
-                              <span className="text-gray-400"> ×{item.quantity}</span>
-                            </span>
-                            <span className="font-black text-gray-800 ml-2 flex-shrink-0">
-                              {(item.price * item.quantity).toFixed(2)} Bs
-                            </span>
+                    <div className="px-3 pb-3 border-t border-gray-50 pt-2 space-y-2">
+                      {/* Detalle de items */}
+                      <div className="bg-gray-50 rounded-xl p-2 space-y-1">
+                        {(order.items ?? []).map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-[11px]">
+                            <span className="text-gray-700 truncate flex-1">{item.productName}{item.size && ` (${item.size})`} ×{item.quantity}</span>
+                            <span className="font-black text-gray-800 ml-2">{(item.price * item.quantity).toFixed(2)} Bs</span>
                           </div>
                         ))}
+                        <div className="border-t border-gray-200 pt-1 flex justify-between">
+                          <span className="text-[10px] font-black text-gray-400 uppercase">Total</span>
+                          <span className="text-[13px] font-black" style={{ color: BRAND }}>{Number(order.total).toFixed(2)} Bs</span>
+                        </div>
                       </div>
+
+                      {/* Acciones según estado */}
                       {order.status === 'pending' && (
-                        <div className="flex gap-2">
-                          <button onClick={() => updateOrder(order.id, { status: 'confirmed' })}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[12px] bg-green-50 text-green-700">
-                            <Check size={13} /> Confirmar
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            onClick={() => verifyOrderManual(order.id)}
+                            disabled={verifyingId === order.id}
+                            className="col-span-2 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[12px] text-white shadow-md disabled:opacity-60"
+                            style={{ background: '#10b981' }}>
+                            {verifyingId === order.id ? '...' : '✅ Verificar Pago Manualmente'}
+                          </button>
+                          <button onClick={() => updateOrder(order.id, { status: 'confirmed', hideProducts: true })}
+                            className="flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] text-white" style={{ background: BRAND }}>
+                            <Check size={12} /> Vendido + Ocultar
                           </button>
                           <button onClick={() => updateOrder(order.id, { status: 'cancelled' })}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[12px] bg-red-50 text-red-600">
-                            <X size={13} /> Cancelar
+                            className="flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] bg-red-50 text-red-600">
+                            <X size={12} /> Cancelar
                           </button>
-                          {!order.wa_sent && (
-                            <button onClick={() => updateOrder(order.id, { wa_sent: true })}
-                              className="px-3 py-2 rounded-xl font-black text-[12px] bg-green-50 text-green-700">
-                              <Send size={13} />
-                            </button>
-                          )}
                         </div>
                       )}
-                      {order.status === 'confirmed' && (
-                        <button onClick={() => updateOrder(order.id, { status: 'cancelled' })}
-                          className="w-full py-2 rounded-xl font-black text-[12px] bg-red-50 text-red-600">
-                          Cancelar pedido
+                      {order.status === 'paid' && (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button onClick={() => updateOrder(order.id, { status: 'ready' })}
+                            className="flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] text-white" style={{ background: '#8b5cf6' }}>
+                            📦 Marcar Listo
+                          </button>
+                          <button
+                            onClick={() => { const msg = encodeURIComponent(`Hola! Tu pedido #${order.id} está listo para entrega 🎉`); window.open(`https://wa.me/591${order.customer_wa}?text=${msg}`, '_blank'); }}
+                            className="flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] text-white" style={{ background: '#25D366' }}>
+                            <Send size={11} /> Avisar WA
+                          </button>
+                        </div>
+                      )}
+                      {order.status === 'ready' && (
+                        <button onClick={() => updateOrder(order.id, { status: 'delivered' })}
+                          className="w-full py-2 rounded-xl font-black text-[12px] text-white" style={{ background: '#22c55e' }}>
+                          🎉 Marcar Entregado
                         </button>
                       )}
                     </div>
                   )}
                 </div>
               );
-            })
-          )}
+            });
+          })()}
         </div>
       )}
     </div>

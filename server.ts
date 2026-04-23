@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { supabaseServer } from "./src/lib/supabaseServer.js";
+import { supabaseStore } from "./src/lib/supabaseStore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,7 +43,8 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3001;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // ==========================================================================
   // SISTEMA DE ETIQUETAS (Supabase)
@@ -191,6 +193,52 @@ async function startServer() {
       if (error) throw error;
       res.json({ history: data ?? [] });
     } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  // Leer configuración global de casilleros
+  app.get("/api/storage/config", async (_req, res) => {
+    try {
+      const { data, error } = await supabaseServer
+        .from("app_config")
+        .select("value")
+        .eq("key", "numeric_container_capacity")
+        .single();
+      if (error) throw error;
+      res.json({ numeric_capacity: Number(data?.value ?? 4) });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  // Actualizar capacidad global de casilleros numéricos
+  // Aplica a TODOS los casilleros NUMERIC_SHARED existentes y guarda el valor
+  // para que los futuros también lo hereden.
+  app.patch("/api/storage/config/numeric-capacity", async (req, res) => {
+    try {
+      const { capacity } = req.body;
+      const cap = Number(capacity);
+      if (!cap || cap < 1 || cap > 999) {
+        return res.status(400).json({ error: "Capacidad debe ser un número entre 1 y 999" });
+      }
+
+      // 1. Guardar en tabla de configuración global
+      await supabaseServer
+        .from("app_config")
+        .upsert({ key: "numeric_container_capacity", value: String(cap), updated_at: new Date() });
+
+      // 2. Aplicar a TODOS los casilleros numéricos existentes de una sola vez
+      const { error: updateErr } = await supabaseServer
+        .from("storage_containers")
+        .update({ max_simple_orders: cap, max_bags_capacity: cap })
+        .eq("container_type", "NUMERIC_SHARED");
+
+      if (updateErr) throw updateErr;
+
+      res.json({ success: true, numeric_capacity: cap });
+    } catch (err: any) {
+      console.error("[/api/storage/config/numeric-capacity] error:", err);
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
   });
@@ -622,16 +670,342 @@ async function startServer() {
 
   // ==========================================================================
   // PRODUCTS (TIENDA)
+  
+  // ==========================================================================
+  // STORE AUTH — Registro y Login con Número + PIN
+  // El cliente solo ve: número de WhatsApp + PIN de 4 dígitos.
+  // En segundo plano creamos: phone@tiendaleydi.com / pin-XXXX en Supabase Auth.
+  // ==========================================================================
+
+  app.post("/api/store-auth/register", async (req, res) => {
+    try {
+      const { phone, pin, name } = req.body;
+      if (!phone || !pin) return res.status(400).json({ error: "Faltan datos" });
+      if (String(pin).length !== 4) return res.status(400).json({ error: "El PIN debe tener 4 dígitos" });
+
+      const cleanPhone = phone.trim().replace(/\D/g, ''); // Solo dígitos
+      const email = `${cleanPhone}@tiendaleydi.com`;
+      const password = `pin-${pin.trim()}`;
+
+      // Crear usuario en supabaseStore (TiendaOnline) — no en ChehiApp
+      const { data, error } = await supabaseStore.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true, // Sin verificación de email — experiencia sin fricción
+        user_metadata: { name: name || '', phone: cleanPhone }
+      });
+
+      if (error) {
+        if (error.message?.includes('already registered')) {
+          return res.status(409).json({ error: "Este número ya tiene cuenta. Ingresa tu PIN para entrar." });
+        }
+        throw error;
+      }
+
+      // También guardar en tabla store_customers
+      await supabaseStore.from('store_customers').insert({
+        whatsapp: cleanPhone,
+        pin_hash: password, // En producción usar bcrypt. Por ahora guardamos referencia.
+        display_name: name || ''
+      }).select().single();
+
+      res.json({ success: true, userId: data.user?.id });
+    } catch (err: any) {
+      console.error("[store-auth] Register error:", err);
+      res.status(500).json({ error: err?.message || "Error al crear perfil" });
+    }
+  });
+
+  app.post("/api/store-auth/login", async (req, res) => {
+    try {
+      const { phone, pin } = req.body;
+      if (!phone || !pin) return res.status(400).json({ error: "Número y PIN requeridos" });
+
+      const cleanPhone = phone.trim().replace(/\D/g, '');
+      const email = `${cleanPhone}@tiendaleydi.com`;
+      const password = `pin-${pin.trim()}`;
+
+      // Login con las credenciales "fantasma" en supabaseStore (TiendaOnline)
+      const { data, error } = await supabaseStore.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        return res.status(401).json({ error: "Número o PIN incorrecto" });
+      }
+
+      // Traer datos del cliente (pedidos anteriores)
+      const { data: customer } = await supabaseStore
+        .from('store_customers')
+        .select('id, display_name, whatsapp, total_orders, total_spent')
+        .eq('whatsapp', cleanPhone)
+        .single();
+
+      res.json({
+        success: true,
+        session: data.session,
+        user: { ...data.user?.user_metadata, id: data.user?.id },
+        customer
+      });
+    } catch (err: any) {
+      console.error("[store-auth] Login error:", err);
+      res.status(500).json({ error: err?.message || "Error al iniciar sesión" });
+    }
+  });
+
+  app.get("/api/store-auth/me", async (req, res) => {
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      if (!token) return res.status(401).json({ error: "Token requerido" });
+
+      const { data, error } = await supabaseStore.auth.getUser(token);
+      if (error || !data.user) return res.status(401).json({ error: "Sesión inválida" });
+
+      const cleanPhone = data.user.email?.replace('@tiendaleydi.com', '') ?? '';
+      const { data: customer } = await supabaseStore
+        .from('store_customers')
+        .select('*')
+        .eq('whatsapp', cleanPhone)
+        .single();
+
+      const { data: orders } = await supabaseStore
+        .from('store_orders')
+        .select('id, status, total, created_at, items, payment_verified_at, expires_at, customer_wa')
+        .eq('customer_wa', cleanPhone)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      res.json({ user: data.user, customer, orders: orders ?? [] });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Error interno" });
+    }
+  });
+
+  // Upload de imágenes — usa supabaseStore (TiendaOnline)
+  app.post("/api/upload-image", async (req, res) => {
+    try {
+      const { base64Data, fileName, contentType } = req.body;
+      if (!base64Data || !fileName) return res.status(400).json({ error: "Faltan datos" });
+      
+      const base64String = base64Data.split(',')[1] || base64Data;
+      const buffer = Buffer.from(base64String, 'base64');
+      
+      // Primero intentar en TiendaOnline, con fallback a ChehiApp
+      let uploadResult = await supabaseStore.storage
+        .from('store_images')
+        .upload(fileName, buffer, { contentType: contentType || 'image/webp', upsert: true });
+
+      if (uploadResult.error) {
+        // Fallback: intentar en la base original
+        uploadResult = await supabaseServer.storage
+          .from('store_images')
+          .upload(fileName, buffer, { contentType: contentType || 'image/webp', upsert: true });
+        if (uploadResult.error) throw uploadResult.error;
+        const { data: urlData } = supabaseServer.storage.from('store_images').getPublicUrl(uploadResult.data.path);
+        return res.json({ publicUrl: urlData.publicUrl });
+      }
+
+      const { data: publicUrlData } = supabaseStore.storage
+        .from('store_images')
+        .getPublicUrl(uploadResult.data.path);
+        
+      res.json({ publicUrl: publicUrlData.publicUrl });
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      res.status(500).json({ error: err?.message || "Error al subir imagen" });
+    }
+  });
+
+  // ==========================================================================
+  // IA — Anlisis de imágenes de producto con Gemini Vision
+  // ==========================================================================
+
+  async function analyzeProductImages(imageUrls: string[]): Promise<{
+    nombre: string;
+    descripcion: string;
+    categoria: string;
+    marca: string;
+    tipoPrenda: string;
+    colorPrincipal: string;
+    tallas: string[];
+    confianza: 'alta' | 'media' | 'baja';
+  } | null> {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) return null;
+    if (!imageUrls || imageUrls.length === 0) return null;
+
+    // Descargar imágenes y convertir a base64 para enviarlas a Gemini
+    const imageParts: { inlineData: { mimeType: string; data: string } }[] = [];
+    for (const url of imageUrls.slice(0, 3)) {
+      try {
+        const imgRes = await fetch(url);
+        if (!imgRes.ok) continue;
+        const arrayBuffer = await imgRes.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
+        const contentType = imgRes.headers.get('content-type') || 'image/webp';
+        imageParts.push({ inlineData: { mimeType: contentType, data: base64 } });
+      } catch (e) {
+        console.warn('[ai-vision] No se pudo descargar imagen:', url, e);
+      }
+    }
+
+    if (imageParts.length === 0) return null;
+
+    const CATEGORIAS_VALIDAS = ['Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos', 'Pantalones', 'Faldas', 'Accesorios', 'General'];
+    const TALLAS_VALIDAS = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '34', '36', '38', '40', '42', 'Único'];
+
+    const prompt = `Eres un experto catalogando ropa de segunda mano.
+Analizarás 1 a 3 imágenes de una prenda (foto completa, etiqueta, o textura).
+Devuelve ÚNICAMENTE un JSON válido sin texto extra ni markdown:
+{
+  "nombre": "MÁXIMO 2 o 3 PALABRAS. Solo el tipo de prenda (Ej: 'Blusa manga corta', 'Jean skinny', 'Vestido floral'). PROHIBIDO incluir la marca aquí.",
+  "descripcion": "Máximo 2 líneas breves. Si se ve la MARCA en la etiqueta, ponla aquí al principio. Describe material y estilo.",
+  "categoria": "Una de: ${CATEGORIAS_VALIDAS.join(' / ')}",
+  "marca": "Marca legible en la etiqueta. Si no → 'Genérica'",
+  "tipoPrenda": "Top / Blusa / Camisa / Vestido / Polera / Chaqueta / Pantalón / Jean / Falda / Conjunto / Shorts / Accesorio",
+  "colorPrincipal": "Color o colores principales",
+  "tallas": ["Tallas visibles. Array vacío si no hay. Valores: ${TALLAS_VALIDAS.join(', ')}"],
+  "confianza": "alta / media / baja"
+}
+Reglas críticas:
+- 'nombre' DEBE SER CORTÍSIMO (2 o 3 palabras). JAMÁS LA MARCA.
+- La marca va SOLO en 'descripcion' y 'marca'.
+- 'categoria' debe ser EXACTAMENTE una de las opciones.
+- JSON 100% válido y parseable.`;
+
+    try {
+      const body = {
+        contents: [{
+          parts: [
+            { text: prompt },
+            ...imageParts,
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 400,
+          responseMimeType: 'application/json',
+        },
+      };
+
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(20000), // 20 segundos máx
+        }
+      );
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error('[ai-vision] Gemini HTTP error:', resp.status, errText);
+        return null;
+      }
+
+      const data = await resp.json();
+      const textResp: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+
+      // Extraer JSON de la respuesta (puede venir envuelto en markdown ```json)
+      const jsonMatch = textResp.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error('[ai-vision] Gemini no devolvió JSON válido:', textResp);
+        return null;
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // Validar y sanitizar la respuesta
+      const categoriaFinal = CATEGORIAS_VALIDAS.includes(parsed.categoria) ? parsed.categoria : 'General';
+      const tallasFinal: string[] = Array.isArray(parsed.tallas)
+        ? parsed.tallas.filter((t: string) => TALLAS_VALIDAS.includes(String(t).toUpperCase()) || String(t).length <= 5)
+        : [];
+
+      return {
+        nombre:        String(parsed.nombre || '').slice(0, 80),
+        descripcion:   String(parsed.descripcion || ''),
+        categoria:     categoriaFinal,
+        marca:         String(parsed.marca || 'Genérica'),
+        tipoPrenda:    String(parsed.tipoPrenda || ''),
+        colorPrincipal: String(parsed.colorPrincipal || ''),
+        tallas:        tallasFinal,
+        confianza:     ['alta', 'media', 'baja'].includes(parsed.confianza) ? parsed.confianza : 'media',
+      };
+
+    } catch (err) {
+      console.error('[ai-vision] Error al llamar Gemini:', err);
+      return null;
+    }
+  }
+
+  app.post("/api/ai/product-from-images", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ ok: false, error: "Autenticación requerida" });
+
+      const { imageUrls } = req.body;
+      if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+        return res.status(400).json({ ok: false, error: "imageUrls requerido (array de URLs)" });
+      }
+
+      const result = await analyzeProductImages(imageUrls);
+
+      if (!result) {
+        return res.status(422).json({
+          ok: false,
+          error: "No se pudo analizar las imágenes. Verifica que sean claras y vuelve a intentarlo."
+        });
+      }
+
+      // Opción A: Si hay marca real, concatenarla al nombre
+      let nombreFinal = result.nombre;
+      if (result.marca && result.marca !== 'Genérica') {
+        nombreFinal = `${result.marca} — ${result.nombre}`;
+      }
+
+      res.json({ ok: true, data: { ...result, nombre: nombreFinal } });
+
+    } catch (err: any) {
+      console.error('[ai-vision] endpoint error:', err);
+      res.status(500).json({ ok: false, error: err?.message || "Error interno del servidor" });
+    }
+  });
+
   // ==========================================================================
 
   app.get("/api/products", async (req, res) => {
     try {
       const showAll = req.query.admin === "true" && req.headers["x-user-id"];
-      let query = supabaseServer.from("products").select("*").order("priority_order", { ascending: true });
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 50; // Por defecto 50, se puede pedir menos (ej. 15)
+      const category = req.query.category as string;
+      const search = req.query.search as string;
+
+      let query = supabaseStore.from("products").select("*", { count: 'exact' });
+
       if (!showAll) query = query.eq("available", true);
-      const { data, error } = await query;
+      
+      if (category && category !== 'Todos') {
+        query = query.eq("category", category);
+      }
+
+      if (search) {
+        query = query.ilike("name", `%${search}%`);
+      }
+
+      // Orden y paginación
+      query = query.order("created_at", { ascending: false })
+                   .range((page - 1) * limit, (page * limit) - 1);
+
+      const { data, count, error } = await query;
       if (error) throw error;
-      res.json(data ?? []);
+      
+      res.json({
+        data: data ?? [],
+        total: count ?? 0,
+        page,
+        limit,
+        hasMore: count ? (page * limit) < count : false
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
@@ -645,19 +1019,16 @@ async function startServer() {
       if (!name || price === undefined) {
         return res.status(400).json({ error: "name y price requeridos" });
       }
-      const { data, error } = await supabaseServer
+      const { data, error } = await supabaseStore
         .from("products")
         .insert({
-          user_id: userId,
           name,
           price: Number(price),
           description: description ?? "",
           category: category ?? "General",
           sizes: Array.isArray(sizes) ? sizes : [],
-          image_url: image_url ?? "",
           images: Array.isArray(images) ? images : [],
           available: available ?? true,
-          priority_order: 0,
         })
         .select()
         .single();
@@ -672,11 +1043,10 @@ async function startServer() {
     try {
       const userId = req.headers["x-user-id"] as string;
       if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
-      const { data, error } = await supabaseServer
+      const { data, error } = await supabaseStore
         .from("products")
         .update(req.body)
         .eq("id", Number(req.params.id))
-        .eq("user_id", userId)
         .select()
         .single();
       if (error) throw error;
@@ -690,11 +1060,10 @@ async function startServer() {
     try {
       const userId = req.headers["x-user-id"] as string;
       if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
-      const { error } = await supabaseServer
+      const { error } = await supabaseStore
         .from("products")
         .delete()
-        .eq("id", Number(req.params.id))
-        .eq("user_id", userId);
+        .eq("id", Number(req.params.id));
       if (error) throw error;
       res.json({ success: true });
     } catch (err: any) {
@@ -706,26 +1075,208 @@ async function startServer() {
   // TIENDA (STORE ORDERS)
   // ==========================================================================
 
+  // GET público: devuelve qué productos están reservados y cuándo se liberan
+  // ⚠️ DEBE IR ANTES de /:id/status para que Express no lo capture como :id="reserved-products"
+  app.get("/api/store-orders/reserved-products", async (req, res) => {
+    try {
+      const now = new Date().toISOString();
+      const { data: pendingOrders } = await supabaseStore
+        .from("store_orders")
+        .select("id, items, expires_at")
+        .eq("status", "pending")
+        .gt("expires_at", now);
+
+      const reservedMap: Record<string, string> = {};
+      for (const order of (pendingOrders ?? [])) {
+        const expiresAt = order.expires_at as string;
+        for (const item of (order.items ?? [])) {
+          if (item.productId) {
+            reservedMap[String(item.productId)] = expiresAt;
+          }
+        }
+      }
+
+      res.json(reservedMap);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  // GET público: permite al Checkout hacer polling del estado del pedido
+  app.get("/api/store-orders/:id/status", async (req, res) => {
+    try {
+      const { data, error } = await supabaseStore
+        .from("store_orders")
+        .select("id, status, payment_verified_at")
+        .eq("id", Number(req.params.id))
+        .single();
+      if (error) throw error;
+      res.json({ id: data.id, status: data.status, verifiedAt: data.payment_verified_at });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+
+
   app.post("/api/store-orders", async (req, res) => {
     try {
       const { items, total, customerName, customerPhone } = req.body;
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: "items requerido (array no vacío)" });
       }
-      const { data, error } = await supabaseServer
+
+      // ── RESERVA EXCLUSIVA: verificar que los productos no estén en otro pedido pending ──
+      const productIds = items.map((i: any) => String(i.productId)).filter(Boolean);
+
+      if (productIds.length > 0) {
+        // Buscar pedidos pending que contengan alguno de estos productos
+        const { data: pendingOrders } = await supabaseStore
+          .from("store_orders")
+          .select("id, items, expires_at")
+          .eq("status", "pending");
+
+        const now = new Date();
+        const conflictProducts: string[] = [];
+
+        for (const po of (pendingOrders ?? [])) {
+          // Ignorar pedidos ya expirados (serán limpiados por el intervalo)
+          if (po.expires_at && new Date(po.expires_at) < now) continue;
+
+          const poProductIds = (po.items ?? []).map((i: any) => String(i.productId));
+          for (const pid of productIds) {
+            if (poProductIds.includes(pid)) {
+              conflictProducts.push(pid);
+            }
+          }
+        }
+
+        if (conflictProducts.length > 0) {
+          return res.status(409).json({
+            error: "Uno o más productos están reservados por otra persona. Se liberarán pronto si no se confirma el pago.",
+            conflictProducts,
+          });
+        }
+      }
+
+      // ── Verificar que los productos existan y estén disponibles ──
+      if (productIds.length > 0) {
+        const { data: prods } = await supabaseStore
+          .from("products")
+          .select("id, available")
+          .in("id", productIds);
+
+        const unavailable = (prods ?? []).filter((p: any) => !p.available);
+        if (unavailable.length > 0) {
+          return res.status(409).json({
+            error: "Uno o más productos ya no están disponibles.",
+            unavailableProducts: unavailable.map((p: any) => p.id),
+          });
+        }
+      }
+
+      let userId = null;
+      const token = req.headers.authorization?.replace("Bearer ", "");
+      if (token) {
+        const { data: authUser } = await supabaseServer.auth.getUser(token);
+        if (authUser?.user) {
+          userId = authUser.user.id;
+        }
+      }
+
+      const RESERVATION_MINUTES = 2;
+      const { data, error } = await supabaseStore
         .from("store_orders")
         .insert({
           items: items,
           total: total ?? 0,
           customer_name: customerName ?? "",
-          customer_phone: customerPhone ?? "",
+          customer_wa: customerPhone ?? "",
           status: "pending",
-          wa_sent: false,
-        })
+          expires_at: new Date(Date.now() + RESERVATION_MINUTES * 60 * 1000).toISOString(),
+        } as any)
         .select()
         .single();
       if (error) throw error;
+
+      console.log(`[store] 🛒 Pedido #${data.id} creado. ${productIds.length} productos reservados por ${RESERVATION_MINUTES} min.`);
       res.status(201).json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  // ── EXPIRACIÓN AUTOMÁTICA: cada 30 seg, cancelar pedidos sin pago ──────
+  setInterval(async () => {
+    try {
+      const now = new Date().toISOString();
+      const { data: expired } = await supabaseStore
+        .from("store_orders")
+        .select("id, items")
+        .eq("status", "pending")
+        .lt("expires_at", now);
+
+      if (!expired?.length) return;
+
+      for (const order of expired) {
+        await supabaseStore
+          .from("store_orders")
+          .update({ status: "cancelled" } as any)
+          .eq("id", order.id)
+          .eq("status", "pending");
+
+        // Liberar los productos (volver a mostrarlos en la tienda)
+        const pIds = (order.items ?? []).map((i: any) => i.productId).filter(Boolean);
+        if (pIds.length > 0) {
+          await supabaseStore
+            .from("products")
+            .update({ available: true } as any)
+            .in("id", pIds);
+        }
+
+        console.log(`[store] ⏰ Pedido #${order.id} expirado. ${pIds.length} productos liberados.`);
+      }
+    } catch (e) {
+      // Silencioso — no bloquear el servidor
+    }
+  }, 30 * 1000); // cada 30 segundos
+
+  app.get("/api/store-orders/me", async (req, res) => {
+    try {
+      const token = req.headers.authorization?.replace("Bearer ", "");
+      if (!token) return res.status(401).json({ error: "Token requerido" });
+      const { data: authUser, error: userErr } = await supabaseServer.auth.getUser(token);
+      if (userErr || !authUser.user) return res.status(401).json({ error: "Token inválido" });
+      
+      const userId = authUser.user.id;
+      
+      const { data, error } = await supabaseStore
+        .from("store_orders")
+        .select("*")
+        .eq("customer_wa", authUser.user.email?.replace('@tiendaleydi.com','') ?? '')
+        .order("created_at", { ascending: false });
+        
+      if (error) throw error;
+      res.json(data ?? []);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  // Admin: ver todos los pedidos de la tienda (más reciente primero)
+  app.get("/api/store-orders/admin", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+      const { data, error } = await supabaseStore
+        .from("store_orders")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      res.json(data ?? []);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
@@ -737,7 +1288,7 @@ async function startServer() {
       if (!token) return res.status(401).json({ error: "Token requerido" });
       const { data: user, error: userErr } = await supabaseServer.auth.getUser(token);
       if (userErr || !user.user) return res.status(401).json({ error: "Token inválido" });
-      const { data, error } = await supabaseServer
+      const { data, error } = await supabaseStore
         .from("store_orders")
         .select("*")
         .order("created_at", { ascending: false });
@@ -754,24 +1305,328 @@ async function startServer() {
       if (!token) return res.status(401).json({ error: "Token requerido" });
       const { data: user, error: userErr } = await supabaseServer.auth.getUser(token);
       if (userErr || !user.user) return res.status(401).json({ error: "Token inválido" });
-      const { status, wa_sent } = req.body;
+      const { status, wa_sent, hideProducts } = req.body;
       const updateData: any = {};
       if (status) updateData.status = status;
       if (wa_sent !== undefined) updateData.wa_sent = wa_sent;
-      const { data, error } = await supabaseServer
+      const { data, error } = await supabaseStore
         .from("store_orders")
         .update(updateData)
         .eq("id", Number(req.params.id))
         .select()
         .single();
       if (error) throw error;
+
+      // Ocultar productos automáticamente si se solicitó
+      if (hideProducts && status === 'confirmed' && data.items) {
+        try {
+          const productIds = data.items.map((i: any) => i.productId).filter(Boolean);
+          if (productIds.length > 0) {
+            await supabaseStore
+              .from("products")
+              .update({ available: false })
+              .in("id", productIds);
+          }
+        } catch (e) {
+          console.error("Error al ocultar productos del pedido:", e);
+        }
+      }
+
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
   });
 
-  // Vite middleware for development
+  // ==========================================================================
+  // MOTOR DE CUADRANGULACIÓN — Verificación de pagos de la tienda
+  // ==========================================================================
+  //
+  // Flujo A (máxima seguridad): banco + WhatsApp + código pedido → verified
+  // Flujo B (banco solo):       banco + número coincide → verified
+  // Flujo C (WA solo):          WhatsApp + código → pending_manual_review
+  //
+  // Llamado por:
+  //   1. MacroDroid → POST /api/store/ingest-bank  (notificación bancaria)
+  //   2. Panel WA   → POST /api/store/ingest-wa    (mensaje del cliente)
+  //   3. Webhook    → POST /api/store/match-payment (cruce manual/automático)
+
+  /**
+   * Motor interno de cruce HÍBRIDO INTELIGENTE
+   * Retorna { order, confidence } donde confidence es:
+   *   'maxima'  = banco + WA + código pedido coinciden (6/6 puntos)
+   *   'alta'    = monto único en ventana → solo 1 candidato posible
+   *   'media'   = monto coincide pero hay múltiples candidatos (necesita WA)
+   *   'none'    = no hay match
+   */
+  async function tryMatchOrder(params: {
+    amount?: number;
+    senderPhone?: string;
+    orderRef?: string;   // "#1042" → "1042"
+    windowMinutes?: number;
+  }): Promise<{ order: any; confidence: 'maxima' | 'alta' | 'media' } | null> {
+    const { amount, senderPhone, orderRef, windowMinutes = 2 } = params;
+    const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+
+    // Buscar TODOS los pedidos pendientes en la ventana de tiempo
+    let query = supabaseStore
+      .from('store_orders')
+      .select('*')
+      .eq('status', 'pending')
+      .gt('created_at', windowStart);
+
+    // Filtrar por monto exacto si viene
+    if (amount) query = query.eq('total', amount);
+
+    const { data: candidates, error } = await query.order('created_at', { ascending: false });
+    if (error || !candidates?.length) return null;
+
+    // ── NIVEL MÁXIMA: código de pedido + monto + número WA ──────
+    // Si el mensaje de WA trae el código #1042, es match exacto
+    if (orderRef) {
+      const refId = Number(orderRef.replace(/\D/g, ''));
+      const exact = candidates.find((o: any) => o.id === refId);
+      if (exact) {
+        console.log(`[store-match] MAXIMA: pedido #${refId} verificado por código + monto`);
+        return { order: exact, confidence: 'maxima' };
+      }
+    }
+
+    // ── NIVEL ALTA: monto ÚNICO en la ventana ───────────────────
+    // Si solo hay 1 pedido pendiente con ese monto exacto → seguro
+    if (candidates.length === 1) {
+      console.log(`[store-match] ALTA: pedido #${candidates[0].id} — monto único (${amount} Bs)`);
+      return { order: candidates[0], confidence: 'alta' };
+    }
+
+    // ── NIVEL MEDIA: hay múltiples pedidos con el mismo monto ───
+    // Intentar filtrar por número de WhatsApp si viene
+    if (senderPhone) {
+      const clean = senderPhone.replace(/\D/g, '');
+      const byPhone = candidates.filter((o: any) =>
+        o.customer_wa && o.customer_wa.includes(clean)
+      );
+      if (byPhone.length === 1) {
+        console.log(`[store-match] ALTA: pedido #${byPhone[0].id} — desempate por WA ${clean}`);
+        return { order: byPhone[0], confidence: 'alta' };
+      }
+    }
+
+    // Múltiples candidatos, no se puede decidir → no verificar automáticamente
+    console.log(`[store-match] MEDIA: ${candidates.length} pedidos de ${amount} Bs — necesita WA con código`);
+    return null; // No verificar — esperar WA con código o verificación manual
+  }
+
+  /**
+   * Marca un pedido como pagado y oculta los productos vendidos
+   */
+  async function confirmStoreOrder(orderId: number, source: string) {
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabaseStore
+      .from('store_orders')
+      .update({
+        status: 'paid',
+        payment_verified_at: now,
+        payment_method: 'qr',
+        payment_ref: source,
+      } as any)
+      .eq('id', orderId)
+      .eq('status', 'pending')   // idempotencia: solo si sigue pending
+      .select()
+      .single();
+
+    if (error || !data) return false;
+
+    // Ocultar productos vendidos
+    try {
+      const productIds = (data.items ?? []).map((i: any) => i.productId).filter(Boolean);
+      if (productIds.length > 0) {
+        await supabaseStore.from('products').update({ available: false }).in('id', productIds);
+      }
+    } catch (e) {
+      console.error('[store-match] Error ocultando productos:', e);
+    }
+
+    console.log(`[store-match] ✅ Pedido #${orderId} VERIFICADO via ${source}`);
+    return true;
+  }
+
+  // ── Endpoint 1: Notificación bancaria de MacroDroid ───────────
+  // MacroDroid llama a este endpoint cuando el banco notifica un pago
+  app.post('/api/store/ingest-bank', async (req, res) => {
+    try {
+      const { amount, senderName, senderPhone, rawText, hash } = req.body;
+      if (!amount) return res.status(400).json({ error: 'amount requerido' });
+
+      const parsedAmount = Number(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ error: 'amount inválido' });
+      }
+
+      // Guardar el evento de pago (idempotencia por hash)
+      if (hash) {
+        const { data: existing } = await supabaseServer
+          .from('payment_events')
+          .select('id')
+          .eq('hash', hash)
+          .single();
+        if (existing) {
+          return res.json({ ok: true, duplicate: true, message: 'Ya procesado' });
+        }
+      }
+
+      // Intentar cruzar con pedido pendiente (ventana de 5 min)
+      const result = await tryMatchOrder({
+        amount: parsedAmount,
+        senderPhone: senderPhone ?? '',
+        windowMinutes: 2,
+      });
+
+      const eventData: any = {
+        source: 'macrodroid',
+        raw_text: rawText ?? '',
+        amount: parsedAmount,
+        sender_name: senderName ?? '',
+        sender_wa: senderPhone ?? '',
+        processed: !!result,
+        match_confidence: result ? result.confidence : 'none',
+        hash: hash ?? null,
+      };
+
+      if (result) {
+        const ok = await confirmStoreOrder(result.order.id, `bank:${hash ?? 'manual'}:${result.confidence}`);
+        if (ok) eventData.matched_order_id = result.order.id;
+      }
+
+      await supabaseServer.from('payment_events').insert(eventData as any);
+
+      res.json({
+        ok: true,
+        matched: !!result,
+        orderId: result?.order.id ?? null,
+        confidence: result?.confidence ?? 'none',
+      });
+
+    } catch (err: any) {
+      console.error('[store/ingest-bank]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint 2: Mensaje de WhatsApp con comprobante ───────────
+  // El Panel de Pedidos (o webhook de WA) llama esto cuando llega un mensaje
+  app.post('/api/store/ingest-wa', async (req, res) => {
+    try {
+      const { fromWa, messageText, hasProof } = req.body;
+      if (!fromWa) return res.status(400).json({ error: 'fromWa requerido' });
+
+      // Extraer código de pedido del texto (#1042 → "1042")
+      const refMatch = messageText?.match(/#(\d+)/);
+      const orderRef = refMatch?.[1] ?? null;
+
+      // Guardar mensaje
+      const waEvent: any = {
+        from_wa: fromWa.replace(/\D/g, ''),
+        summary: messageText ?? '',
+        has_proof: !!hasProof,
+        order_ref: orderRef,
+      };
+
+      // Intentar cruzar con pedido (ventana 10 min para WA)
+      const result = await tryMatchOrder({
+        senderPhone: fromWa,
+        orderRef: orderRef ?? undefined,
+        windowMinutes: 10, // ventana más amplia para WA
+      });
+
+      if (result) {
+        waEvent.matched_order_id = result.order.id;
+        // Marcar wa_proof_received
+        await supabaseStore
+          .from('store_orders')
+          .update({ wa_proof_received: true, wa_message_id: fromWa } as any)
+          .eq('id', result.order.id);
+
+        // Si ya había notificación bancaria → verificar con cuadrangulación completa
+        const { data: bankEvent } = await supabaseServer
+          .from('payment_events')
+          .select('id')
+          .eq('matched_order_id', result.order.id)
+          .eq('processed', true)
+          .single();
+
+        if (bankEvent) {
+          await confirmStoreOrder(result.order.id, `wa+bank:${fromWa}:maxima`);
+        } else {
+          // WA llegó primero que el banco → marcar como esperando banco
+          console.log(`[store-wa] Pedido #${result.order.id} — WA recibido, esperando banco`);
+        }
+      }
+
+      await supabaseStore.from('wa_messages').insert(waEvent as any);
+
+      res.json({ ok: true, matched: !!result, orderId: result?.order.id ?? null });
+
+    } catch (err: any) {
+      console.error('[store/ingest-wa]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint 3: Match manual / webhook externo ────────────────
+  // Para verificaciones manuales o desde herramientas externas
+  app.post('/api/store/match-payment', async (req, res) => {
+    try {
+      const { amount, senderPhone, orderRef, orderId, source } = req.body;
+
+      let order: any = null;
+
+      if (orderId) {
+        const { data } = await supabaseStore
+          .from('store_orders')
+          .select('*')
+          .eq('id', Number(orderId))
+          .single();
+        order = data;
+      } else {
+        const result = await tryMatchOrder({ amount, senderPhone, orderRef });
+        order = result?.order ?? null;
+      }
+
+      if (!order) {
+        return res.status(404).json({ ok: false, error: 'No se encontró pedido pendiente que coincida' });
+      }
+
+      const ok = await confirmStoreOrder(order.id, source ?? 'manual');
+      if (!ok) {
+        return res.status(409).json({ ok: false, error: 'El pedido ya fue procesado o no está pendiente' });
+      }
+
+      res.json({ ok: true, orderId: order.id, total: order.total, customerWa: order.customer_wa });
+
+    } catch (err: any) {
+      console.error('[store/match-payment]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint 4: Verificación admin manual (panel de control) ──
+  app.post('/api/store/verify-order/:id', async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ error: 'No autorizado' });
+
+      const ok = await confirmStoreOrder(Number(req.params.id), 'admin:manual');
+      if (!ok) return res.status(409).json({ ok: false, error: 'No se pudo verificar (ya procesado o no pendiente)' });
+
+      res.json({ ok: true, message: 'Pedido verificado manualmente' });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

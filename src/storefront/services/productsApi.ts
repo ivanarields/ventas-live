@@ -38,45 +38,43 @@ function mapRow(row: any): Product {
 }
 
 // Caché en memoria: evita repetir la misma petición durante 5 minutos
-let _cache: { data: Product[]; ts: number } | null = null;
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutos en milisegundos
-
-// Promesa compartida para evitar llamadas duplicadas simultáneas
-let _inflight: Promise<Product[]> | null = null;
+export interface PaginatedProducts {
+  data: Product[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
+}
 
 export const productsApi = {
-  /**
-   * Obtiene los productos. Si hay caché reciente la usa directamente.
-   * Si hay una petición en vuelo la reutiliza (sin hacer dos fetch al mismo tiempo).
-   */
-  getProducts: async (): Promise<Product[]> => {
-    // 1. Devolver caché si sigue vigente
-    if (_cache && Date.now() - _cache.ts < CACHE_TTL) {
-      return _cache.data;
-    }
-    // 2. Si ya hay una petición en vuelo, reutilizarla
-    if (_inflight) return _inflight;
-    // 3. Nueva petición
-    _inflight = fetch('/api/products')
-      .then(res => (res.ok ? res.json() : []))
-      .then((rows: any[]) => {
-        const data = rows.map(mapRow);
-        _cache = { data, ts: Date.now() };
-        return data;
-      })
-      .catch(() => [])
-      .finally(() => { _inflight = null; });
-    return _inflight;
-  },
+  getProducts: async (params?: { page?: number; limit?: number; category?: string; search?: string; admin?: boolean; token?: string }): Promise<PaginatedProducts> => {
+    const p = new URLSearchParams();
+    if (params?.page) p.append('page', params.page.toString());
+    if (params?.limit) p.append('limit', params.limit.toString());
+    if (params?.category) p.append('category', params.category);
+    if (params?.search) p.append('search', params.search);
+    if (params?.admin) p.append('admin', 'true');
 
-  /** Pre-carga los productos sin bloquear (fire-and-forget). */
-  prefetch: () => { productsApi.getProducts().catch(() => {}); },
+    const headers: Record<string, string> = {};
+    if (params?.token) headers['x-user-id'] = params.token;
+
+    const res = await fetch(`/api/products?${p.toString()}`, { headers });
+    if (!res.ok) return { data: [], total: 0, page: 1, limit: 10, hasMore: false };
+    
+    const json = await res.json();
+    // Compatibilidad por si json es un array (viejo backend)
+    if (Array.isArray(json)) {
+      return { data: json.map(mapRow), total: json.length, page: 1, limit: json.length, hasMore: false };
+    }
+
+    return {
+      ...json,
+      data: json.data.map(mapRow)
+    };
+  },
 
   getProduct: async (id: string): Promise<Product | undefined> => {
-    const all = await productsApi.getProducts();
-    return all.find(p => p.id === id);
+    const res = await productsApi.getProducts({ limit: 1000 });
+    return res.data.find(p => p.id === id);
   },
-
-  /** Invalida la caché manualmente (útil tras crear/editar productos en el panel). */
-  invalidate: () => { _cache = null; },
 };
