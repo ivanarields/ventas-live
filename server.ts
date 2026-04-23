@@ -39,9 +39,8 @@ const cleanName = (name: string) => {
   return cleaned;
 };
 
-async function startServer() {
-  const app = express();
-  const PORT = process.env.PORT || 3001;
+const app = express();
+const PORT = process.env.PORT || 3001;
 
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -1691,11 +1690,16 @@ Reglas críticas:
 
 
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    try {
+      const viteModule = await import("vite");
+      const vite = await viteModule.createServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.log("Vite no disponible en este entorno", e);
+    }
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -1704,10 +1708,11 @@ Reglas críticas:
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Endpoint for mobile payments: http://localhost:${PORT}/api/pagos`);
-  });
-}
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Endpoint for mobile payments: http://localhost:${PORT}/api/pagos`);
+    });
+  }
 
-startServer();
+export default app;
