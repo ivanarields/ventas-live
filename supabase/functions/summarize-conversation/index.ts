@@ -28,14 +28,14 @@ const PROMPT_USUARIO = (textos: string, fotos: string, audios: string) =>
 MENSAJES DE TEXTO:
 ${textos || '(ninguno)'}
 
-DESCRIPCIONES DE FOTOGRAFÍAS:
+ANÁLISIS DE FOTOGRAFÍAS (pueden ser prendas de ropa O comprobantes de pago):
 ${fotos || '(ninguna)'}
 
 TRANSCRIPCIÓN DE AUDIOS:
 ${audios || '(ninguno)'}
 
 Genera este JSON exacto (sin backticks, sin texto antes o después):
-{"pedido":"qué quiere el cliente","cantidad":"número o no especificado","talla":"talla o no especificada","pago":"forma de pago o no especificado","entrega":"cuándo o dónde o no especificado","notas":"observaciones adicionales o null"}`;
+{"pedido":"qué quiere el cliente","cantidad":"número o no especificado","talla":"talla o no especificada","pago":"forma de pago o no especificado","entrega":"cuándo o dónde o no especificado","comprobante":"Si hay un comprobante de pago en las fotos, escribe: nombre del pagador - monto Bs - banco. Si no hay comprobante, escribe null","notas":"observaciones adicionales o null"}`;
 
 async function callGemini(prompt: string): Promise<Record<string, string>> {
   if (!ACTIVE_GEMINI_KEY) {
@@ -128,7 +128,11 @@ async function describirFoto(url: string): Promise<string> {
     const buf = await r.arrayBuffer();
     const b64 = toBase64(buf);
     const mime = url.endsWith('.png') ? 'image/png' : url.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-    const d = await geminiWithMedia('Describe brevemente qué prenda de ropa se ve (color, tipo, características). Máximo 15 palabras.', mime, b64);
+    const d = await geminiWithMedia(`Analiza esta imagen y responde con UNA SOLA línea:
+- Si es un COMPROBANTE de pago, transferencia o captura de QR bancario: escribe "COMPROBANTE: [nombre del pagador] - [monto] Bs - [banco o app]". Extrae el nombre REAL que aparece en el comprobante.
+- Si es una PRENDA de ropa: escribe "PRENDA: [color, tipo, características]". Máximo 15 palabras.
+- Si es otra cosa: escribe "OTRO: [descripción breve]".
+Responde SOLO con una línea, sin explicaciones.`, mime, b64);
     console.log('🖼️ Descripción foto:', d);
     return d;
   } catch (e) {

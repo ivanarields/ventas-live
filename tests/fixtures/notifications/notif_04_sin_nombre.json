@@ -1,0 +1,11 @@
+{
+  "texto": "Recibiste un yapeo de Bs. 100.00",
+  "app_package": "com.bcp.innovacxion.yapeapp",
+  "title": "Yape",
+  "expected": {
+    "name": null,
+    "amount": 100,
+    "via": "manual_review"
+  },
+  "notas": "Notificación SIN nombre — NO debe inventar nombre, debe ir a cola manual. Regla sagrada."
+}

@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "KATHERINE NICOL SALVATIERRA EULATE",
+  "monto_esperado": 25,
+  "banco_esperado": "Yape",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante Yape con nombre completo del pagador."
+}

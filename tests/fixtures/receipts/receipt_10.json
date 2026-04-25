@@ -1,0 +1,10 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "monto_esperado": 50,
+  "banco_esperado": "BancoFie",
+  "receptor_esperado": null,
+  "es_transferencia_propia": true,
+  "confianza_minima": "media",
+  "notas": "Caso excepcional: Leidy Candy Diaz Sanchez es la PAGADORA (envió dinero a alguien). es_transferencia_propia debe ser true. El prompt lee la dirección del pago."
+}

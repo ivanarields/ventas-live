@@ -1,10 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, RefreshCw, Package, Trash2, Sparkles, Clock, Image, MessageSquare, AlertCircle, CheckCircle, Settings, Key, X, Eye, EyeOff } from 'lucide-react';
+import { ChevronLeft, RefreshCw, Package, Trash2, Sparkles, Clock, Image, MessageSquare, AlertCircle, CheckCircle } from 'lucide-react';
 
 const PANEL_URL   = 'https://vwaocoaeenavxkcshyuf.supabase.co';
 const PANEL_KEY   = 'sb_publishable_Rdo7g5SEvzS7BfJCn33k3g_dcuU64Vz';
-const SUMM_URL    = `${PANEL_URL}/functions/v1/summarize-conversation`;
+// El resumen ahora pasa por el gateway Express (round-robin de 5 keys coordinado).
+// La Edge Function de Supabase queda como backup pero ya no es el camino principal.
+const SUMM_URL    = '/api/ai/summarize-conversation';
 const H = { apikey: PANEL_KEY, Authorization: `Bearer ${PANEL_KEY}` };
+
+// Lee el userId del localStorage para autenticar contra el gateway Express.
+function getUserId(): string {
+  try {
+    const raw = localStorage.getItem('sb_session');
+    if (!raw) return '';
+    const parsed = JSON.parse(raw);
+    return parsed?.user?.id || '';
+  } catch { return ''; }
+}
 
 interface Cliente {
   id: string; phone: string; last_interaction: string;
@@ -78,16 +90,22 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
   const generarResumen = async () => {
     setGenerando(true);
     try {
-      const geminiKey = localStorage.getItem('panel_gemini_key') || '';
+      const userId = getUserId();
       const r = await fetch(SUMM_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: PANEL_KEY, Authorization: `Bearer ${PANEL_KEY}` },
-        body: JSON.stringify({ clienteId: cliente.id, ...(geminiKey ? { geminiKey } : {}) }),
+        headers: {
+          'Content-Type': 'application/json',
+          // x-user-id autentica contra el gateway y selecciona las keys correctas
+          'x-user-id': userId,
+        },
+        body: JSON.stringify({ clienteId: cliente.id }),
       });
       const j = await r.json();
       if (j.resumen) {
         setResumen(j.resumen);
         setResumeRaw(JSON.stringify(j.resumen));
+      } else if (j.error) {
+        console.error('[summarize]', j.error);
       }
     } catch (e) { console.error(e); }
     setGenerando(false);
@@ -279,91 +297,13 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
   );
 }
 
-// ─── Modal Configuración IA ─────────────────────────────────────
-function ModalConfigIA({ onClose }: { onClose: () => void }) {
-  const [key, setKey]       = useState(localStorage.getItem('panel_gemini_key') || '');
-  const [visible, setVisible] = useState(false);
-  const [guardado, setGuardado] = useState(false);
-
-  const guardar = () => {
-    if (key.trim()) localStorage.setItem('panel_gemini_key', key.trim());
-    else localStorage.removeItem('panel_gemini_key');
-    setGuardado(true);
-    setTimeout(() => { setGuardado(false); onClose(); }, 800);
-  };
-
-  const keyActual = localStorage.getItem('panel_gemini_key');
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-pink-50 flex items-center justify-center">
-              <Key size={15} className="text-[#ff2d78]" />
-            </div>
-            <h3 className="font-black text-slate-800 text-base">Configuración IA</h3>
-          </div>
-          <button onClick={onClose} className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
-            <X size={14} />
-          </button>
-        </div>
-
-        {keyActual && (
-          <div className="bg-green-50 border border-green-100 rounded-xl px-3 py-2 mb-4 flex items-center gap-2">
-            <CheckCircle size={13} className="text-green-500 flex-shrink-0" />
-            <p className="text-xs text-green-700 font-medium">API Key personalizada activa</p>
-          </div>
-        )}
-
-        <p className="text-xs text-slate-500 mb-3 leading-relaxed">
-          Pega aquí tu Gemini API Key de <span className="font-bold text-slate-700">Google AI Studio</span>. 
-          Si el límite se agota, crea una nueva key gratuita y pégala aquí.
-        </p>
-
-        <div className="relative mb-4">
-          <input
-            type={visible ? 'text' : 'password'}
-            value={key}
-            onChange={e => setKey(e.target.value)}
-            placeholder="AIza..."
-            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono pr-10 focus:outline-none focus:border-[#ff2d78] focus:ring-1 focus:ring-pink-200"
-          />
-          <button onClick={() => setVisible(!visible)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-            {visible ? <EyeOff size={15} /> : <Eye size={15} />}
-          </button>
-        </div>
-
-        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer"
-          className="block text-center text-xs text-[#ff2d78] font-bold mb-4 hover:underline">
-          → Crear nueva API Key gratuita en Google AI Studio
-        </a>
-
-        <div className="flex gap-3">
-          {keyActual && (
-            <button onClick={() => { localStorage.removeItem('panel_gemini_key'); setKey(''); onClose(); }}
-              className="flex-1 py-3 rounded-2xl bg-red-50 text-red-500 font-bold text-sm">
-              Quitar key
-            </button>
-          )}
-          <button onClick={guardar}
-            className="flex-1 py-3 rounded-2xl font-bold text-sm text-white"
-            style={{ background: guardado ? '#22c55e' : 'linear-gradient(135deg,#ff2d78,#ff6b9d)' }}>
-            {guardado ? '✓ Guardada' : 'Guardar'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ModalConfigIA eliminado — las API Keys se gestionan en Configuración → Inteligencia Artificial
 
 // ─── Lista principal ─────────────────────────────────────────────
 export function PanelPedidos() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
   const [detalle, setDetalle]   = useState<Cliente | null>(null);
-  const [showConfig, setShowConfig] = useState(false);
 
   const cargar = useCallback(async () => {
     const data = await api<Cliente[]>('panel_clientes?select=*&order=last_interaction.desc');
@@ -396,20 +336,11 @@ export function PanelPedidos() {
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">{clientes.length} conversación{clientes.length !== 1 ? 'es' : ''} activas</p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => setShowConfig(true)}
-              className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-pink-50 hover:text-[#ff2d78] hover:border-pink-200 transition-colors"
-              title="Configurar API Key de Gemini">
-              <Settings size={14} />
-            </button>
-            <button onClick={cargar} className="w-9 h-9 rounded-full bg-pink-50 border border-pink-100 flex items-center justify-center text-[#ff2d78]">
-              <RefreshCw size={14} />
-            </button>
-          </div>
+          <button onClick={cargar} className="w-9 h-9 rounded-full bg-pink-50 border border-pink-100 flex items-center justify-center text-[#ff2d78]">
+            <RefreshCw size={14} />
+          </button>
         </div>
       </div>
-
-      {showConfig && <ModalConfigIA onClose={() => setShowConfig(false)} />}
 
       <div className="px-4 pt-4 space-y-3">
         {cargando ? (

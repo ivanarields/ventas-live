@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "DANIELA ARAOZ BAZAN",
+  "monto_esperado": 20,
+  "banco_esperado": "Yasta",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante Yasta con nombre completo del pagador."
+}

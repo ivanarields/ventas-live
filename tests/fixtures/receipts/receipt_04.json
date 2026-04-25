@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": null,
+  "monto_esperado": 25,
+  "banco_esperado": "Banco Union",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "baja",
+  "notas": "Comprobante Banco Union sin nombre del pagador visible. Debe devolver pagador=null (regla sagrada: nunca inventar nombres). Va a cola manual."
+}

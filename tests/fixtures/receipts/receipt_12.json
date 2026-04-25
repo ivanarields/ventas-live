@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "NOEMI VERONICA SEVERICH CHAVARRIA",
+  "monto_esperado": 25,
+  "banco_esperado": "ZAS",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante ZAS con nombre completo del pagador."
+}

@@ -1,0 +1,10 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": null,
+  "monto_esperado": 15,
+  "banco_esperado": "Cooperativa San Martin de Porres",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "hora_esperada": "02:08",
+  "confianza_minima": "baja",
+  "notas": "Cooperativa San Martín de Porres. El campo 'Cuenta a debitar' dice 'Caja de Ahorros' (tipo de cuenta, NO nombre de persona). El email danielitayemir@gmail.com tampoco es un nombre. pagador debe ser null. La hora 02:08 sí es visible."
+}

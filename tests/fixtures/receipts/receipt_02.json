@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "SALAZAR PRADO SILVIA LINETH",
+  "monto_esperado": 15,
+  "banco_esperado": "BancoSol",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante BancoSol con nombre completo del pagador claramente legible."
+}

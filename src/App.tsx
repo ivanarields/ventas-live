@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { processBankScreenshots, reconcilePayments, type ReconciliationResult, type Candidate } from './services/reconciliationService';
 import { syncPedidoLabel, releasePedidoLabel } from './services/labelingService';
-import { FileCheck, ShieldAlert, FileSearch, AlertTriangle } from 'lucide-react';
+import { ShieldAlert, FileSearch, AlertTriangle } from 'lucide-react';
 import { PaymentHistoryTape } from './components/PaymentHistoryTape';
 import { PanelPedidos } from './components/PanelPedidos';
 import { clsx, type ClassValue } from 'clsx';
@@ -247,7 +246,6 @@ import {
 import confetti from 'canvas-confetti';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { GoogleGenAI, Type } from "@google/genai";
 
 const normalizeName = (name: string) => {
   if (!name) return "";
@@ -978,12 +976,8 @@ export default function App() {
   const [linkingCustomer, setLinkingCustomer] = useState<any>(null);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [editingPayment, setEditingPayment] = useState<any>(null);
-  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
   const [showPeopleModal, setShowPeopleModal] = useState(false);
-  const [showReconciliationModal, setShowReconciliationModal] = useState(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [ocrResult, setOcrResult] = useState<any>(null);
   const [loadingData, setLoadingData] = useState(false);
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -1055,6 +1049,8 @@ export default function App() {
         name: c.full_name,
         canonicalName: c.canonical_name ?? c.normalized_name,
         phone: c.phone ?? '',
+        waNumber: c.wa_number ?? c.phone ?? '',
+        notes: c.notes ?? '',
         activeLabel: c.active_label ?? '',
         activeLabelType: c.active_label_type ?? '',
         totalSpent: c.total_spent ?? 0,
@@ -1183,6 +1179,8 @@ export default function App() {
         count: 0,
         lastDate: new Date(0).toISOString(),
         phone: c.phone || '',
+        waNumber: c.waNumber || '',
+        notes: c.notes || '',
         customerId: c.id,
         payments: [],
         pedidos: [],
@@ -1208,6 +1206,8 @@ export default function App() {
           count: 0,
           lastDate: p.fecha || p.date,
           phone: '',
+          waNumber: '',
+          notes: '',
           customerId: null,
           payments: [],
           pedidos: [],
@@ -1427,152 +1427,6 @@ export default function App() {
     localStorage.removeItem('sb_session');
   };
 
-  const handleOcr = async (e: React.ChangeEvent<HTMLInputElement>, type: 'transaction' | 'payment' | 'quick' = 'transaction') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setOcrLoading(true);
-    setOcrResult(null);
-    try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-        
-        let prompt = "";
-        if (type === 'quick') {
-          prompt = "Analiza esta captura de pantalla (puede ser un perfil de WhatsApp, un chat o un recibo). Extrae el nombre del cliente, su número de WhatsApp (si está visible), el monto del pago y la fecha. Responde en formato JSON: { name: string, phone: string, amount: number, date: string }. Si algún dato no está, deja el campo vacío o 0.";
-        } else {
-          prompt = "Analiza esta captura de pantalla de una transferencia bancaria. Extrae el monto, la fecha y el nombre del remitente. Responde en formato JSON: { amount: number, date: string, description: string }. Si no es una transferencia, responde con un error.";
-        }
-
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                { inlineData: { mimeType: file.type, data: base64 } }
-              ]
-            }
-          ]
-        });
-
-        const text = response.text;
-        const jsonMatch = text?.match(/\{.*\}/s);
-        if (jsonMatch) {
-          try {
-            const data = JSON.parse(jsonMatch[0]);
-            
-            if (type === 'quick') {
-              const cleanedName = cleanName(data.name);
-              
-              // If data is incomplete or ambiguous, redirect to manual entry with prefilled data
-              if (!data.name || data.amount <= 0) {
-                setEditingPayment({
-                  nombre: data.name?.toUpperCase() || '',
-                  pago: data.amount || 0,
-                  date: data.date || new Date().toISOString(),
-                  phone: data.phone || ''
-                });
-                setShowPaymentMethodModal(false);
-                setShowAddModal('payment');
-                return;
-              }
-
-              // 1. Get or create customer
-              const customersRef = collection(db, 'customers');
-              let customerId = "";
-              
-              // Try to find by phone if provided
-              if (data.phone) {
-                const qPhone = query(customersRef, where('phone', '==', data.phone), limit(1));
-                const snapPhone = await getDocs(qPhone);
-                if (!snapPhone.empty) {
-                  customerId = snapPhone.docs[0].id;
-                }
-              }
-              
-              // If not found by phone, try by name
-              if (!customerId) {
-                const qName = query(customersRef, where('canonicalName', '==', cleanedName), limit(1));
-                const snapName = await getDocs(qName);
-                if (!snapName.empty) {
-                  customerId = snapName.docs[0].id;
-                  // Update phone if we have it now
-                  if (data.phone) {
-                    await updateDoc(doc(db, 'customers', customerId), { phone: data.phone });
-                  }
-                } else {
-                  // Create new customer
-                  const newCust = await addDoc(customersRef, {
-                    name: data.name.toUpperCase(),
-                    canonicalName: cleanedName,
-                    phone: data.phone || '',
-                    createdAt: serverTimestamp(),
-                    totalPaid: 0
-                  });
-                  customerId = newCust.id;
-                }
-              }
-
-              // 2. Create payment
-              if (data.amount > 0) {
-                await addDoc(collection(db, 'pagos'), {
-                  nombre: data.name.toUpperCase(),
-                  customerId,
-                  pago: data.amount,
-                  date: data.date || new Date().toISOString(),
-                  createdAt: serverTimestamp()
-                });
-              }
-
-              setOcrResult({ ...data, customerId });
-              confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#ff2d55', '#10b981'] });
-            } else if (type === 'transaction') {
-              const cleanedDesc = cleanName(data.description);
-              await addDoc(collection(db, 'transactions'), {
-                type: 'income',
-                amount: data.amount,
-                category: 'Venta Live',
-                description: `OCR: ${cleanedDesc}`,
-                fecha: serverTimestamp(),
-                isOcr: true
-              });
-              confetti({ particleCount: 50, colors: ['#ff2d55'] });
-            } else {
-              const cleanedDesc = cleanName(data.description);
-              setEditingPayment({
-                nombre: cleanedDesc,
-                pago: data.amount,
-                date: data.date || new Date().toISOString()
-              });
-              setShowAddModal('payment');
-              confetti({ particleCount: 50, colors: ['#ff2d55'] });
-            }
-          } catch (parseErr) {
-            console.error("JSON Parse Error:", parseErr);
-            if (type === 'quick') {
-              setShowPaymentMethodModal(false);
-              setShowAddModal('payment');
-            }
-          }
-        } else {
-          // No JSON found, fallback to manual
-          if (type === 'quick') {
-            setShowPaymentMethodModal(false);
-            setShowAddModal('payment');
-          }
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setOcrLoading(false);
-    }
-  };
-
   // Routing público (tienda) delegado a main.tsx para extrema velocidad
 
   if (loading) {
@@ -1712,7 +1566,7 @@ export default function App() {
               key="payments" 
               hideCompletedWork={hideCompletedWork}
               onToggleHideCompleted={() => setHideCompletedWork(!hideCompletedWork)}
-              onAdd={() => { setEditingPayment(null); setShowPaymentMethodModal(true); }} 
+              onAdd={() => { setEditingPayment(null); setShowAddModal('payment'); }}
               onEdit={(p: any) => { setEditingPayment(p); setShowAddModal('payment'); }}
               onLinkNumber={(c: any) => { setLinkingCustomer(c); setShowLinkModal(true); }}
               onSelectPerson={(id: string) => setSelectedPersonId(id)}
@@ -1724,16 +1578,13 @@ export default function App() {
                 setSelectedPaymentTime("");
               }}
               onOpenPeople={() => setShowPeopleModal(true)}
-              onReconcile={() => setShowReconciliationModal(true)}
             />
           )}
           {currentTab === 'finance' && (
-            <FinanceView 
-              transactions={transactions} 
+            <FinanceView
+              transactions={transactions}
               categories={categories}
-              onOcr={handleOcr} 
-              ocrLoading={ocrLoading} 
-              key="finance" 
+              key="finance"
               onAdd={() => { setEditingTransaction(null); setShowAddModal('transaction'); }} 
               onEdit={(tx: any) => { setEditingTransaction(tx); setShowAddModal('transaction'); }}
             />
@@ -1745,7 +1596,7 @@ export default function App() {
               </React.Suspense>
             </motion.div>
           )}
-          {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} key="settings" />}
+          {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} userId={user?.id ?? ''} key="settings" />}
           {currentTab === 'panel_pedidos' && <PanelPedidos />}
         </AnimatePresence>
       </main>
@@ -1775,50 +1626,6 @@ export default function App() {
           />
         )}
 
-        {showPaymentMethodModal && (
-          <QuickRegisterModal 
-            onClose={() => {
-              setShowPaymentMethodModal(false);
-              setOcrResult(null);
-            }}
-            onSelectManual={() => {
-              setShowPaymentMethodModal(false);
-              setShowAddModal('payment');
-            }}
-            onSelectOcr={(e: any) => handleOcr(e, 'quick')}
-            ocrLoading={ocrLoading}
-            ocrResult={ocrResult}
-            onGoToProfile={() => {
-              if (ocrResult?.customerId) {
-                setSelectedPersonId(ocrResult.customerId);
-                setShowPeopleModal(true);
-                setShowPaymentMethodModal(false);
-                setOcrResult(null);
-              }
-            }}
-          />
-        )}
-        {showReconciliationModal && (
-          <ReconciliationModal 
-            onClose={() => setShowReconciliationModal(false)}
-            selectedDates={selectedPaymentDates}
-            payments={payments.filter(p => {
-              const pDate = parseAppDate(p.date);
-              return pDate && selectedPaymentDates.some(d => d.toDateString() === pDate.toDateString());
-            })}
-            customers={customers}
-            pedidos={pedidos}
-            onAddPayment={(amount: number, customerName: string) => {
-              setEditingPayment({ nombre: customerName, pago: amount, date: selectedPaymentDates[0].toISOString() });
-              setShowAddModal('payment');
-              setShowReconciliationModal(false);
-            }}
-            onSelectPerson={(id: string) => {
-              setSelectedPersonId(id);
-              setShowReconciliationModal(false);
-            }}
-          />
-        )}
         {selectedPerson && (
           <PersonDetailModal
             person={selectedPerson}
@@ -1874,190 +1681,6 @@ export default function App() {
           payments={payments}
         />
       )}
-    </div>
-  );
-}
-
-function QuickRegisterModal({ onClose, onSelectManual, onSelectOcr, ocrLoading, ocrResult, onGoToProfile }: any) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [step, setStep] = useState<'select' | 'processing' | 'success'>('select');
-
-  useEffect(() => {
-    if (ocrLoading) {
-      setStep('processing');
-    } else if (ocrResult) {
-      setStep('success');
-    }
-  }, [ocrLoading, ocrResult]);
-
-  const handleOcrClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-      />
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="relative w-full max-w-sm bg-white rounded-[32px] p-8 shadow-2xl overflow-hidden"
-      >
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="p-2 -ml-2 hover:bg-gray-50 rounded-full transition-colors">
-              <ChevronLeft className="w-5 h-5 text-base-text" />
-            </button>
-            <h3 className="text-lg font-black text-base-text tracking-tight uppercase">REGISTRO TOTAL RÁPIDO</h3>
-          </div>
-        </div>
-
-        <AnimatePresence mode="wait">
-          {step === 'select' && (
-            <motion.div 
-              key="select"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-8"
-            >
-              <div className="space-y-2">
-                <p className="text-xs font-bold text-base-text-muted uppercase tracking-widest">Extrae todo (WhatsApp)</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <button 
-                    onClick={handleOcrClick}
-                    disabled={ocrLoading}
-                    className="aspect-square flex flex-col items-center justify-center gap-3 rounded-[32px] bg-pink-50 border-2 border-pink-100 hover:bg-pink-100 transition-all group relative overflow-hidden"
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-pink-500 flex items-center justify-center text-white shadow-lg shadow-pink-200 group-hover:scale-110 transition-transform">
-                      <Camera className="w-6 h-6" />
-                    </div>
-                    <div className="text-center px-2">
-                      <span className="block text-xs font-black text-pink-600 uppercase tracking-widest">CAPTURA</span>
-                      <span className="text-[8px] font-bold text-pink-400 uppercase leading-tight">Extrae todos automáticamente</span>
-                    </div>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      onChange={onSelectOcr} 
-                      className="hidden" 
-                      accept="image/*"
-                    />
-                  </button>
-
-                  <button 
-                    onClick={onSelectManual}
-                    className="aspect-square flex flex-col items-center justify-center gap-3 rounded-[32px] bg-gray-50 border-2 border-gray-100 hover:bg-gray-100 transition-all group"
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 group-hover:scale-110 transition-transform">
-                      <Pencil className="w-6 h-6" />
-                    </div>
-                    <div className="text-center px-2">
-                      <span className="block text-xs font-black text-base-text uppercase tracking-widest">MANUAL</span>
-                      <span className="text-[8px] font-bold text-base-text-muted uppercase leading-tight">Ingresa los datos manualmente</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-3 bg-gray-50/50 p-6 rounded-[24px]">
-                {[
-                  'Nombre del cliente?',
-                  'Número de WhatsApp',
-                  'Monto del pago',
-                  'Fecha de pago',
-                  'Perfil del cliente'
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="w-5 h-5 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500">
-                      <Check className="w-3 h-3 stroke-[3]" />
-                    </div>
-                    <span className="text-[11px] font-bold text-base-text-muted uppercase tracking-wider">{item}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="text-center">
-                <p className="text-[10px] font-bold text-base-text-muted uppercase tracking-widest">
-                  Completa <span className="text-pink-500">todo</span> en pocos pasos!
-                </p>
-                <div className="mt-4 flex justify-center">
-                  <div className="w-32 h-10 bg-gray-100 rounded-full flex items-center justify-center gap-2 text-[10px] font-black text-base-text-muted uppercase tracking-widest">
-                    Solo revisas y <ChevronRight className="w-3 h-3" />
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {step === 'processing' && (
-            <motion.div 
-              key="processing"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="py-12 flex flex-col items-center justify-center text-center space-y-6"
-            >
-              <div className="relative">
-                <div className="w-24 h-24 rounded-full border-4 border-pink-100 border-t-pink-500 animate-spin" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Camera className="w-8 h-8 text-pink-500" />
-                </div>
-              </div>
-              <div>
-                <h4 className="text-xl font-black text-base-text uppercase tracking-tight">Analizando...</h4>
-                <p className="text-xs font-bold text-base-text-muted uppercase tracking-widest mt-2">Gemini está extrayendo los datos</p>
-              </div>
-            </motion.div>
-          )}
-
-          {step === 'success' && (
-            <motion.div 
-              key="success"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center text-center space-y-8"
-            >
-              <div className="w-24 h-24 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500 animate-bounce-subtle">
-                <div className="w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-xl shadow-emerald-200">
-                  <Check className="w-10 h-10 stroke-[4]" />
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-2xl font-black text-base-text uppercase tracking-tight leading-none">¡REGISTRO EXITOSO!</h4>
-                <p className="text-xs font-bold text-base-text-muted uppercase tracking-widest mt-3">Todo se registró correctamente</p>
-              </div>
-
-              <div className="w-full space-y-3 bg-gray-50/50 p-6 rounded-[24px]">
-                {[
-                  { label: 'Nombre registrado', done: true },
-                  { label: 'Número vinculado', done: true },
-                  { label: 'Número registrado', done: true },
-                  { label: 'Perfil creado', done: true }
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <span className="text-[11px] font-bold text-base-text uppercase tracking-wider">{item.label}</span>
-                    <Check className="w-3 h-3 text-emerald-500 stroke-[3] ml-auto" />
-                  </div>
-                ))}
-              </div>
-
-              <button 
-                onClick={onGoToProfile}
-                className="w-full py-4 bg-pink-500 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-pink-100 active:scale-95 transition-all"
-              >
-                VER PERFIL
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
     </div>
   );
 }
@@ -2612,14 +2235,11 @@ function LinkNumberModal({ customer: initialCustomer, customers, onClose }: { cu
   const [searchTerm, setSearchTerm] = useState('');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
-  const [ocrResult, setOcrResult] = useState<{ phone: string, name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isManual, setIsManual] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredCustomers = useMemo(() => {
     if (!searchTerm) return [];
-    return customers.filter(c => 
+    return customers.filter(c =>
       c.name.toLowerCase().includes(searchTerm.toLowerCase())
     ).slice(0, 5);
   }, [customers, searchTerm]);
@@ -2656,71 +2276,9 @@ function LinkNumberModal({ customer: initialCustomer, customers, onClose }: { cu
     }
   };
 
-  const handleOcr = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedCustomer) return;
-
-    setLoading(true);
-    setError(null);
-    setOcrResult(null);
-
-    try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [
-            {
-              inlineData: {
-                data: base64,
-                mimeType: file.type
-              }
-            },
-            {
-              text: "Extract the phone number from the header of this WhatsApp screenshot and the name of the sender/comprobante (look for 'Cuenta origen', QR name, or sender name). Return JSON format: { \"phone\": \"...\", \"name\": \"...\" }"
-            }
-          ],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                phone: { type: Type.STRING },
-                name: { type: Type.STRING }
-              },
-              required: ["phone", "name"]
-            }
-          }
-        });
-
-        const data = JSON.parse(response.text || '{}');
-        const extractedName = data.name || '';
-        const extractedPhone = data.phone?.replace(/\D/g, '') || '';
-
-        const normalizedCustomer = normalizeName(selectedCustomer.name);
-        const normalizedExtracted = normalizeName(extractedName);
-
-        if (normalizedCustomer === normalizedExtracted) {
-          setOcrResult({ phone: extractedPhone, name: extractedName });
-          setPhone(extractedPhone);
-        } else {
-          setError(`No se puede vincular el número. El nombre del comprobante no coincide con el cliente seleccionado.\n\nCliente esperado: ${selectedCustomer.name}\nNombre detectado: ${extractedName}`);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error(err);
-      setError('Error al procesar la imagen');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
@@ -2739,7 +2297,7 @@ function LinkNumberModal({ customer: initialCustomer, customers, onClose }: { cu
                 <label className="text-[10px] font-bold text-base-text-muted uppercase tracking-wider block mb-2">Seleccionar Cliente</label>
                 <div className="relative">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input 
+                  <input
                     type="text"
                     placeholder="Buscar por nombre..."
                     className="input-modern pl-11"
@@ -2749,11 +2307,11 @@ function LinkNumberModal({ customer: initialCustomer, customers, onClose }: { cu
                   />
                 </div>
               </div>
-              
+
               {filteredCustomers.length > 0 && (
                 <div className="space-y-2">
                   {filteredCustomers.map((c, idx) => (
-                    <button 
+                    <button
                       key={`${c.id || 'cust'}-${idx}`}
                       onClick={() => setSelectedCustomer(c)}
                       className="w-full p-4 text-left bg-gray-50 hover:bg-brand/5 rounded-2xl border border-gray-100 transition-colors group"
@@ -2766,7 +2324,7 @@ function LinkNumberModal({ customer: initialCustomer, customers, onClose }: { cu
               )}
 
               {searchTerm && filteredCustomers.length === 0 && (
-                <button 
+                <button
                   onClick={() => setSelectedCustomer({ name: searchTerm })}
                   className="w-full p-4 text-left bg-brand/5 border border-brand/10 rounded-2xl flex items-center justify-between group"
                 >
@@ -2789,101 +2347,36 @@ function LinkNumberModal({ customer: initialCustomer, customers, onClose }: { cu
                 </div>
               </div>
 
-              {!isManual && !ocrResult && !error && (
-                <div className="space-y-3">
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={loading}
-                    className="w-full btn-pill-primary py-4 flex items-center justify-center gap-3"
-                  >
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
-                    Vincular desde captura
-                  </button>
-                  <button 
-                    onClick={() => setIsManual(true)}
-                    className="w-full py-4 text-sm font-bold text-base-text-muted hover:text-brand transition-colors uppercase tracking-widest"
-                  >
-                    Ingresar manual
-                  </button>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-bold text-base-text-muted uppercase tracking-wider block mb-2">Número de WhatsApp</label>
+                  <input
+                    type="tel"
+                    placeholder="Ej: 78945612"
+                    className="input-modern"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    autoFocus
+                  />
                 </div>
-              )}
-
-              {isManual && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-base-text-muted uppercase tracking-wider block mb-2">Número de WhatsApp</label>
-                    <input 
-                      type="tel"
-                      placeholder="Ej: 78945612"
-                      className="input-modern"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      autoFocus
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setIsManual(false)} className="flex-1 py-4 text-sm font-bold text-base-text-muted uppercase tracking-widest">Atrás</button>
-                    <button onClick={handleManualConfirm} disabled={loading || !phone} className="flex-1 btn-pill-primary py-4">
-                      {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : 'Confirmar'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {ocrResult && (
-                <div className="space-y-4">
-                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 space-y-2">
-                    <div className="flex items-center gap-2 text-emerald-600 font-bold text-xs uppercase tracking-wider">
-                      <CheckCircle2 className="w-4 h-4" />
-                      Coincidencia válida
-                    </div>
-                    <div className="text-[10px] font-bold text-emerald-800/60 uppercase tracking-tight">
-                      Nombre detectado: {ocrResult.name}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-base-text-muted uppercase tracking-wider block mb-2">Número detectado</label>
-                    <input 
-                      type="tel"
-                      className="input-modern"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                    />
-                  </div>
-                  <button onClick={handleManualConfirm} disabled={loading} className="w-full btn-pill-primary py-4">
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : 'Confirmar vinculación'}
-                  </button>
-                  <button onClick={() => setOcrResult(null)} className="w-full py-2 text-[10px] font-bold text-base-text-muted uppercase tracking-widest">Subir otra captura</button>
-                </div>
-              )}
+                <button onClick={handleManualConfirm} disabled={loading || !phone} className="w-full btn-pill-primary py-4">
+                  {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : 'Confirmar vinculación'}
+                </button>
+              </div>
 
               {error && (
-                <div className="space-y-4">
-                  <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 space-y-3">
-                    <div className="flex items-center gap-2 text-rose-600 font-bold text-xs uppercase tracking-wider">
-                      <AlertCircle className="w-4 h-4" />
-                      Error de validación
-                    </div>
-                    <p className="text-[11px] font-bold text-rose-800 leading-relaxed whitespace-pre-wrap">
-                      {error}
-                    </p>
+                <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 space-y-2">
+                  <div className="flex items-center gap-2 text-rose-600 font-bold text-xs uppercase tracking-wider">
+                    <AlertCircle className="w-4 h-4" />
+                    Error
                   </div>
-                  <div className="space-y-2">
-                    <button onClick={() => fileInputRef.current?.click()} className="w-full btn-pill-primary py-4">Subir otra captura</button>
-                    <button onClick={() => { setError(null); setIsManual(true); }} className="w-full py-4 text-sm font-bold text-base-text-muted uppercase tracking-widest">Ingresar manual</button>
-                  </div>
+                  <p className="text-[11px] font-bold text-rose-800 leading-relaxed whitespace-pre-wrap">
+                    {error}
+                  </p>
                 </div>
               )}
             </>
           )}
-
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            className="hidden" 
-            accept="image/*" 
-            onChange={handleOcr} 
-          />
         </div>
       </motion.div>
     </div>
@@ -2961,26 +2454,24 @@ function PaymentsView({
   onOpenCalendar, 
   onResetDate, 
   onOpenPeople,
-  onReconcile,
   onToggleHideCompleted,
   pedidos,
   hideCompletedWork,
   orders = []
-}: { 
-  payments: Payment[], 
-  customers: Customer[], 
+}: {
+  payments: Payment[],
+  customers: Customer[],
   pedidos: Pedido[],
   orders?: any[],
-  onAdd: () => void, 
-  onEdit: (p: any) => void, 
-  onLinkNumber: (c: any) => void, 
-  onSelectPerson: (name: string) => void, 
-  selectedDates: Date[], 
+  onAdd: () => void,
+  onEdit: (p: any) => void,
+  onLinkNumber: (c: any) => void,
+  onSelectPerson: (name: string) => void,
+  selectedDates: Date[],
   selectedTime: string,
-  onOpenCalendar: () => void, 
-  onResetDate: () => void, 
+  onOpenCalendar: () => void,
+  onResetDate: () => void,
   onOpenPeople: () => void,
-  onReconcile: () => void,
   onToggleHideCompleted: () => void,
   hideCompletedWork: boolean,
   key?: string 
@@ -3172,15 +2663,8 @@ function PaymentsView({
           <h2 className="text-2xl font-extrabold text-base-text tracking-tight uppercase">Pagos</h2>
         </div>
         <div className="flex gap-2">
-          <button 
-            onClick={onReconcile} 
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 text-gray-400 hover:bg-gray-200 transition-all active:scale-90"
-            title="Conciliar"
-          >
-            <FileCheck size={18} />
-          </button>
-          <button 
-            onClick={() => setShowOnlyWithPhone(!showOnlyWithPhone)} 
+          <button
+            onClick={() => setShowOnlyWithPhone(!showOnlyWithPhone)}
             className={cn(
               "w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90",
               showOnlyWithPhone 
@@ -3285,311 +2769,6 @@ function PaymentsView({
         message="¿Estás seguro de que deseas eliminar este pago permanentemente?"
       />
     </motion.div>
-  );
-}
-
-function ReconciliationModal({ onClose, selectedDates, payments, customers, pedidos, onAddPayment, onSelectPerson }: any) {
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ReconciliationResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const compressImage = (file: File): Promise<{ data: string, mimeType: string }> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          
-          // Max dimension 1600px
-          const maxDim = 1600;
-          if (width > height && width > maxDim) {
-            height = (height * maxDim) / width;
-            width = maxDim;
-          } else if (height > maxDim) {
-            width = (width * maxDim) / height;
-            height = maxDim;
-          }
-          
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          
-          // Compress as JPEG 0.7
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          resolve({
-            data: dataUrl.split(',')[1],
-            mimeType: 'image/jpeg'
-          });
-        };
-        img.src = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const getProbabilityLabel = (score: number) => {
-    if (score >= 80) return "alta probabilidad";
-    if (score >= 40) return "media probabilidad";
-    return "baja probabilidad";
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const imageData = await Promise.all(Array.from(files).map(file => compressImage(file)));
-      
-      // Format date for Gemini (e.g., "7 de abril")
-      const dateStr = selectedDates[0].toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
-      
-      const bankPayments = await processBankScreenshots(imageData, dateStr);
-      const reconResult = reconcilePayments(bankPayments, payments, customers, pedidos);
-      setResult(reconResult);
-    } catch (err: any) {
-      console.error("Reconciliation error:", err);
-      setError("No se pudo procesar la imagen. Verifica tu conexión o intenta con otra captura.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay">
-      <motion.div 
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 100, opacity: 0 }}
-        className="modal-content-modern max-w-md w-full max-h-[90vh] overflow-y-auto"
-      >
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-brand/10 flex items-center justify-center text-brand">
-              <FileCheck className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-xl font-black text-base-text uppercase tracking-tight">Conciliación</h3>
-              <p className="text-[10px] font-bold text-base-text-muted uppercase tracking-widest">Bancaria Automática</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <X className="w-6 h-6 text-gray-400" />
-          </button>
-        </div>
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-            <p className="text-sm text-red-600 font-medium leading-relaxed">{error}</p>
-          </div>
-        )}
-
-        {!result && !loading && (
-          <div className="space-y-6">
-            <div className="p-8 border-2 border-dashed border-gray-100 rounded-3xl flex flex-col items-center justify-center text-center space-y-4 bg-gray-50/30">
-              <div className="w-16 h-16 rounded-full bg-white shadow-sm flex items-center justify-center text-brand">
-                <Camera className="w-8 h-8" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-base-text">Sube capturas del extracto</p>
-                <p className="text-[10px] text-base-text-muted mt-1 uppercase tracking-wider">Puedes seleccionar varias imágenes a la vez</p>
-              </div>
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="btn-pill-primary px-8 py-3"
-              >
-                Seleccionar Imágenes
-              </button>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                className="hidden" 
-                accept="image/*"
-                multiple
-              />
-            </div>
-            
-            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex gap-3">
-              <Lightbulb className="w-5 h-5 text-blue-500 shrink-0" />
-              <p className="text-[11px] text-blue-700 font-medium leading-relaxed">
-                Tip: Asegúrate de que los montos y las horas sean legibles para una mejor precisión.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {loading && (
-          <div className="py-20 flex flex-col items-center justify-center space-y-4">
-            <Loader2 className="w-12 h-12 text-brand animate-spin" />
-            <div className="text-center">
-              <p className="text-sm font-black text-base-text uppercase tracking-widest">Analizando captura...</p>
-              <p className="text-[10px] text-base-text-muted mt-1 uppercase tracking-widest">Gemini está procesando los datos</p>
-            </div>
-          </div>
-        )}
-
-        {result && (
-          <div className="space-y-6 py-2">
-            {result.matches ? (
-              <div className="space-y-6">
-                {/* Success Header - More Compact */}
-                <div className="flex items-center gap-4 p-6 bg-emerald-50 rounded-[2rem] border border-emerald-100">
-                  <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-200 shrink-0 animate-bounce-subtle">
-                    <Check className="w-10 h-10 stroke-[4]" />
-                  </div>
-                  <div className="text-left">
-                    <h4 className="text-xl font-black text-emerald-900 uppercase tracking-tight leading-none">Todo cuadra</h4>
-                    <p className="text-[10px] font-bold text-emerald-600/80 uppercase tracking-widest mt-1">Validación Exitosa</p>
-                  </div>
-                </div>
-
-                {/* Comparison Grid */}
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Total Amount Check */}
-                    <div className="p-4 bg-gray-50 rounded-3xl border border-gray-100 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Monto Total</p>
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-medium text-gray-500">Banco</span>
-                          <span className="text-xs font-black text-base-text">Bs {result.bankPayments.reduce((acc, p) => acc + p.amount, 0)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-medium text-gray-500">App</span>
-                          <span className="text-xs font-bold text-gray-400">Bs {result.appPayments.reduce((acc, p) => acc + Number(p.pago), 0)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Transaction Count Check */}
-                    <div className="p-4 bg-gray-50 rounded-3xl border border-gray-100 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Total Pagos</p>
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-medium text-gray-500">Banco</span>
-                          <span className="text-xs font-black text-base-text">{result.bankPayments.length}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-medium text-gray-500">App</span>
-                          <span className="text-xs font-bold text-gray-400">{result.appPayments.length}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Verification Status */}
-                  <div className="flex items-center gap-3 p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50">
-                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                    <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Datos verificados correctamente</span>
-                  </div>
-                </div>
-
-                <button 
-                  onClick={onClose}
-                  className="btn-pill-primary w-full py-4 text-sm shadow-emerald-200/50"
-                >
-                  Entendido
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Error Header - More Compact */}
-                <div className="flex items-center gap-4 p-6 bg-rose-50 rounded-[2rem] border border-rose-100">
-                  <div className="w-16 h-16 bg-rose-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-rose-200 shrink-0 animate-pulse-subtle">
-                    <X className="w-10 h-10 stroke-[4]" />
-                  </div>
-                  <div className="text-left flex-1">
-                    <h4 className="text-xl font-black text-rose-900 uppercase tracking-tight leading-none">Pagos no coinciden</h4>
-                    <div className="mt-2 inline-block px-2 py-1 bg-white/50 rounded-lg">
-                      <p className="text-[9px] font-black text-rose-600 uppercase tracking-widest">
-                        {result.missingInApp.length > 0 
-                          ? `Faltan: ${result.missingInApp.length} ${result.missingInApp.length === 1 ? 'pago' : 'pagos'} de Bs ${result.missingInApp[0]?.amount || 0}`
-                          : `Sobran: ${result.extraInApp.length} ${result.extraInApp.length === 1 ? 'pago' : 'pagos'} en la App`
-                        }
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Candidates List */}
-                {result.candidates.length > 0 ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center px-2">
-                      <p className="text-[9px] font-black text-base-text-muted uppercase tracking-[0.2em]">Posibles responsables</p>
-                    </div>
-                    
-                    <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1 scrollbar-hide">
-                      {result.candidates.map((c, i) => (
-                        <div 
-                          key={i} 
-                          onClick={() => onSelectPerson(c.customerId || cleanName(c.name))}
-                          className="card-modern p-4 flex justify-between items-center hover:border-brand hover:shadow-md transition-all cursor-pointer active:scale-[0.98] bg-white border-gray-100"
-                        >
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-sm font-black text-base-text uppercase tracking-tight">{c.name}</span>
-                            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-tighter w-fit ${
-                              c.score >= 80 ? 'bg-emerald-100 text-emerald-600' : 
-                              c.score >= 40 ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-400'
-                            }`}>
-                              {getProbabilityLabel(c.score)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-sm font-black text-base-text">Bs {c.missingAmount}</span>
-                            <div className="w-8 h-8 bg-brand/10 text-brand rounded-xl flex items-center justify-center group-hover:bg-brand group-hover:text-white transition-all">
-                              <Plus className="w-4 h-4" />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center p-8 border-2 border-dashed border-gray-200 rounded-[2rem] bg-gray-50/50 space-y-3">
-                    <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center text-gray-400 mx-auto">
-                      <FileSearch className="w-5 h-5" />
-                    </div>
-                    <p className="text-[10px] font-bold text-base-text-muted uppercase tracking-widest leading-relaxed px-4">
-                      No se encontraron clientes con pagos pendientes que coincidan.
-                    </p>
-                    <button 
-                      onClick={() => {
-                        setResult(null);
-                        fileInputRef.current?.click();
-                      }}
-                      className="text-brand font-black text-[9px] uppercase tracking-[0.2em] hover:underline"
-                    >
-                      Reintentar Captura
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <button 
-              onClick={() => { setResult(null); }}
-              className="w-full py-4 text-xs font-black text-base-text-muted uppercase tracking-[0.2em] hover:text-brand transition-colors"
-            >
-              Analizar otra captura
-            </button>
-          </div>
-        )}
-      </motion.div>
-    </div>
   );
 }
 
@@ -3893,7 +3072,7 @@ function ContextMenu({ onClose, onDuplicate, onDelete }: any) {
   );
 }
 
-function FinanceView({ transactions, categories, onOcr, ocrLoading, onAdd, onEdit }: any) {
+function FinanceView({ transactions, categories, onAdd, onEdit }: any) {
   const [showDetails, setShowDetails] = useState<'income' | 'expense' | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -4024,24 +3203,12 @@ function FinanceView({ transactions, categories, onOcr, ocrLoading, onAdd, onEdi
       <div className="flex justify-between items-center px-1">
         <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Finanzas</h2>
         <div className="flex gap-2">
-          <label className="btn-tertiary text-xs cursor-pointer">
-            <Camera className="w-4 h-4" />
-            OCR
-            <input type="file" accept="image/*" className="hidden" onChange={onOcr} disabled={ocrLoading} />
-          </label>
           <button onClick={onAdd} className="btn-tertiary-brand text-xs">
             <Plus className="w-4 h-4" />
             Transacción
           </button>
         </div>
       </div>
-
-      {ocrLoading && (
-        <div className="bg-brand-secondary p-4 rounded-[20px] flex items-center gap-3 border border-brand/10">
-          <Loader2 className="w-5 h-5 text-brand animate-spin" />
-          <p className="text-xs font-bold text-brand uppercase tracking-wider">Procesando captura...</p>
-        </div>
-      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-3">
@@ -5356,7 +4523,7 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
                   <div className="text-left">
                     <p className="text-sm font-bold text-base-text uppercase tracking-tight truncate max-w-[150px]">{getVisualName(person.nombre)}</p>
                     <div className="flex items-center gap-2 text-[9px] font-bold text-base-text-muted uppercase tracking-wider">
-                      {person.phone && <span className="text-emerald-600">{person.phone} • </span>}
+                      {person.waNumber && <span className="text-emerald-600">{person.waNumber} • </span>}
                       <span>{person.count} {person.count === 1 ? 'Pago' : 'Pagos'}</span>
                       <span>•</span>
                       <span>Último: {formatAppDate(person.lastDate)}</span>
@@ -5368,8 +4535,8 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
                     <p className="text-base font-extrabold text-brand leading-none">Bs {person.total}</p>
                     <ChevronRight className="w-4 h-4 text-gray-300 ml-auto mt-1 group-hover:translate-x-1 transition-transform" />
                   </div>
-                  {!person.phone && (
-                    <button 
+                  {!person.waNumber && (
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onLinkNumber({
@@ -5564,26 +4731,30 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const [quickPhone, setQuickPhone] = useState('');
   const [isLinking, setIsLinking] = useState(false);
   const [showQuickLink, setShowQuickLink] = useState(false);
+  const [noteText, setNoteText] = useState(person.notes || '');
+  const [isSavingNote, setIsSavingNote] = useState(false);
 
   const handleQuickLink = async () => {
     if (!quickPhone) return;
     setIsLinking(true);
     try {
-      const phoneToSave = quickPhone.startsWith('+') ? quickPhone : `+591${quickPhone}`;
+      const cleanNumber = quickPhone.replace(/\D/g, '');
+      const waToSave = cleanNumber.startsWith('591') ? cleanNumber : `591${cleanNumber}`;
       if (person.customerId) {
-        await updateDoc(doc(db, 'customers', person.customerId), { phone: phoneToSave });
+        await clientesApi.update(person.customerId, {
+          wa_number: waToSave,
+          wa_linked_at: new Date().toISOString(),
+        });
       } else {
-        const cleanedName = cleanName(person.nombre);
-        await addDoc(collection(db, 'customers'), {
+        await clientesApi.create({
           name: person.nombre.toUpperCase(),
-          canonicalName: cleanedName,
-          phone: phoneToSave,
-          createdAt: serverTimestamp(),
-          totalPaid: 0
+          canonicalName: cleanName(person.nombre),
+          phone: waToSave,
         });
       }
       setShowQuickLink(false);
       setQuickPhone('');
+      await loadData();
     } catch (error) {
       console.error("Error linking phone:", error);
     } finally {
@@ -5963,20 +5134,20 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
               </p>
               <h1 className="clone-name-title leading-tight">{getVisualName(person.nombre)}</h1>
               <div className="mt-1">
-                {person.phone ? (
-                  <a 
-                    href={`https://wa.me/${person.phone.replace(/\D/g, '')}`}
+                {person.waNumber ? (
+                  <a
+                    href={`https://wa.me/${person.waNumber.replace(/\D/g, '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-brand font-black text-[18px] tracking-tight hover:underline flex items-center"
                   >
-                    {person.phone.replace('+591', '').trim()}
+                    {person.waNumber.replace('591', '')}
                   </a>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {showQuickLink ? (
                       <div className="flex items-center gap-2">
-                        <input 
+                        <input
                           autoFocus
                           type="tel"
                           placeholder="Número..."
@@ -5985,7 +5156,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                           className="w-32 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1 text-xs font-bold focus:outline-none focus:border-brand"
                           onKeyDown={(e) => e.key === 'Enter' && handleQuickLink()}
                         />
-                        <button 
+                        <button
                           onClick={handleQuickLink}
                           disabled={isLinking}
                           className="bg-brand text-white px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
@@ -5994,7 +5165,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                         </button>
                       </div>
                     ) : (
-                      <div 
+                      <div
                         onClick={() => setShowQuickLink(true)}
                         className="flex items-center text-gray-400 text-[11px] font-bold uppercase tracking-wider cursor-pointer hover:text-brand transition-colors"
                       >
@@ -6212,20 +5383,20 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             </p>
             <h1 className="clone-name-title leading-tight">{getVisualName(person.nombre)}</h1>
             <div className="mt-1">
-              {person.phone ? (
-                <a 
-                  href={`https://wa.me/${person.phone.replace(/\D/g, '')}`}
+              {person.waNumber ? (
+                <a
+                  href={`https://wa.me/${person.waNumber.replace(/\D/g, '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-brand font-black text-[18px] tracking-tight hover:underline flex items-center"
                 >
-                  {person.phone.replace('+591', '').trim()}
+                  {person.waNumber.replace('591', '')}
                 </a>
               ) : (
                 <div className="flex flex-col gap-2">
                   {showQuickLink ? (
                     <div className="flex items-center gap-2">
-                      <input 
+                      <input
                         autoFocus
                         type="tel"
                         placeholder="Número..."
@@ -6234,7 +5405,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                         className="w-32 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1 text-xs font-bold focus:outline-none focus:border-brand"
                         onKeyDown={(e) => e.key === 'Enter' && handleQuickLink()}
                       />
-                      <button 
+                      <button
                         onClick={handleQuickLink}
                         disabled={isLinking}
                         className="bg-brand text-white px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
@@ -6243,7 +5414,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                       </button>
                     </div>
                   ) : (
-                    <div 
+                    <div
                       onClick={() => setShowQuickLink(true)}
                       className="flex items-center text-gray-400 text-[11px] font-bold uppercase tracking-wider cursor-pointer hover:text-brand transition-colors"
                     >
@@ -6275,6 +5446,36 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             <span className="text-xl font-black text-emerald-700">{stats.orderCount}</span>
           </div>
         </div>
+
+        {person.customerId && (
+          <div className="mb-6">
+            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Notas del operador</p>
+            <textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Observaciones sobre esta clienta..."
+              rows={2}
+              className="w-full bg-gray-50 border border-gray-200 rounded-[16px] px-4 py-3 text-sm font-medium text-gray-700 placeholder-gray-300 focus:outline-none focus:border-brand resize-none"
+            />
+            {noteText !== (person.notes || '') && (
+              <button
+                onClick={async () => {
+                  setIsSavingNote(true);
+                  try {
+                    await clientesApi.update(person.customerId, { notes: noteText });
+                    await loadData();
+                  } finally {
+                    setIsSavingNote(false);
+                  }
+                }}
+                disabled={isSavingNote}
+                className="mt-2 px-4 py-1.5 bg-brand text-white rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                {isSavingNote ? '...' : 'Guardar nota'}
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="space-y-8 pb-24">
           {dailyOrders.length === 0 ? (

@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "CRUZ J. INES",
+  "monto_esperado": 25,
+  "banco_esperado": "BNB",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "baja",
+  "notas": "Comprobante BNB con nombre parcial (inicial). Validar que acepta formato 'APELLIDO I. NOMBRE' sin inventar las letras faltantes."
+}

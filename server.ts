@@ -5,6 +5,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { supabaseServer } from "./src/lib/supabaseServer.js";
 import { supabaseStore } from "./src/lib/supabaseStore.js";
+import {
+  buildProductCatalogPrompt,
+  buildImageClassifierPrompt,
+  buildReceiptQrPrompt,
+  CATEGORIAS_VALIDAS,
+  TALLAS_VALIDAS,
+} from "./src/ai/prompts/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -814,10 +821,170 @@ const PORT = Number(process.env.PORT || 3001);
   });
 
   // ==========================================================================
-  // IA — Anlisis de imágenes de producto con Gemini Vision
+  // IA GATEWAY — Punto centralizado para TODAS las llamadas a Gemini
   // ==========================================================================
 
-  async function analyzeProductImages(imageUrls: string[]): Promise<{
+  /**
+   * aiGateway: Lee la key desde ai_config (DB) o .env, llama a Gemini,
+   * loguea el resultado en ai_usage_log, y si falla con 429 (rate limit)
+   * reintenta con la key de respaldo automáticamente.
+   */
+  async function getAiKeys(userId?: string): Promise<string[]> {
+    const envKey = process.env.GEMINI_API_KEY ?? '';
+    if (!userId) return [envKey].filter(Boolean);
+    try {
+      const { data } = await supabaseServer
+        .from('ai_config')
+        .select('primary_key_encrypted, fallback_key_encrypted, fallback2_key_encrypted, key3_encrypted, key4_encrypted, key5_encrypted')
+        .eq('user_id', userId)
+        .single();
+      if (data) {
+        return [
+          data.primary_key_encrypted || envKey,
+          data.fallback_key_encrypted,
+          data.fallback2_key_encrypted,
+          data.key3_encrypted,
+          data.key4_encrypted,
+          data.key5_encrypted,
+        ].filter(Boolean) as string[];
+      }
+    } catch { /* tabla no existe aún → usar .env */ }
+    return [envKey].filter(Boolean);
+  }
+
+  async function getAiFeatureConfig(userId: string, feature: string): Promise<{ enabled: boolean; model: string }> {
+    try {
+      const { data } = await supabaseServer
+        .from('ai_config')
+        .select('features')
+        .eq('user_id', userId)
+        .single();
+      if (data?.features?.[feature]) {
+        return data.features[feature];
+      }
+    } catch { /* tabla no existe → defaults */ }
+    return { enabled: true, model: 'gemini-2.5-flash-lite' };
+  }
+
+  async function logAiUsage(entry: {
+    userId: string; feature: string; model: string;
+    inputTokens?: number; outputTokens?: number; latencyMs: number;
+    success: boolean; errorMessage?: string; metadata?: any;
+  }) {
+    try {
+      await supabaseServer.from('ai_usage_log').insert({
+        user_id: entry.userId,
+        feature: entry.feature,
+        model: entry.model,
+        input_tokens: entry.inputTokens ?? 0,
+        output_tokens: entry.outputTokens ?? 0,
+        latency_ms: entry.latencyMs,
+        success: entry.success,
+        error_message: entry.errorMessage ?? null,
+        metadata: entry.metadata ?? null,
+      });
+    } catch (e: any) { console.error('[ai-gateway] Error guardando log:', e?.message ?? e); }
+  }
+
+  async function callGeminiGateway(params: {
+    userId: string;
+    feature: string;
+    prompt: string;
+    imageParts?: { inlineData: { mimeType: string; data: string } }[];
+    maxTokens?: number;
+    temperature?: number;
+    jsonMode?: boolean;
+  }): Promise<{ text: string; model: string; latencyMs: number } | null> {
+    const config = await getAiFeatureConfig(params.userId, params.feature);
+    if (!config.enabled) {
+      console.log(`[ai-gateway] Feature '${params.feature}' está DESACTIVADA`);
+      return null;
+    }
+
+    const keysToTry = await getAiKeys(params.userId);
+    const model = config.model || 'gemini-2.5-flash-lite';
+
+    for (const apiKey of keysToTry) {
+      const start = Date.now();
+      try {
+        const parts: any[] = [{ text: params.prompt }];
+        if (params.imageParts) parts.push(...params.imageParts);
+
+        const body: any = {
+          contents: [{ parts }],
+          generationConfig: {
+            temperature: params.temperature ?? 0.2,
+            maxOutputTokens: params.maxTokens ?? 400,
+          },
+        };
+        if (params.jsonMode) {
+          body.generationConfig.responseMimeType = 'application/json';
+        }
+
+        const resp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(20000),
+          }
+        );
+
+        const latencyMs = Date.now() - start;
+
+        if (resp.status === 429) {
+          console.log(`[ai-gateway] 429 Rate limit con key ...${apiKey.slice(-4)}. Intentando siguiente.`);
+          await logAiUsage({
+            userId: params.userId, feature: params.feature, model,
+            latencyMs, success: false, errorMessage: 'Rate limit 429',
+          });
+          continue; // Intentar con la siguiente key
+        }
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          console.error(`[ai-gateway] HTTP ${resp.status}:`, errText.slice(0, 200));
+          await logAiUsage({
+            userId: params.userId, feature: params.feature, model,
+            latencyMs, success: false, errorMessage: `HTTP ${resp.status}`,
+          });
+          return null;
+        }
+
+        const data = await resp.json();
+        const textResp = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const usage = data.usageMetadata;
+
+        await logAiUsage({
+          userId: params.userId, feature: params.feature, model, latencyMs,
+          success: true,
+          inputTokens: usage?.promptTokenCount,
+          outputTokens: usage?.candidatesTokenCount,
+        });
+
+        return { text: textResp, model, latencyMs };
+
+      } catch (err: any) {
+        const latencyMs = Date.now() - start;
+        console.error(`[ai-gateway] Error:`, err?.message);
+        await logAiUsage({
+          userId: params.userId, feature: params.feature, model,
+          latencyMs, success: false, errorMessage: err?.message,
+        });
+        return null;
+      }
+    }
+
+    console.error('[ai-gateway] Todas las keys fallaron para', params.feature);
+    return null;
+  }
+
+  // ==========================================================================
+  // IA — Análisis de imágenes de producto con Gemini Vision (via Gateway)
+  // ==========================================================================
+
+  async function analyzeProductImages(imageUrls: string[], userId: string): Promise<{
     nombre: string;
     descripcion: string;
     categoria: string;
@@ -827,11 +994,8 @@ const PORT = Number(process.env.PORT || 3001);
     tallas: string[];
     confianza: 'alta' | 'media' | 'baja';
   } | null> {
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY) return null;
     if (!imageUrls || imageUrls.length === 0) return null;
 
-    // Descargar imágenes y convertir a base64 para enviarlas a Gemini
     const imageParts: { inlineData: { mimeType: string; data: string } }[] = [];
     for (const url of imageUrls.slice(0, 3)) {
       try {
@@ -845,93 +1009,44 @@ const PORT = Number(process.env.PORT || 3001);
         console.warn('[ai-vision] No se pudo descargar imagen:', url, e);
       }
     }
-
     if (imageParts.length === 0) return null;
 
-    const CATEGORIAS_VALIDAS = ['Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos', 'Pantalones', 'Faldas', 'Accesorios', 'General'];
-    const TALLAS_VALIDAS = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '34', '36', '38', '40', '42', 'Único'];
+    const prompt = buildProductCatalogPrompt();
 
-    const prompt = `Eres un experto catalogando ropa de segunda mano.
-Analizarás 1 a 3 imágenes de una prenda (foto completa, etiqueta, o textura).
-Devuelve ÚNICAMENTE un JSON válido sin texto extra ni markdown:
-{
-  "nombre": "MÁXIMO 2 o 3 PALABRAS. Solo el tipo de prenda (Ej: 'Blusa manga corta', 'Jean skinny', 'Vestido floral'). PROHIBIDO incluir la marca aquí.",
-  "descripcion": "Máximo 2 líneas breves. Si se ve la MARCA en la etiqueta, ponla aquí al principio. Describe material y estilo.",
-  "categoria": "Una de: ${CATEGORIAS_VALIDAS.join(' / ')}",
-  "marca": "Marca legible en la etiqueta. Si no → 'Genérica'",
-  "tipoPrenda": "Top / Blusa / Camisa / Vestido / Polera / Chaqueta / Pantalón / Jean / Falda / Conjunto / Shorts / Accesorio",
-  "colorPrincipal": "Color o colores principales",
-  "tallas": ["Tallas visibles. Array vacío si no hay. Valores: ${TALLAS_VALIDAS.join(', ')}"],
-  "confianza": "alta / media / baja"
-}
-Reglas críticas:
-- 'nombre' DEBE SER CORTÍSIMO (2 o 3 palabras). JAMÁS LA MARCA.
-- La marca va SOLO en 'descripcion' y 'marca'.
-- 'categoria' debe ser EXACTAMENTE una de las opciones.
-- JSON 100% válido y parseable.`;
+    const result = await callGeminiGateway({
+      userId,
+      feature: 'product_vision',
+      prompt,
+      imageParts,
+      maxTokens: 400,
+      temperature: 0.2,
+      jsonMode: true,
+    });
+
+    if (!result) return null;
 
     try {
-      const body = {
-        contents: [{
-          parts: [
-            { text: prompt },
-            ...imageParts,
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 400,
-          responseMimeType: 'application/json',
-        },
-      };
-
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(20000), // 20 segundos máx
-        }
-      );
-
-      if (!resp.ok) {
-        const errText = await resp.text();
-        console.error('[ai-vision] Gemini HTTP error:', resp.status, errText);
-        return null;
-      }
-
-      const data = await resp.json();
-      const textResp: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-
-      // Extraer JSON de la respuesta (puede venir envuelto en markdown ```json)
-      const jsonMatch = textResp.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.error('[ai-vision] Gemini no devolvió JSON válido:', textResp);
-        return null;
-      }
+      const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
 
       const parsed = JSON.parse(jsonMatch[0]);
-
-      // Validar y sanitizar la respuesta
       const categoriaFinal = CATEGORIAS_VALIDAS.includes(parsed.categoria) ? parsed.categoria : 'General';
       const tallasFinal: string[] = Array.isArray(parsed.tallas)
         ? parsed.tallas.filter((t: string) => TALLAS_VALIDAS.includes(String(t).toUpperCase()) || String(t).length <= 5)
         : [];
 
       return {
-        nombre:        String(parsed.nombre || '').slice(0, 80),
-        descripcion:   String(parsed.descripcion || ''),
-        categoria:     categoriaFinal,
-        marca:         String(parsed.marca || 'Genérica'),
-        tipoPrenda:    String(parsed.tipoPrenda || ''),
+        nombre: String(parsed.nombre || '').slice(0, 80),
+        descripcion: String(parsed.descripcion || ''),
+        categoria: categoriaFinal,
+        marca: String(parsed.marca || 'Genérica'),
+        tipoPrenda: String(parsed.tipoPrenda || ''),
         colorPrincipal: String(parsed.colorPrincipal || ''),
-        tallas:        tallasFinal,
-        confianza:     ['alta', 'media', 'baja'].includes(parsed.confianza) ? parsed.confianza : 'media',
+        tallas: tallasFinal,
+        confianza: ['alta', 'media', 'baja'].includes(parsed.confianza) ? parsed.confianza : 'media',
       };
-
     } catch (err) {
-      console.error('[ai-vision] Error al llamar Gemini:', err);
+      console.error('[ai-vision] Error parseando respuesta:', err);
       return null;
     }
   }
@@ -946,7 +1061,7 @@ Reglas críticas:
         return res.status(400).json({ ok: false, error: "imageUrls requerido (array de URLs)" });
       }
 
-      const result = await analyzeProductImages(imageUrls);
+      const result = await analyzeProductImages(imageUrls, userId);
 
       if (!result) {
         return res.status(422).json({
@@ -955,7 +1070,6 @@ Reglas críticas:
         });
       }
 
-      // Opción A: Si hay marca real, concatenarla al nombre
       let nombreFinal = result.nombre;
       if (result.marca && result.marca !== 'Genérica') {
         nombreFinal = `${result.marca} — ${result.nombre}`;
@@ -968,6 +1082,443 @@ Reglas críticas:
       res.status(500).json({ ok: false, error: err?.message || "Error interno del servidor" });
     }
   });
+
+  // ==========================================================================
+  // IA — Prompt Unificado de Imagen (prenda / comprobante / otro)
+  // ==========================================================================
+
+  async function analyzeImageUnified(imageUrls: string[], userId: string): Promise<{
+    tipo: 'COMPROBANTE_PAGO' | 'PRENDA_ROPA' | 'OTRO';
+    // COMPROBANTE_PAGO
+    pagador?: string | null;
+    receptor?: string | null;
+    monto?: number | null;
+    moneda?: string | null;
+    banco_app?: string | null;
+    fecha?: string | null;
+    hora?: string | null;
+    nro_operacion?: string | null;
+    // PRENDA_ROPA
+    nombre?: string;
+    color?: string;
+    categoria?: string;
+    talla?: string | null;
+    // OTRO
+    descripcion?: string;
+    confianza: 'alta' | 'media' | 'baja';
+  } | null> {
+    const imageParts = await Promise.all(imageUrls.map(async (url) => {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!r.ok) return null;
+        const buf = await r.arrayBuffer();
+        const ct = r.headers.get('content-type') || 'image/jpeg';
+        return { inlineData: { mimeType: ct, data: Buffer.from(buf).toString('base64') } };
+      } catch { return null; }
+    }));
+    const validParts = imageParts.filter(Boolean) as any[];
+    if (validParts.length === 0) return null;
+
+    const prompt = buildImageClassifierPrompt();
+
+    const result = await callGeminiGateway({
+      userId,
+      feature: 'product_vision',
+      prompt,
+      imageParts: validParts,
+      maxTokens: 300,
+      temperature: 0,
+      jsonMode: true,
+    });
+
+    if (!result?.text) return null;
+    try {
+      const m = result.text.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      return JSON.parse(m[0]);
+    } catch { return null; }
+  }
+
+  app.post('/api/ai/analyze-image', async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ ok: false, error: 'x-user-id requerido' });
+      const { imageUrls } = req.body;
+      if (!imageUrls?.length) return res.status(400).json({ ok: false, error: 'imageUrls requerido' });
+      const result = await analyzeImageUnified(imageUrls, userId);
+      if (!result) return res.status(422).json({ ok: false, error: 'No se pudo analizar la imagen' });
+      res.json({ ok: true, data: result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message });
+    }
+  });
+
+  // ==========================================================================
+  // IA — Prompt QR Especializado (extrae pagador + receptor + detalles)
+  // ==========================================================================
+
+  async function analyzeQrReceipt(imageUrl: string, userId: string): Promise<{
+    es_comprobante: boolean;
+    pagador: string | null;
+    receptor: string | null;
+    monto: number | null;
+    moneda: string | null;
+    banco_app: string | null;
+    fecha: string | null;
+    hora: string | null;
+    nro_operacion: string | null;
+    confianza: 'alta' | 'media' | 'baja';
+  } | null> {
+    let imagePart: any;
+    try {
+      const r = await fetch(imageUrl, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return null;
+      const buf = await r.arrayBuffer();
+      const ct = r.headers.get('content-type') || 'image/jpeg';
+      imagePart = { inlineData: { mimeType: ct, data: Buffer.from(buf).toString('base64') } };
+    } catch { return null; }
+
+    const prompt = buildReceiptQrPrompt();
+
+    const result = await callGeminiGateway({
+      userId,
+      feature: 'product_vision',
+      prompt,
+      imageParts: [imagePart],
+      maxTokens: 250,
+      temperature: 0,
+      jsonMode: true,
+    });
+
+    if (!result?.text) return null;
+    try {
+      const m = result.text.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      return JSON.parse(m[0]);
+    } catch { return null; }
+  }
+
+  app.post('/api/ai/analyze-qr', async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ ok: false, error: 'x-user-id requerido' });
+      const { imageUrl } = req.body;
+      if (!imageUrl) return res.status(400).json({ ok: false, error: 'imageUrl requerido' });
+      const result = await analyzeQrReceipt(imageUrl, userId);
+      if (!result) return res.status(422).json({ ok: false, error: 'No se pudo analizar el comprobante' });
+
+      // Si es comprobante con pagador → intentar vincular al perfil del cliente
+      if (result.es_comprobante && result.pagador && req.body.waNumber) {
+        const canonicalPagador = result.pagador
+          .toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z\s]/g, '').trim();
+        try {
+          await supabaseServer.rpc('fn_link_customer_wa', {
+            p_canonical_name: canonicalPagador,
+            p_wa_number: req.body.waNumber.replace(/\D/g, ''),
+            p_user_id: userId,
+          });
+        } catch (e) { console.error('[link-wa] Error:', e); }
+      }
+
+      res.json({ ok: true, data: result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message });
+    }
+  });
+
+  // ==========================================================================
+  // IA — Variantes base64 para tests locales (script test-ai-receipts.mjs)
+  // Acepta imageData como data URI (data:image/jpeg;base64,...) en vez de URL
+  // ==========================================================================
+
+  function dataUriToImagePart(dataUri: string): { inlineData: { mimeType: string; data: string } } | null {
+    const m = dataUri.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!m) return null;
+    return { inlineData: { mimeType: m[1], data: m[2] } };
+  }
+
+  app.post('/api/ai/analyze-qr-base64', async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ ok: false, error: 'x-user-id requerido' });
+      const { imageData } = req.body;
+      if (!imageData) return res.status(400).json({ ok: false, error: 'imageData requerido' });
+
+      const imagePart = dataUriToImagePart(imageData);
+      if (!imagePart) return res.status(400).json({ ok: false, error: 'imageData inválido (debe ser data URI)' });
+
+      const config = await getAiFeatureConfig(userId, 'product_vision');
+      const keysToTry = await getAiKeys(userId);
+      const model = config.model || 'gemini-2.5-flash-lite';
+
+      // Usar el prompt canónico (que incluye el contexto de negocio: Leidy = receptora)
+      const prompt = buildReceiptQrPrompt();
+
+      let result = null;
+      for (const apiKey of keysToTry) {
+        const start = Date.now();
+        try {
+          const resp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }, imagePart] }],
+                generationConfig: { temperature: 0, maxOutputTokens: 250, responseMimeType: 'application/json' },
+              }),
+              signal: AbortSignal.timeout(25000),
+            }
+          );
+          const latencyMs = Date.now() - start;
+          if (resp.status === 429) { await logAiUsage({ userId, feature: 'product_vision', model, latencyMs, success: false, errorMessage: '429' }); continue; }
+          if (!resp.ok) { await logAiUsage({ userId, feature: 'product_vision', model, latencyMs, success: false, errorMessage: `HTTP ${resp.status}` }); break; }
+          const data = await resp.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          await logAiUsage({ userId, feature: 'product_vision', model, latencyMs, success: true, inputTokens: data.usageMetadata?.promptTokenCount, outputTokens: data.usageMetadata?.candidatesTokenCount });
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) result = JSON.parse(jsonMatch[0]);
+          break;
+        } catch { break; }
+      }
+
+      if (!result) return res.status(422).json({ ok: false, error: 'No se pudo analizar' });
+      res.json({ ok: true, data: result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message });
+    }
+  });
+
+  app.post('/api/ai/analyze-image-base64', async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ ok: false, error: 'x-user-id requerido' });
+      const { imageData } = req.body;
+      if (!imageData) return res.status(400).json({ ok: false, error: 'imageData requerido' });
+
+      const imagePart = dataUriToImagePart(imageData);
+      if (!imagePart) return res.status(400).json({ ok: false, error: 'imageData inválido' });
+
+      // Reutilizar analyzeImageUnified pero con imagePart ya construido
+      const result = await callGeminiGateway({
+        userId, feature: 'product_vision',
+        prompt: `Analiza esta imagen y clasifícala en UNA de estas 3 categorías:
+A) COMPROBANTE_PAGO: Screenshot de Yape, transferencia, QR pagado. {"tipo":"COMPROBANTE_PAGO","pagador":null,"monto":null,"confianza":"baja"}
+B) PRENDA_ROPA: Foto de ropa. {"tipo":"PRENDA_ROPA","nombre":"2-3 palabras","color":"color","categoria":"Blusas|Pantalones|Vestidos|Chaquetas|General","confianza":"alta"}
+C) OTRO: Cualquier otra cosa. {"tipo":"OTRO","descripcion":"breve","confianza":"baja"}
+Responde SOLO con JSON válido.`,
+        imageParts: [imagePart],
+        maxTokens: 150, temperature: 0, jsonMode: true,
+      });
+
+      if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta' });
+      const m = result.text.match(/\{[\s\S]*\}/);
+      if (!m) return res.status(422).json({ ok: false, error: 'JSON inválido' });
+      res.json({ ok: true, data: JSON.parse(m[0]) });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message });
+    }
+  });
+
+  // ==========================================================================
+  // CLIENTES — Vinculación de WhatsApp al perfil (triangulación manual)
+  // ==========================================================================
+
+  app.post('/api/clientes/:id/link-wa', async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+      const { waNumber } = req.body;
+      if (!waNumber) return res.status(400).json({ error: 'waNumber requerido' });
+
+      const cleanWa = String(waNumber).replace(/\D/g, '');
+      const { data, error } = await supabaseServer
+        .from('customers')
+        .update({ wa_number: cleanWa, wa_linked_at: new Date().toISOString() })
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true, customer: data });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message });
+    }
+  });
+
+  // ==========================================================================
+  // IA CONFIG — CRUD para el Panel de IA
+  // ==========================================================================
+
+  // Leer configuración de IA del usuario
+  app.get("/api/ai/config", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+      const { data, error } = await supabaseServer
+        .from("ai_config")
+        .select("*")
+        .eq("user_id", userId)
+        .single();
+
+      if (error || !data) {
+        // No tiene config → devolver defaults
+        return res.json({
+          primary_key: process.env.GEMINI_API_KEY ? '••••' + (process.env.GEMINI_API_KEY).slice(-4) : '',
+          has_primary: !!process.env.GEMINI_API_KEY,
+          fallback_key: '',
+          has_fallback: false,
+          features: {
+            product_vision: { enabled: true, model: 'gemini-2.5-flash-lite' },
+            chat_summary: { enabled: true, model: 'gemini-2.5-flash-lite' },
+            notif_parser: { enabled: true, model: 'gemini-2.5-flash-lite' },
+          },
+          daily_limit: 1500,
+          source: 'env',
+        });
+      }
+
+      const maskKey = (k: string | null | undefined) => k ? '••••' + k.slice(-4) : '';
+      res.json({
+        keys: [
+          { slot: 1, masked: maskKey(data.primary_key_encrypted), active: !!data.primary_key_encrypted },
+          { slot: 2, masked: maskKey(data.fallback_key_encrypted), active: !!data.fallback_key_encrypted },
+          { slot: 3, masked: maskKey(data.fallback2_key_encrypted), active: !!data.fallback2_key_encrypted },
+          { slot: 4, masked: maskKey(data.key3_encrypted), active: !!data.key3_encrypted },
+          { slot: 5, masked: maskKey(data.key4_encrypted), active: !!data.key4_encrypted },
+        ],
+        // compat legacy
+        primary_key: maskKey(data.primary_key_encrypted),
+        has_primary: !!data.primary_key_encrypted,
+        fallback_key: maskKey(data.fallback_key_encrypted),
+        has_fallback: !!data.fallback_key_encrypted,
+        features: data.features,
+        daily_limit: data.daily_limit,
+        source: 'db',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  // Guardar/actualizar configuración de IA
+  app.post("/api/ai/config", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+      const { primaryKey, fallbackKey, fallback2Key, key3, key4, key5, keys, features } = req.body;
+      const upsertData: any = { user_id: userId, updated_at: new Date() };
+
+      // Sólo actualizar las keys que trae valor — jamás sobreescribir con null/vacío
+      if (Array.isArray(keys)) {
+        const cols = ['primary_key_encrypted', 'fallback_key_encrypted', 'fallback2_key_encrypted', 'key3_encrypted', 'key4_encrypted'];
+        keys.forEach((k: any, i: number) => {
+          if (cols[i] && k !== null && k !== undefined && String(k).trim() !== '') {
+            upsertData[cols[i]] = String(k).trim();
+          }
+        });
+      } else {
+        // formato legacy
+        if (primaryKey && String(primaryKey).trim()) upsertData.primary_key_encrypted = String(primaryKey).trim();
+        if (fallbackKey && String(fallbackKey).trim()) upsertData.fallback_key_encrypted = String(fallbackKey).trim();
+        if (fallback2Key && String(fallback2Key).trim()) upsertData.fallback2_key_encrypted = String(fallback2Key).trim();
+        if (key3 && String(key3).trim()) upsertData.key3_encrypted = String(key3).trim();
+        if (key4 && String(key4).trim()) upsertData.key4_encrypted = String(key4).trim();
+        if (key5 && String(key5).trim()) upsertData.key5_encrypted = String(key5).trim();
+      }
+      if (features) upsertData.features = features;
+
+      const { data, error } = await supabaseServer
+        .from("ai_config")
+        .upsert(upsertData, { onConflict: 'user_id' })
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ ok: true, data });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  // Testear una API Key de Gemini
+  app.post("/api/ai/test-key", async (req, res) => {
+    try {
+      const { apiKey } = req.body;
+      if (!apiKey) return res.status(400).json({ error: "apiKey requerida" });
+
+      const start = Date.now();
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Responde solo: OK' }] }],
+            generationConfig: { maxOutputTokens: 10 },
+          }),
+          signal: AbortSignal.timeout(10000),
+        }
+      );
+      const latency = Date.now() - start;
+
+      if (resp.ok) {
+        res.json({ ok: true, latency, message: `✅ Key válida (${latency}ms)` });
+      } else {
+        const err = await resp.json();
+        res.json({ ok: false, latency, message: `❌ ${err.error?.message || resp.status}` });
+      }
+    } catch (err: any) {
+      res.json({ ok: false, message: `❌ Error: ${err?.message}` });
+    }
+  });
+
+  // Métricas de uso de IA
+  app.get("/api/ai/usage", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+      const days = Number(req.query.days) || 7;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await supabaseServer
+        .from("ai_usage_log")
+        .select("feature, success, latency_ms, created_at, error_message, input_tokens, output_tokens")
+        .eq("user_id", userId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (error) {
+        // Tabla no existe → devolver vacío
+        return res.json({ total: 0, today: 0, errors: 0, byFeature: {}, log: [] });
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const todayCount = (data ?? []).filter(r => r.created_at?.startsWith(today)).length;
+      const errors = (data ?? []).filter(r => !r.success).length;
+
+      const byFeature: Record<string, number> = {};
+      for (const r of data ?? []) {
+        byFeature[r.feature] = (byFeature[r.feature] || 0) + 1;
+      }
+
+      res.json({
+        total: data?.length ?? 0,
+        today: todayCount,
+        errors,
+        byFeature,
+        log: (data ?? []).slice(0, 50),
+      });
+    } catch (err: any) {
+      res.json({ total: 0, today: 0, errors: 0, byFeature: {}, log: [] });
+    }
+  });
+
 
   // ==========================================================================
 

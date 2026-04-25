@@ -1,0 +1,11 @@
+{
+  "texto": "QR DE JUAN PEREZ te envió Bs. 80.00",
+  "app_package": "com.bcp.innovacxion.yapeapp",
+  "title": "Yape QR",
+  "expected": {
+    "name": "JUAN PEREZ",
+    "amount": 80,
+    "via": "regex"
+  },
+  "notas": "Caso Yape QR — regex hardcodeado 'QR DE X'"
+}

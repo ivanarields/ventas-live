@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "TEMO BERDECIO CAROLA",
+  "monto_esperado": 45,
+  "banco_esperado": "Banco Economico",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante Banco Economico con nombre completo del pagador."
+}

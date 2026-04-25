@@ -1,0 +1,7 @@
+{
+  "test_user_id": "2707c588-e985-4317-ba77-e3f2d1e5abc0",
+  "test_email": "test-ai-fixtures@ventaslive.test",
+  "real_user_id": "13dcb065-6099-4776-982c-18e98ff2b27a",
+  "created_at": "2026-04-24T11:12:23.137Z",
+  "warning": "Este archivo define el aislamiento. NUNCA poner el real_user_id como test_user_id."
+}

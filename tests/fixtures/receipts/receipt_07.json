@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "VIANA MIRANDA PAOLA ANDREA",
+  "monto_esperado": 22,
+  "banco_esperado": "Banco Ganadero",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante Banco Ganadero con nombre completo del pagador."
+}

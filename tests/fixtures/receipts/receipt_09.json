@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "PICHA AVALOS MARIELENA",
+  "monto_esperado": 25,
+  "banco_esperado": "Jesus Nazareno",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante Cooperativa Jesus Nazareno con nombre completo del pagador."
+}

@@ -1,0 +1,11 @@
+{
+  "texto": "Aprovecha 30% de descuento en tu próxima compra. Válido hasta el viernes.",
+  "app_package": "com.ejemplo.promos",
+  "title": "Oferta especial",
+  "expected": {
+    "name": null,
+    "amount": null,
+    "via": "manual_review"
+  },
+  "notas": "Texto basura / spam — NO debe crear pago, debe ir a cola manual"
+}

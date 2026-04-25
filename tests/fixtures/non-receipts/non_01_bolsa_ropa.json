@@ -1,0 +1,5 @@
+{
+  "es_comprobante": false,
+  "tipo_esperado": "OTRO",
+  "notas": "Bolsa de ropa/mercadería. NO es comprobante de pago. Debe clasificarse como OTRO o PRENDA_ROPA, nunca COMPROBANTE_PAGO."
+}

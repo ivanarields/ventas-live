@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "LUZ VANIA ZURITA ALVAREZ",
+  "monto_esperado": 18,
+  "banco_esperado": "Altoke",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante Altoke (BancoSol) con nombre completo del pagador."
+}

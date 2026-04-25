@@ -1,0 +1,6 @@
+{
+  "_instrucciones": "Copia este archivo con un nombre descriptivo (ej: blusa_rosa.json) junto a la imagen.",
+  "tipo_esperado": "PRENDA_ROPA",
+  "categoria_esperada": "Blusas",
+  "notas": "Blusa rosa manga corta — NO debe clasificarse como comprobante"
+}

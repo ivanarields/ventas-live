@@ -1,0 +1,9 @@
+{
+  "es_comprobante": true,
+  "pagador_esperado": "AGUILAR QUINA DAIRA DANA",
+  "monto_esperado": 30,
+  "banco_esperado": "Banco de Credito BCP",
+  "receptor_esperado": "LEIDY CANDY DIAZ SANCHEZ",
+  "confianza_minima": "media",
+  "notas": "Comprobante BCP con nombre completo del pagador."
+}

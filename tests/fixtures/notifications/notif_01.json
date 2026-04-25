@@ -1,0 +1,11 @@
+{
+  "texto": "MARIA, te envió Bs. 50.00. Saldo disponible: Bs. 1,234.56",
+  "app_package": "com.bcp.innovacxion.yapeapp",
+  "title": "Yape",
+  "expected": {
+    "name": "MARIA",
+    "amount": 50,
+    "via": "regex"
+  },
+  "notas": "Caso Yape directo — debe matchear con el regex hardcodeado (sin IA)"
+}

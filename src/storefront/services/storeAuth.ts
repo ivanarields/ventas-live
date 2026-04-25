@@ -36,7 +36,7 @@ export const storeAuth = {
   },
 
   /** Obtener usuario actual de forma síncrona (desde localStorage) */
-  getCurrentUserSync: (): StoreUser | null => {
+  getCurrentUserSync: (): (StoreUser & { token: string }) | null => {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
       if (!raw) return null;
@@ -45,7 +45,7 @@ export const storeAuth = {
         localStorage.removeItem(SESSION_KEY);
         return null;
       }
-      return session.user;
+      return { ...session.user, token: session.token };
     } catch {
       return null;
     }
