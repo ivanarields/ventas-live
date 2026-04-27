@@ -1586,8 +1586,9 @@ export default function App() {
               transactions={transactions}
               categories={categories}
               key="finance"
-              onAdd={() => { setEditingTransaction(null); setShowAddModal('transaction'); }} 
+              onAdd={() => { setEditingTransaction(null); setShowAddModal('transaction'); }}
               onEdit={(tx: any) => { setEditingTransaction(tx); setShowAddModal('transaction'); }}
+              onRefresh={loadData}
             />
           )}
           {currentTab === 'tienda' && (
@@ -1654,11 +1655,12 @@ export default function App() {
           />
         )}
         {showAddModal === 'transaction' && (
-          <AddTransactionModal 
-            onClose={() => { setShowAddModal(null); setEditingTransaction(null); }} 
+          <AddTransactionModal
+            onClose={() => { setShowAddModal(null); setEditingTransaction(null); }}
             editingTransaction={editingTransaction}
             categories={categories}
             onAddCategory={() => setShowAddModal('category')}
+            onSaved={loadData}
           />
         )}
         {showAddModal === 'category' && (
@@ -3073,7 +3075,7 @@ function ContextMenu({ onClose, onDuplicate, onDelete }: any) {
   );
 }
 
-function FinanceView({ transactions, categories, onAdd, onEdit }: any) {
+function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any) {
   const [showDetails, setShowDetails] = useState<'income' | 'expense' | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -3127,7 +3129,8 @@ function FinanceView({ transactions, categories, onAdd, onEdit }: any) {
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'transactions', id));
+      await transaccionesApi.delete(id);
+      onRefresh?.();
     } catch (error) {
       console.error("Error deleting transaction:", error);
     }
@@ -3136,12 +3139,12 @@ function FinanceView({ transactions, categories, onAdd, onEdit }: any) {
   const handleDuplicate = async (t: any) => {
     try {
       const { id, ...data } = t;
-      await addDoc(collection(db, 'transactions'), {
+      await transaccionesApi.create({
         ...data,
-        fecha: serverTimestamp(),
-        createdAt: serverTimestamp(),
+        fecha: new Date().toISOString(),
         description: `${data.description} (Copia)`
       });
+      onRefresh?.();
     } catch (error) {
       console.error("Error duplicating transaction:", error);
     }
@@ -3408,7 +3411,7 @@ function AddOrderModal({ onClose }: any) {
   );
 }
 
-function AddTransactionModal({ onClose, editingTransaction, categories, onAddCategory }: any) {
+function AddTransactionModal({ onClose, editingTransaction, categories, onAddCategory, onSaved }: any) {
   const [step, setStep] = useState(editingTransaction ? 2 : 1);
   const [type, setType] = useState<'income' | 'expense'>(editingTransaction?.type || 'expense');
   const [category, setCategory] = useState(editingTransaction?.category || '');
@@ -3539,24 +3542,21 @@ function AddTransactionModal({ onClose, editingTransaction, categories, onAddCat
       for (const item of allItemsToSave) {
         const data: any = {
           type,
-          category: item.category.name || item.name.split(' - ')[0],
+          category: item.category?.name || item.name.split(' - ')[0],
           subcategory: item.name.includes(' - ') ? item.name.split(' - ')[1] : '',
           amount: item.amount,
           description: item.name,
           status: isPaid ? 'paid' : 'pending',
-          fecha: finalDate,
-          updatedAt: serverTimestamp()
+          fecha: finalDate.toISOString(),
         };
 
         if (editingTransaction && allItemsToSave.length === 1) {
-          await updateDoc(doc(db, 'transactions', editingTransaction.id), data);
+          await transaccionesApi.update(editingTransaction.id, data);
         } else {
-          await addDoc(collection(db, 'transactions'), {
-            ...data,
-            createdAt: serverTimestamp()
-          });
+          await transaccionesApi.create(data);
         }
       }
+      onSaved?.();
       onClose();
     } catch (error) {
       console.error("Error saving transaction:", error);
