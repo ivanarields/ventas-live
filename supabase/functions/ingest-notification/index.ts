@@ -450,34 +450,37 @@ Deno.serve(async (req) => {
     } else {
       const oneMinAgo = new Date(Date.now() - 60 * 1000).toISOString();
       const { data: maybeDup } = await supabase
-        .from('payments_ui').select('id')
-        .eq('canonical_display_name', payerNameCanonical)
-        .eq('amount', amount).gte('created_at', oneMinAgo).limit(1);
+        .from('pagos').select('id')
+        .eq('user_id', INGEST_USER_ID)
+        .eq('nombre', payerNameRaw)
+        .eq('pago', amount).gte('date', oneMinAgo).limit(1);
       isDuplicate = (maybeDup?.length ?? 0) > 0;
     }
 
-    await supabase.from('payments_ui').insert({
-      parsed_candidate_id: candidate.id, canonical_display_name: payerNameCanonical,
-      amount, currency: 'BOB', paid_at: new Date().toISOString(),
-      match_status: 'auto', review_status: 'auto_confirmed', is_duplicate: isDuplicate,
-    });
+    // Removed payments_ui insertion as the view handles it or it's deprecated
 
     if (!isDuplicate) {
       // Buscar o crear cliente
       const normForSearch = payerNameCanonical.toLowerCase();
       let customerId: number | null = null;
 
-      const { data: existingCustomers } = await supabase
+      let { data: existingCustomers } = await supabase
         .from('customers').select('id').eq('user_id', INGEST_USER_ID)
         .ilike('normalized_name', normForSearch).limit(1);
+      if (!existingCustomers?.length) {
+        const { data: byCan } = await supabase
+          .from('customers').select('id').eq('user_id', INGEST_USER_ID)
+          .eq('canonical_name', payerNameCanonical).limit(1);
+        if (byCan?.length) existingCustomers = byCan;
+      }
 
       if (existingCustomers && existingCustomers.length > 0) {
         customerId = existingCustomers[0].id;
       } else {
         const { data: newCust } = await supabase.from('customers').insert({
           full_name: payerNameRaw, normalized_name: normForSearch,
-          canonical_name: normForSearch, phone: '',
-          active_label: '', active_label_type: '', user_id: INGEST_USER_ID,
+          canonical_name: payerNameCanonical, phone: null,
+          active_label: null, active_label_type: null, user_id: INGEST_USER_ID,
         }).select('id').single();
         if (newCust) customerId = newCust.id;
       }
@@ -491,6 +494,53 @@ Deno.serve(async (req) => {
       if (pagoErr) {
         console.error('[pagos insert]', pagoErr);
       } else if (pago) {
+        // Depositar evidencia de identidad con perfil vinculado (fire-and-forget)
+        (async () => {
+          try {
+            const nameNorm = payerNameCanonical.toUpperCase()
+              .normalize('NFD').replace(/[̀-ͯ]/g, '')
+              .replace(/[^A-Z\s]/g, '').replace(/\s+/g, ' ').trim();
+
+            // Buscar perfil existente por nombre normalizado
+            const { data: allProfiles } = await supabase
+              .from('identity_profiles')
+              .select('id, display_name')
+              .eq('user_id', INGEST_USER_ID);
+
+            const match = allProfiles?.find(p =>
+              p.display_name.toUpperCase().normalize('NFD')
+                .replace(/[̀-ͯ]/g, '').replace(/[^A-Z\s]/g, '')
+                .replace(/\s+/g, ' ').trim() === nameNorm
+            );
+
+            let profileId: string | null = null;
+            if (match) {
+              profileId = match.id;
+            } else {
+              const { data: newProfile } = await supabase
+                .from('identity_profiles')
+                .insert({ user_id: INGEST_USER_ID, display_name: payerNameRaw, confidence: 1.0, origin: 'auto' })
+                .select('id').single();
+              profileId = newProfile?.id ?? null;
+            }
+
+            await supabase.from('identity_evidence').insert({
+              user_id: INGEST_USER_ID,
+              profile_id: profileId,
+              source: 'macrodroid',
+              source_id: String(pago.id),
+              event_type: 'payment',
+              amount,
+              name_raw: payerNameRaw,
+              name_normalized: nameNorm,
+              event_at: new Date().toISOString(),
+              payload: { customer_id: customerId, app_package: payload.app_package, name_source: nameSource },
+            });
+          } catch (e) {
+            console.error('[identity deposit]', e);
+          }
+        })();
+
         await supabase.from('pedidos').insert({
           customer_id: customerId, customer_name: payerNameRaw,
           item_count: 0, bag_count: 1, status: 'procesar',

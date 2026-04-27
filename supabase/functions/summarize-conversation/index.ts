@@ -73,8 +73,8 @@ async function callGemini(prompt: string): Promise<Record<string, string>> {
 }
 
 async function geminiText(prompt: string): Promise<string> {
-  if (!GEMINI_KEY) return '';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
+  if (!ACTIVE_GEMINI_KEY) return '';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${ACTIVE_GEMINI_KEY}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -180,8 +180,11 @@ Deno.serve(async (req) => {
     for (const m of mensajes) {
       if (m.content?.trim()) textos.push(m.content.trim());
       if (m.media_url) {
-        if (/\.(jpg|jpeg|png|webp)/i.test(m.media_url)) fotoUrls.push(m.media_url);
-        if (/\.(ogg|mp3|mp4|m4a)/i.test(m.media_url)) audioUrls.push(m.media_url);
+        const mt: string = m.media_type || '';
+        const isImage = mt.startsWith('image/') || /\.(jpg|jpeg|png|webp)/i.test(m.media_url);
+        const isAudio = mt.startsWith('audio/') || mt.startsWith('video/') || /\.(ogg|mp3|mp4|m4a)/i.test(m.media_url);
+        if (isImage) fotoUrls.push(m.media_url);
+        else if (isAudio) audioUrls.push(m.media_url);
       }
     }
 

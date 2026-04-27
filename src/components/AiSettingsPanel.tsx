@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Key, Eye, EyeOff, CheckCircle2, XCircle, RefreshCw,
   Zap, Camera, MessageSquare, CreditCard, Loader2,
-  ChevronDown, ChevronUp, BarChart3, Plus, Trash2,
+  ChevronDown, ChevronUp, BarChart3, Plus, Trash2, FileText,
 } from 'lucide-react';
 
 const BRAND = '#ff2d78';
@@ -75,20 +75,36 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
   const [saveMsg, setSaveMsg] = useState('');
   const [showLog, setShowLog] = useState(false);
   const [ownerName, setOwnerName] = useState('');
+  const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [promptMsg, setPromptMsg] = useState('');
+  const [comprobanteMode, setComprobanteMode] = useState<'simple' | 'completo'>('simple');
+  const [savingMode, setSavingMode] = useState(false);
 
   const loadConfig = async () => {
     try {
-      const [cRes, uRes] = await Promise.all([
+      const [cRes, uRes, pRes] = await Promise.all([
         fetch('/api/ai/config', { headers: { 'x-user-id': userId } }),
         fetch('/api/ai/usage?days=7', { headers: { 'x-user-id': userId } }),
+        fetch('/api/ai/prompts', { headers: { 'x-user-id': userId } }),
       ]);
       if (cRes.ok) {
         const cfg = await cRes.json();
         setConfig(cfg);
-        // Cargar nombre de la dueña en el input (solo si el input está vacío)
         if (cfg.owner_name) setOwnerName(cfg.owner_name);
       }
       if (uRes.ok) setUsage(await uRes.json());
+      if (pRes.ok) {
+        const pd = await pRes.json();
+        const mapped: Record<string, string> = {};
+        for (const [k, v] of Object.entries(pd.prompts ?? {})) {
+          mapped[k] = (v as any).text ?? '';
+        }
+        setPrompts(mapped);
+        const mode = (pd.prompts?.comprobante_mode as any)?.text;
+        if (mode === 'completo') setComprobanteMode('completo');
+        else setComprobanteMode('simple');
+      }
     } catch (e) { console.error('[ai-settings] Error cargando:', e); }
     finally { setLoading(false); }
   };
@@ -178,6 +194,39 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
     } finally { setSaving(false); }
   };
 
+  const saveComprobanteMode = async (mode: 'simple' | 'completo') => {
+    setSavingMode(true);
+    setComprobanteMode(mode);
+    try {
+      await fetch('/api/ai/prompts/comprobante_mode', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ text: mode }),
+      });
+      setPromptMsg(`✅ Prompt ${mode === 'simple' ? 'Simple' : 'Completo'} activado`);
+    } catch { setPromptMsg('❌ Error al guardar modo'); }
+    finally { setSavingMode(false); setTimeout(() => setPromptMsg(''), 3000); }
+  };
+
+  const savePrompt = async (key: string) => {
+    setSavingPrompt(true);
+    setPromptMsg('');
+    try {
+      const res = await fetch(`/api/ai/prompts/${key}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ text: prompts[key] ?? '' }),
+      });
+      if (res.ok) {
+        setPromptMsg('✅ Prompt guardado');
+      } else {
+        const err = await res.json();
+        setPromptMsg(`❌ ${err.error || 'Error al guardar'}`);
+      }
+    } catch { setPromptMsg('❌ Error de conexión'); }
+    finally { setSavingPrompt(false); setTimeout(() => setPromptMsg(''), 4000); }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -189,6 +238,36 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
   const usagePercent = usage && config
     ? Math.min(100, Math.round((usage.today / (config.daily_limit * 5)) * 100))
     : 0;
+
+  const PREVIEW_SIMPLE = `La dueña del negocio es: [NOMBRE DE LA DUEÑA]
+Ella SIEMPRE recibe el dinero. Nunca lo envía.
+
+Tu tarea: identificar al CLIENTE que envió el dinero, el MONTO y la HORA.
+
+REGLA — El cliente debe ser una persona real:
+Escribe null si ves: tipo de cuenta (Caja de Ahorros, Cuenta Corriente), nombre
+de banco, número de teléfono, email, o si el pagador es la dueña.
+
+Un nombre válido tiene nombre + apellido: "JUAN MAMANI", "ANA GARCIA".
+Extrae exactamente como aparece, en MAYÚSCULAS.
+
+{"cliente": "NOMBRE EN MAYÚSCULAS o null", "monto": número, "hora": "HH:MM"}`;
+
+  const PREVIEW_COMPLETO = `5 pasos de verificación:
+
+PASO 1 — ¿Es comprobante? (Yape, QR, transferencia, Yolo, ZAS...)
+PASO 2 — ¿Quién RECIBIÓ? (receptor = la dueña del negocio)
+PASO 3 — ¿Quién ENVIÓ? (pagador = el cliente)
+  ⚠ Regla: el pagador debe ser persona real con nombre+apellido.
+  Palabras prohibidas: CAJA · AHORROS · BANCO · CUENTA · QR · TIGO
+  · COOPERATIVA · BILLETERA · número de teléfono · email
+  Cooperativas sin nombre: → pagador = null (es normal)
+PASO 4 — Monto (número puro) y hora (HH:MM)
+PASO 5 — Autoverificación antes de responder
+
+{"es_comprobante":true, "pagador":"NOMBRE o null",
+ "receptor":"NOMBRE o null", "monto":150, "hora":"14:30",
+ "es_transferencia_propia":false}`;
 
   // Construir el estado de los 5 slots desde la respuesta del servidor
   const serverKeys: KeySlot[] = config?.keys ?? [
@@ -409,6 +488,101 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
           className="w-full h-9 rounded-xl font-black text-[11px] text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">
           Guardar configuración de funciones
         </button>
+      </div>
+
+      {/* ═══ Prompts de IA ═══ */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <h4 className="text-sm font-black text-gray-800 flex items-center gap-2">
+          <FileText size={14} style={{ color: BRAND }} />
+          Prompts de IA
+        </h4>
+
+        <div className="p-3 rounded-xl border border-gray-100 bg-gray-50 space-y-3">
+          <div>
+            <p className="text-[12px] font-black text-gray-800">Extracción de Comprobantes de Pago</p>
+            <p className="text-[10px] text-gray-400 leading-tight">
+              Se activa cuando el cliente manda una foto de comprobante (Yape, QR, transferencia bancaria).
+              Seleccioná cuál prompt usar y presioná el botón para activarlo.
+            </p>
+          </div>
+
+          {/* Switch Simple / Completo */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => saveComprobanteMode('simple')}
+              disabled={savingMode}
+              className="relative p-3 rounded-xl border-2 text-left transition-all disabled:opacity-50"
+              style={{
+                borderColor: comprobanteMode === 'simple' ? '#3b82f6' : '#e5e7eb',
+                background: comprobanteMode === 'simple' ? '#eff6ff' : '#fafafa',
+              }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <div className="w-3 h-3 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                  style={{ borderColor: comprobanteMode === 'simple' ? '#3b82f6' : '#d1d5db' }}>
+                  {comprobanteMode === 'simple' && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  )}
+                </div>
+                <span className="text-[11px] font-black text-gray-800">Prompt Simple</span>
+                {comprobanteMode === 'simple' && (
+                  <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full text-white bg-blue-500 ml-auto">
+                    ACTIVO
+                  </span>
+                )}
+              </div>
+              <p className="text-[9px] text-gray-500 leading-tight pl-4">
+                Directo y eficiente. Deja razonar al modelo. Recomendado para empezar.
+              </p>
+            </button>
+
+            <button
+              onClick={() => saveComprobanteMode('completo')}
+              disabled={savingMode}
+              className="relative p-3 rounded-xl border-2 text-left transition-all disabled:opacity-50"
+              style={{
+                borderColor: comprobanteMode === 'completo' ? '#a855f7' : '#e5e7eb',
+                background: comprobanteMode === 'completo' ? '#faf5ff' : '#fafafa',
+              }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <div className="w-3 h-3 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                  style={{ borderColor: comprobanteMode === 'completo' ? '#a855f7' : '#d1d5db' }}>
+                  {comprobanteMode === 'completo' && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                  )}
+                </div>
+                <span className="text-[11px] font-black text-gray-800">Prompt Completo</span>
+                {comprobanteMode === 'completo' && (
+                  <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full text-white bg-purple-500 ml-auto">
+                    ACTIVO
+                  </span>
+                )}
+              </div>
+              <p className="text-[9px] text-gray-500 leading-tight pl-4">
+                5 pasos, reglas bolivianas, autoverificación. Más robusto en casos difíciles.
+              </p>
+            </button>
+          </div>
+
+          {promptMsg && (
+            <p className="text-[11px] font-bold text-center">{promptMsg}</p>
+          )}
+
+          {/* Vista previa del prompt activo */}
+          <div>
+            <p className="text-[10px] font-black text-gray-500 mb-1 uppercase tracking-wide">
+              Vista previa — {comprobanteMode === 'simple' ? 'Prompt Simple' : 'Prompt Completo'}
+            </p>
+            <textarea
+              readOnly
+              value={comprobanteMode === 'simple' ? PREVIEW_SIMPLE : PREVIEW_COMPLETO}
+              rows={9}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-[10px] font-mono resize-none leading-relaxed bg-white text-gray-500 outline-none cursor-default"
+            />
+            <p className="text-[9px] text-gray-400 mt-1">
+              Solo es una vista resumida. El prompt real enviado a la IA es más completo.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* ═══ Métricas ═══ */}

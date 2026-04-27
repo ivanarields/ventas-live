@@ -34,3 +34,13 @@ railway.toml
 
 Faces panel de pedido/fase4-n8n-workflow.json
 run-fase2.mjs
+
+# Archivos binarios y backups que no pertenecen al proyecto
+*.msix
+*.exe
+backup_*.json
+_backup_*/
+mentira.png
+fix_env.cjs
+server.log
+deploy.log

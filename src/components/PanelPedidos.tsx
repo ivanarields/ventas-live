@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, RefreshCw, Package, Trash2, Sparkles, Clock, Image, MessageSquare, AlertCircle, CheckCircle } from 'lucide-react';
+import { ChevronLeft, RefreshCw, Package, Trash2, Sparkles, Clock, Image, MessageSquare, AlertCircle, CheckCircle, ShieldCheck, AlertTriangle, Filter, CreditCard } from 'lucide-react';
 
 const PANEL_URL   = 'https://vwaocoaeenavxkcshyuf.supabase.co';
 const PANEL_KEY   = 'sb_publishable_Rdo7g5SEvzS7BfJCn33k3g_dcuU64Vz';
@@ -19,7 +19,7 @@ function getUserId(): string {
 }
 
 interface Cliente {
-  id: string; phone: string; last_interaction: string;
+  id: string; phone: string; nombre?: string | null; last_interaction: string;
   resumen?: string; resumen_at?: string; estado?: string;
 }
 interface Mensaje {
@@ -29,7 +29,10 @@ interface Mensaje {
 }
 interface ResumenIA {
   pedido?: string; cantidad?: string; talla?: string;
-  pago?: string; entrega?: string; notas?: string;
+  pago?: string; entrega?: string; comprobante?: string | null; notas?: string;
+}
+interface PagoAlerta {
+  nombre: string; monto: string | null; hora: string | null;
 }
 
 function fmt(p: string) {
@@ -60,6 +63,8 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
   const [generando, setGenerando] = useState(false);
   const [fotoGrande, setFotoGrande] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pagoAlerta, setPagoAlerta] = useState<PagoAlerta | null>(null);
+  const [estadoPago, setEstadoPago] = useState<string | null>(cliente.estado ?? null);
 
   const fotos = mensajes.filter(m => m.has_media && m.media_url && isImage(m.media_url));
 
@@ -104,9 +109,10 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
       if (j.resumen) {
         setResumen(j.resumen);
         setResumeRaw(JSON.stringify(j.resumen));
-      } else if (j.error) {
-        console.error('[summarize]', j.error);
       }
+      if (j.estado_pago) setEstadoPago(j.estado_pago);
+      if (j.pago_alerta) setPagoAlerta(j.pago_alerta);
+      if (j.error) console.error('[summarize]', j.error);
     } catch (e) { console.error(e); }
     setGenerando(false);
   };
@@ -140,11 +146,32 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
             <Trash2 size={15} />
           </button>
         </div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-[#ff2d78]">Número del cliente</p>
-        <h2 className="text-2xl font-black text-slate-800 leading-tight">{fmt(cliente.phone)}</h2>
-        <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-          <Clock size={10} /> Último mensaje: {ago(cliente.last_interaction)}
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#ff2d78]">
+              {cliente.nombre ? 'Cliente' : 'Número del cliente'}
+            </p>
+            <h2 className="text-2xl font-black text-slate-800 leading-tight">
+              {cliente.nombre || fmt(cliente.phone)}
+            </h2>
+            {cliente.nombre && (
+              <p className="text-xs text-slate-400 font-mono">{fmt(cliente.phone)}</p>
+            )}
+            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+              <Clock size={10} /> Último mensaje: {ago(cliente.last_interaction)}
+            </p>
+          </div>
+          {estadoPago === 'pagado_verificado' && (
+            <div className="flex items-center gap-1 bg-green-50 text-green-700 text-[10px] font-black px-2 py-1 rounded-xl border border-green-200">
+              <ShieldCheck size={12} /> Pago verificado
+            </div>
+          )}
+          {estadoPago === 'solo_comprobante' && (
+            <div className="flex items-center gap-1 bg-amber-50 text-amber-700 text-[10px] font-black px-2 py-1 rounded-xl border border-amber-200">
+              <AlertTriangle size={12} /> Verificar pago
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Contadores */}
@@ -164,6 +191,25 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
           <p className="text-[10px] font-bold text-slate-400 uppercase">Mensajes</p>
         </div>
       </div>
+
+      {/* RESUMEN IA */}
+      {/* ALERTA: comprobante sin pago en MacroDroid */}
+      {pagoAlerta && (
+        <div className="mx-4 mt-4 bg-amber-50 border border-amber-300 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={16} className="text-amber-600 flex-shrink-0" />
+            <p className="text-sm font-black text-amber-800">Pago no llegó por MacroDroid</p>
+          </div>
+          <p className="text-xs text-amber-700 leading-relaxed mb-2">
+            Se detectó un comprobante pero el pago no llegó automáticamente. Registrarlo a mano si es correcto.
+          </p>
+          <div className="bg-white rounded-xl p-3 border border-amber-200 space-y-1">
+            <p className="text-xs font-bold text-slate-700">Nombre: <span className="font-black text-slate-900">{pagoAlerta.nombre}</span></p>
+            {pagoAlerta.monto && <p className="text-xs font-bold text-slate-700">Monto: <span className="font-black text-green-700">Bs {pagoAlerta.monto}</span></p>}
+            {pagoAlerta.hora && <p className="text-xs font-bold text-slate-700">Hora: {pagoAlerta.hora}</p>}
+          </div>
+        </div>
+      )}
 
       {/* RESUMEN IA */}
       <div className="mx-4 mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -222,6 +268,14 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
                   </div>
                 )}
               </div>
+              {resumen.comprobante && resumen.comprobante !== 'null' && (
+                <div className="bg-green-50 rounded-xl p-3 border border-green-100">
+                  <p className="text-[10px] font-bold uppercase text-green-600 mb-1 flex items-center gap-1">
+                    <CreditCard size={10} /> Comprobante detectado
+                  </p>
+                  <p className="text-xs text-slate-700 font-bold leading-relaxed">{resumen.comprobante}</p>
+                </div>
+              )}
               {resumen.notas && resumen.notas !== 'null' && (
                 <div className="bg-yellow-50 rounded-xl p-3">
                   <p className="text-[10px] font-bold uppercase text-yellow-600 mb-1">📝 Notas</p>
@@ -251,13 +305,25 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
             Fotografías del pedido ({fotos.length})
           </p>
           <div className="grid grid-cols-3 gap-2">
-            {fotos.map((m, i) => (
-              <button key={m.id} onClick={() => setFotoGrande(m.media_url!)}
-                className="aspect-square rounded-xl overflow-hidden border border-slate-100 shadow-sm hover:scale-[1.03] transition-transform active:scale-95">
-                <img src={m.media_url!} alt={`foto ${i+1}`} className="w-full h-full object-cover" />
-              </button>
-            ))}
+            {fotos.map((m, i) => {
+              const esComprobante = resumen?.comprobante && resumen.comprobante !== 'null' && i === fotos.length - 1;
+              return (
+                <button key={m.id} onClick={() => setFotoGrande(m.media_url!)}
+                  className="aspect-square rounded-xl overflow-hidden border shadow-sm hover:scale-[1.03] transition-transform active:scale-95 relative"
+                  style={{ borderColor: esComprobante ? '#86efac' : '#f1f5f9' }}>
+                  <img src={m.media_url!} alt={`foto ${i+1}`} className="w-full h-full object-cover" />
+                  {esComprobante && (
+                    <div className="absolute top-1 right-1 bg-green-500 rounded-full p-0.5">
+                      <CreditCard size={9} className="text-white" />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
+          <p className="text-[9px] text-slate-300 mt-2">
+            {resumen?.comprobante && resumen.comprobante !== 'null' ? '💳 La última foto es el comprobante detectado' : ''}
+          </p>
         </div>
       )}
 
@@ -304,9 +370,10 @@ export function PanelPedidos() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
   const [detalle, setDetalle]   = useState<Cliente | null>(null);
+  const [soloConPago, setSoloConPago] = useState(false);
 
   const cargar = useCallback(async () => {
-    const data = await api<Cliente[]>('panel_clientes?select=*&order=last_interaction.desc');
+    const data = await api<Cliente[]>('panel_clientes?select=id,phone,nombre,last_interaction,resumen,resumen_at,estado&order=last_interaction.desc');
     setClientes(Array.isArray(data) ? data : []);
     setCargando(false);
   }, []);
@@ -328,17 +395,33 @@ export function PanelPedidos() {
     <div className="pb-28 min-h-screen" style={{ background: 'var(--brand-secondary, #fff0f3)' }}>
       {/* Header */}
       <div className="sticky top-0 z-20 bg-white/90 backdrop-blur-md border-b border-pink-100 px-4 pt-5 pb-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-xl font-black text-slate-800 flex items-center gap-2">
               <Package size={20} className="text-[#ff2d78]" />
               Panel de Pedidos
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5">{clientes.length} conversación{clientes.length !== 1 ? 'es' : ''} activas</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {clientes.length} conversación{clientes.length !== 1 ? 'es' : ''}
+              {soloConPago ? ' · filtrando con pago' : ''}
+            </p>
           </div>
-          <button onClick={cargar} className="w-9 h-9 rounded-full bg-pink-50 border border-pink-100 flex items-center justify-center text-[#ff2d78]">
-            <RefreshCw size={14} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSoloConPago(v => !v)}
+              className="flex items-center gap-1 text-[10px] font-black px-2 py-1.5 rounded-xl border transition-all"
+              style={{
+                background: soloConPago ? '#dcfce7' : '#f8fafc',
+                borderColor: soloConPago ? '#86efac' : '#e2e8f0',
+                color: soloConPago ? '#166534' : '#64748b',
+              }}>
+              <Filter size={10} />
+              {soloConPago ? 'Con pago' : 'Todos'}
+            </button>
+            <button onClick={cargar} className="w-9 h-9 rounded-full bg-pink-50 border border-pink-100 flex items-center justify-center text-[#ff2d78]">
+              <RefreshCw size={14} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -355,36 +438,70 @@ export function PanelPedidos() {
             <p className="text-slate-400 text-xs mt-1">Los mensajes de WhatsApp aparecerán aquí</p>
           </div>
         ) : (
-          clientes.map(c => {
-            let resumenObj: ResumenIA | null = null;
-            try { if (c.resumen) resumenObj = JSON.parse(c.resumen); } catch {}
-            const preview = resumenObj?.pedido || 'Sin resumen aún — toca para generar';
-            const tieneResumen = !!resumenObj?.pedido;
-
-            return (
-              <button key={c.id} onClick={() => setDetalle(c)}
-                className="w-full text-left bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-pink-200 active:scale-[0.99] transition-all p-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 shadow"
-                    style={{ background: 'linear-gradient(135deg,#ff2d78,#ff6b9d)' }}>
-                    {fmt(c.phone)[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-black text-slate-800 text-sm truncate">{fmt(c.phone)}</p>
-                    <p className="text-[10px] text-slate-400">{ago(c.last_interaction)}</p>
-                  </div>
-                  {tieneResumen
-                    ? <CheckCircle size={15} className="text-green-400 flex-shrink-0" />
-                    : <Sparkles size={15} className="text-slate-300 flex-shrink-0" />
+          clientes
+            .filter(c => !soloConPago || c.estado === 'pagado_verificado' || c.estado === 'solo_comprobante')
+            .map(c => {
+              let resumenObj: ResumenIA | null = null;
+              try {
+                if (c.resumen) {
+                  const parsed = JSON.parse(c.resumen);
+                  // Doble codificación: si pedido es un JSON string, desempaquetarlo
+                  if (typeof parsed.pedido === 'string' && parsed.pedido.trimStart().startsWith('{')) {
+                    try { resumenObj = JSON.parse(parsed.pedido); } catch { resumenObj = parsed; }
+                  } else {
+                    resumenObj = parsed;
                   }
-                </div>
-                {/* Preview del resumen */}
-                <p className={`text-xs leading-relaxed truncate ${tieneResumen ? 'text-slate-600' : 'text-slate-400 italic'}`}>
-                  {preview}
-                </p>
-              </button>
-            );
-          })
+                }
+              } catch {}
+              const preview = resumenObj?.pedido || 'Sin resumen aún — toca para generar';
+              const tieneResumen = !!resumenObj?.pedido;
+              const displayName = c.nombre || fmt(c.phone);
+              const initial = (c.nombre ? c.nombre[0] : fmt(c.phone)[0]).toUpperCase();
+
+              return (
+                <button key={c.id} onClick={() => setDetalle(c)}
+                  className="w-full text-left bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-pink-200 active:scale-[0.99] transition-all p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 shadow"
+                      style={{ background: 'linear-gradient(135deg,#ff2d78,#ff6b9d)' }}>
+                      {initial}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black text-slate-800 text-sm truncate">{displayName}</p>
+                      {c.nombre && (
+                        <p className="text-[10px] text-slate-400 font-mono truncate">{fmt(c.phone)}</p>
+                      )}
+                      {!c.nombre && (
+                        <p className="text-[10px] text-slate-400">{ago(c.last_interaction)}</p>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      {c.estado === 'pagado_verificado' && (
+                        <div className="flex items-center gap-0.5 bg-green-50 text-green-700 text-[9px] font-black px-1.5 py-0.5 rounded-lg border border-green-200">
+                          <ShieldCheck size={9} /> Pagado
+                        </div>
+                      )}
+                      {c.estado === 'solo_comprobante' && (
+                        <div className="flex items-center gap-0.5 bg-amber-50 text-amber-700 text-[9px] font-black px-1.5 py-0.5 rounded-lg border border-amber-200">
+                          <AlertTriangle size={9} /> Verificar
+                        </div>
+                      )}
+                      {tieneResumen
+                        ? <CheckCircle size={13} className="text-slate-400" />
+                        : <Sparkles size={13} className="text-slate-300" />
+                      }
+                    </div>
+                  </div>
+                  {c.nombre && (
+                    <p className="text-[10px] text-slate-400 mb-1">{ago(c.last_interaction)}</p>
+                  )}
+                  {/* Preview del resumen */}
+                  <p className={`text-xs leading-relaxed truncate ${tieneResumen ? 'text-slate-600' : 'text-slate-400 italic'}`}>
+                    {preview}
+                  </p>
+                </button>
+              );
+            })
         )}
       </div>
     </div>

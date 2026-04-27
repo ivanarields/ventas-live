@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { syncPedidoLabel, releasePedidoLabel } from './services/labelingService';
 import { ShieldAlert, FileSearch, AlertTriangle } from 'lucide-react';
 import { PaymentHistoryTape } from './components/PaymentHistoryTape';
+import { WhatsappPhotos } from './components/WhatsappPhotos';
 import { PanelPedidos } from './components/PanelPedidos';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -5206,11 +5207,17 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           </div>
 
           <div>
-            <PaymentHistoryTape 
-              payments={dayPayments} 
-              onPaymentClick={(p) => console.log(`Pago de Bs ${p.amount}`)} 
+            <PaymentHistoryTape
+              payments={dayPayments}
+              onPaymentClick={(p) => console.log(`Pago de Bs ${p.amount}`)}
             />
           </div>
+
+          <WhatsappPhotos
+            phone={person.waNumber ?? ''}
+            orderDate={selectedPedido.date}
+            days={4}
+          />
 
           <div className="clone-kit-container">
             {selectedPedido.source === 'WEB' ? (

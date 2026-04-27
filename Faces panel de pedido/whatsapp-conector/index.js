@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const dotenv = require('dotenv');
 dotenv.config({ path: join(__dirname, '.env') });
 
-const WEBHOOK_URL    = process.env.N8N_WEBHOOK_URL;
+const WEBHOOK_URL    = process.env.WEBHOOK_URL;
 const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY;
 const BUCKET         = 'whatsapp-media';
@@ -24,6 +24,14 @@ let connected  = false;
 
 // ─── Servidor HTTP para mostrar el QR por URL ───
 const server = http.createServer(async (req, res) => {
+  // Endpoint JSON para la app principal
+  if (req.url === '/status') {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.end(JSON.stringify({ connected, qrDataUrl }));
+    return;
+  }
+
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   if (connected) {
     res.end(`<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#111;color:#fff">
@@ -87,11 +95,16 @@ const client = new Client({
     executablePath: IS_RAILWAY
       ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
       : undefined,
-    args: [
-      '--no-sandbox', '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage', '--disable-gpu',
-      '--no-first-run', '--no-zygote', '--single-process',
-    ],
+    args: IS_RAILWAY
+      ? [
+          '--no-sandbox', '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage', '--disable-gpu',
+          '--no-first-run', '--no-zygote', '--single-process',
+        ]
+      : [
+          '--no-sandbox', '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage', '--disable-gpu',
+        ],
   },
 });
 
@@ -150,6 +163,7 @@ client.on('message_create', async (msg) => {
       id: msg.id._serialized,
       from: msg.from,          // ID interno de WhatsApp (para referencia)
       fromPhone,               // ← número real limpio (ej: 59178456789)
+      fromMe: msg.fromMe,      // true si el operador envió este mensaje
       to: msg.to,
       body: msg.body,
       hasMedia: msg.hasMedia,

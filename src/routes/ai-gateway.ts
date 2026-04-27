@@ -13,8 +13,9 @@ import {
   buildImageClassifierPrompt,
   buildReceiptQrPrompt,
 } from '../ai/prompts/index';
+import { findOrCreateProfile, depositEvidence } from '../services/identityService';
 
-export function createAiRouter(supabase: SupabaseClient) {
+export function createAiRouter(supabase: SupabaseClient, supabasePanel?: SupabaseClient) {
   const router = Router();
 
   // ── Helpers internos ────────────────────────────────────────────────────────
@@ -29,17 +30,98 @@ export function createAiRouter(supabase: SupabaseClient) {
         .eq('user_id', userId)
         .single();
       if (data) {
-        return [
-          data.primary_key_encrypted || envKey,
+        // La key del .env siempre se incluye al final como red de seguridad.
+        // Si las keys de la DB están caídas o inválidas, el sistema cae en la del .env.
+        const all = [
+          data.primary_key_encrypted,
           data.fallback_key_encrypted,
           data.fallback2_key_encrypted,
           data.key3_encrypted,
           data.key4_encrypted,
           data.key5_encrypted,
+          envKey,
         ].filter(Boolean) as string[];
+        return [...new Set(all)]; // deduplicar si .env coincide con alguna DB key
       }
     } catch { /* tabla no existe → usar .env */ }
     return [envKey].filter(Boolean);
+  }
+
+  // Prompt SIMPLE — directo, deja razonar al modelo con pocos ejemplos.
+  // Recomendado por OpenAI para casos donde el modelo moderno puede inferir el contexto.
+  const DEFAULT_COMPROBANTE_PROMPT = `Eres un extractor de comprobantes de pago bolivianos. Analiza la imagen y extrae 3 datos: quién pagó, cuánto y a qué hora.
+
+La dueña del negocio es: {{OWNER_NAME}}
+Ella SIEMPRE recibe el dinero. Nunca lo envía.
+
+Tu tarea: identificar al CLIENTE que envió el dinero, el MONTO y la HORA.
+
+REGLA ÚNICA E IRROMPIBLE — El cliente debe ser una persona real:
+Escribe null para "cliente" si ves cualquiera de estas situaciones:
+- El texto es un tipo de cuenta: "Caja de Ahorros", "Cuenta Corriente", "Cuenta Vista"
+- El texto es nombre de banco o app: BANCO, COOPERATIVA, YAPE, TIGO, QR, BILLETERA, DEPOSITO
+- El texto es un número de teléfono (ej: 79123456)
+- El texto es un email (contiene @)
+- El pagador es EXACTAMENTE "{{OWNER_NAME}}" con las 4 palabras completas → eso sería transferencia propia, descártalo
+  ATENCIÓN: si faltan palabras del nombre (ej: "LEIDY DIAZ SANCHEZ" sin CANDY, o "CANDY DIAZ SANCHEZ" sin LEIDY) → NO es la dueña, es un cliente válido, extráelo normalmente
+- El nombre no aparece en el comprobante
+
+Un nombre válido tiene nombre + apellido: "JUAN MAMANI", "ANA GARCIA", "M. RODRIGUEZ".
+Extrae el nombre exactamente como aparece, en MAYÚSCULAS.
+El monto es solo el número, sin Bs ni BOB.
+La hora en formato HH:MM (24h).
+
+Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
+{"cliente": "NOMBRE EN MAYÚSCULAS o null", "monto": número_o_null, "hora": "HH:MM o null"}`;
+
+  // Lee el modo activo del prompt de comprobante: 'simple' (default) o 'completo'
+  async function getComprobanteMode(userId: string): Promise<'simple' | 'completo'> {
+    try {
+      const { data } = await supabase
+        .from('ai_prompts')
+        .select('prompt_text')
+        .eq('user_id', userId)
+        .eq('prompt_key', 'comprobante_mode')
+        .single();
+      if (data?.prompt_text === 'completo') return 'completo';
+    } catch { /* default */ }
+    return 'simple';
+  }
+
+  async function getPrompt(userId: string, promptKey: string): Promise<string> {
+    if (promptKey === 'comprobante_extraction') {
+      const mode = await getComprobanteMode(userId);
+      if (mode === 'completo') {
+        const ownerName = await getOwnerName(userId);
+        return buildReceiptQrPrompt(ownerName);
+      }
+      // mode === 'simple': devuelve el prompt simple mejorado con el nombre reemplazado
+      // (lo reemplaza el caller con .replace({{OWNER_NAME}}))
+      return DEFAULT_COMPROBANTE_PROMPT;
+    }
+    try {
+      const { data } = await supabase
+        .from('ai_prompts')
+        .select('prompt_text')
+        .eq('user_id', userId)
+        .eq('prompt_key', promptKey)
+        .single();
+      if (data?.prompt_text) return data.prompt_text;
+    } catch { /* usa default */ }
+    return '';
+  }
+
+  // Normaliza la respuesta de cualquier prompt de comprobante al mismo shape interno.
+  // El prompt simple devuelve {cliente, monto, hora}.
+  // El prompt completo devuelve {es_comprobante, pagador, receptor, monto, hora, es_transferencia_propia}.
+  function normalizeComprobanteResponse(raw: any): { cliente: string | null; monto: string | null; hora: string | null } | null {
+    if (!raw || typeof raw !== 'object') return null;
+    if (raw.es_comprobante === false) return null;
+    if (raw.es_transferencia_propia === true) return null;
+    const cliente: string | null = raw.cliente ?? raw.pagador ?? null;
+    const monto: string | null = raw.monto != null ? String(raw.monto) : null;
+    const hora: string | null = raw.hora ?? null;
+    return { cliente, monto: monto || null, hora };
   }
 
   // Devuelve el nombre de la dueña configurado en el perfil del usuario.
@@ -159,6 +241,7 @@ export function createAiRouter(supabase: SupabaseClient) {
           generationConfig: {
             temperature: params.temperature ?? 0.2,
             maxOutputTokens: params.maxTokens ?? 400,
+            thinkingConfig: { thinkingBudget: 0 },
           },
         };
         if (params.jsonMode) body.generationConfig.responseMimeType = 'application/json';
@@ -185,7 +268,10 @@ export function createAiRouter(supabase: SupabaseClient) {
         }
 
         const data = await resp.json();
-        const textResp = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        // Gemini 2.5 puede devolver thinking tokens (thought:true) antes de la respuesta real.
+        // Ignoramos los tokens de pensamiento y tomamos el primer texto real.
+        const allParts: any[] = data.candidates?.[0]?.content?.parts ?? [];
+        const textResp = allParts.find((p: any) => !p.thought)?.text ?? allParts[0]?.text ?? '';
         await logAiUsage({
           userId: params.userId, feature: params.feature, model, latencyMs, success: true,
           inputTokens: data.usageMetadata?.promptTokenCount,
@@ -367,6 +453,60 @@ export function createAiRouter(supabase: SupabaseClient) {
     }
   });
 
+  // GET /api/ai/prompts
+  router.get('/prompts', async (req: Request, res: Response) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+
+      const { data } = await supabase
+        .from('ai_prompts')
+        .select('prompt_key, prompt_text, updated_at')
+        .eq('user_id', userId);
+
+      const prompts: Record<string, { text: string; updated_at: string }> = {};
+      for (const row of data ?? []) {
+        prompts[row.prompt_key] = { text: row.prompt_text, updated_at: row.updated_at };
+      }
+
+      // Incluir el prompt por defecto si no hay uno guardado
+      if (!prompts['comprobante_extraction']) {
+        prompts['comprobante_extraction'] = { text: DEFAULT_COMPROBANTE_PROMPT, updated_at: '' };
+      }
+      // Incluir el modo activo por defecto si no está guardado
+      if (!prompts['comprobante_mode']) {
+        prompts['comprobante_mode'] = { text: 'simple', updated_at: '' };
+      }
+
+      res.json({ ok: true, prompts });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message });
+    }
+  });
+
+  // PATCH /api/ai/prompts/:key
+  router.patch('/prompts/:key', async (req: Request, res: Response) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+      const { key } = req.params;
+      const { text } = req.body;
+      if (typeof text !== 'string') return res.status(400).json({ error: 'text requerido' });
+
+      const { error } = await supabase.from('ai_prompts').upsert({
+        user_id: userId,
+        prompt_key: key,
+        prompt_text: text,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,prompt_key' });
+
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message });
+    }
+  });
+
   // GET /api/ai/config
   router.get('/config', async (req: Request, res: Response) => {
     try {
@@ -513,8 +653,8 @@ export function createAiRouter(supabase: SupabaseClient) {
   });
 
   // POST /api/ai/summarize-conversation
-  // Reemplaza la Edge Function summarize-conversation para que use el round-robin de keys.
   // Recibe { clienteId } — lee mensajes de panel_mensajes y genera un resumen del pedido.
+  // También extrae datos de comprobantes con el prompt configurable y vincula al Sistema Pulpo.
   router.post('/summarize-conversation', async (req: Request, res: Response) => {
     try {
       const userId = req.headers['x-user-id'] as string;
@@ -522,8 +662,18 @@ export function createAiRouter(supabase: SupabaseClient) {
       const { clienteId } = req.body;
       if (!clienteId) return res.status(400).json({ error: 'clienteId requerido' });
 
+      const panelDb = supabasePanel ?? supabase;
+
+      // Obtener teléfono del cliente para vincular con el Sistema Pulpo
+      const { data: clienteData } = await panelDb
+        .from('panel_clientes')
+        .select('phone')
+        .eq('id', clienteId)
+        .single();
+      const panelPhone: string | null = clienteData?.phone ?? null;
+
       // Leer mensajes de la tabla del panel de WhatsApp
-      const { data: mensajes, error: dbErr } = await supabase
+      const { data: mensajes, error: dbErr } = await panelDb
         .from('panel_mensajes')
         .select('content, media_url, media_type, has_media, direction')
         .eq('cliente_id', clienteId)
@@ -539,8 +689,11 @@ export function createAiRouter(supabase: SupabaseClient) {
       for (const m of mensajes) {
         if (m.content?.trim()) textos.push(m.content.trim());
         if (m.media_url) {
-          if (/\.(jpg|jpeg|png|webp)/i.test(m.media_url)) fotoUrls.push(m.media_url);
-          if (/\.(ogg|mp3|mp4|m4a)/i.test(m.media_url)) audioUrls.push(m.media_url);
+          const mt: string = m.media_type || '';
+          const isImage = mt.startsWith('image/') || /\.(jpg|jpeg|png|webp)/i.test(m.media_url);
+          const isAudio = mt.startsWith('audio/') || mt.startsWith('video/') || /\.(ogg|mp3|mp4|m4a)/i.test(m.media_url);
+          if (isImage) fotoUrls.push(m.media_url);
+          else if (isAudio) audioUrls.push(m.media_url);
         }
       }
 
@@ -554,7 +707,12 @@ export function createAiRouter(supabase: SupabaseClient) {
         } catch { return null; }
       }
 
-      // Transcribir audios (máx 3) — cada uno es 1 llamada a la IA
+      // Cargar prompt de extracción de comprobantes (configurable desde el panel)
+      const ownerName = await getOwnerName(userId);
+      const rawComprobantePrompt = await getPrompt(userId, 'comprobante_extraction');
+      const comprobantePrompt = rawComprobantePrompt.replace(/\{\{OWNER_NAME\}\}/g, ownerName);
+
+      // Transcribir audios (máx 3)
       const transcripciones: string[] = [];
       for (const url of audioUrls.slice(0, 3)) {
         const media = await fetchBase64(url);
@@ -569,26 +727,71 @@ export function createAiRouter(supabase: SupabaseClient) {
         if (result?.text) transcripciones.push(result.text.trim());
       }
 
-      // Describir fotos (máx 3) — cada una es 1 llamada a la IA
+      // Clasificar fotos y detectar comprobante.
+      // El comprobante puede llegar en CUALQUIER posición: antes, en el medio, o después de las prendas.
+      // Procesamos las primeras 3 fotos para las descripciones del resumen,
+      // y ADEMÁS revisamos todas las fotos restantes buscando el comprobante.
       const descripciones: string[] = [];
-      for (const url of fotoUrls.slice(0, 3)) {
-        const media = await fetchBase64(url);
-        if (!media) continue;
-        const mime = url.endsWith('.png') ? 'image/png' : url.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-        const result = await callGemini({
-          userId, feature: 'chat_summary',
-          prompt: `Analiza esta imagen y responde con UNA SOLA línea:
+      let comprobanteExtraido: { cliente: string | null; monto: string | null; hora: string | null } | null = null;
+
+      const CLASIFICADOR_PROMPT = `Analiza esta imagen y responde con UNA SOLA línea:
 - Si es un COMPROBANTE de pago, transferencia o captura de QR bancario: escribe "COMPROBANTE: [nombre del pagador] - [monto] Bs - [banco o app]".
 - Si es una PRENDA de ropa: escribe "PRENDA: [color, tipo, características]". Máximo 15 palabras.
 - Si es otra cosa: escribe "OTRO: [descripción breve]".
-Responde SOLO con una línea, sin explicaciones.`,
-          imageParts: [{ inlineData: { mimeType: mime, data: media.b64 } }],
-          maxTokens: 200, temperature: 0,
+Responde SOLO con una línea, sin explicaciones.`;
+
+      async function clasificarYExtraer(url: string): Promise<void> {
+        const media = await fetchBase64(url);
+        if (!media) return;
+        const mime = url.endsWith('.png') ? 'image/png' : url.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+        const imagePart = { inlineData: { mimeType: mime, data: media.b64 } };
+
+        const classResult = await callGemini({
+          userId, feature: 'chat_summary',
+          prompt: CLASIFICADOR_PROMPT,
+          imageParts: [imagePart], maxTokens: 200, temperature: 0,
         });
-        if (result?.text) descripciones.push(result.text.trim());
+        const desc = classResult?.text?.trim() ?? '';
+        if (desc) descripciones.push(desc);
+
+        if (desc.toUpperCase().startsWith('COMPROBANTE') && !comprobanteExtraido) {
+          const extractResult = await callGemini({
+            userId, feature: 'chat_summary',
+            prompt: comprobantePrompt,
+            imageParts: [imagePart], maxTokens: 250, temperature: 0, jsonMode: true,
+          });
+          if (extractResult?.text) {
+            const match = extractResult.text.match(/\{[\s\S]*\}/);
+            if (match) {
+              try {
+                const raw = JSON.parse(match[0]);
+                comprobanteExtraido = normalizeComprobanteResponse(raw);
+              } catch { /* ignorar */ }
+            }
+          }
+        }
       }
 
-      // Generar resumen final del pedido (1 llamada de texto)
+      // Primeras 3 fotos: descripciones para el resumen
+      for (const url of fotoUrls.slice(0, 3)) {
+        await clasificarYExtraer(url);
+      }
+
+      // Si no encontramos comprobante aún y hay más fotos, revisar las restantes
+      // en orden INVERSO (más reciente primero) para capturar el comprobante más nuevo.
+      if (!comprobanteExtraido && fotoUrls.length > 3) {
+        // Máximo 5 fotos adicionales (8 totales) para no agotar la cuota de Gemini
+        for (const url of [...fotoUrls.slice(3)].reverse().slice(0, 5)) {
+          await clasificarYExtraer(url);
+          if (comprobanteExtraido) break;
+        }
+      }
+
+      // Generar resumen final del pedido
+      const comprobanteDesc = comprobanteExtraido?.cliente
+        ? `${comprobanteExtraido.cliente}${comprobanteExtraido.monto ? ' - ' + comprobanteExtraido.monto + ' Bs' : ''}${comprobanteExtraido.hora ? ' - ' + comprobanteExtraido.hora : ''}`
+        : null;
+
       const promptFinal = `Eres un asistente que analiza conversaciones de WhatsApp de una tienda de ropa en Bolivia.
 
 MENSAJES DE TEXTO:
@@ -601,7 +804,7 @@ TRANSCRIPCIÓN DE AUDIOS:
 ${transcripciones.map((t, i) => `Audio ${i+1}: "${t}"`).join('\n') || '(ninguno)'}
 
 Genera este JSON exacto (sin backticks, sin texto antes o después):
-{"pedido":"qué quiere el cliente","cantidad":"número o no especificado","talla":"talla o no especificada","pago":"forma de pago o no especificado","entrega":"cuándo o dónde o no especificado","comprobante":"Si hay un comprobante de pago en las fotos, escribe: nombre del pagador - monto Bs - banco. Si no hay comprobante, escribe null","notas":"observaciones adicionales o null"}`;
+{"pedido":"qué quiere el cliente","cantidad":"número o no especificado","talla":"talla o no especificada","pago":"forma de pago o no especificado","entrega":"cuándo o dónde o no especificado","comprobante":${comprobanteDesc ? JSON.stringify(comprobanteDesc) : '"Si hay un comprobante de pago en las fotos, escribe: nombre del pagador - monto Bs - banco. Si no hay comprobante, escribe null"'},"notas":"observaciones adicionales o null"}`;
 
       const finalResult = await callGemini({
         userId, feature: 'chat_summary',
@@ -609,21 +812,186 @@ Genera este JSON exacto (sin backticks, sin texto antes o después):
         maxTokens: 400, temperature: 0, jsonMode: true,
       });
 
-      let resumen: Record<string, string> = { pedido: 'Sin respuesta de IA' };
+      let resumen: Record<string, string | null> = { pedido: 'Sin respuesta de IA' };
       if (finalResult?.text) {
-        const match = finalResult.text.match(/\{[\s\S]*\}/);
+        const match = finalResult.text.match(/\{[\s\S]*?\}/s);
         if (match) {
-          try { resumen = JSON.parse(match[0]); } catch { resumen = { pedido: finalResult.text }; }
+          try {
+            const parsed = JSON.parse(match[0]);
+            // Si el pedido contiene un JSON completo en vez de texto → estaba doblemente codificado
+            if (typeof parsed.pedido === 'string' && parsed.pedido.trimStart().startsWith('{')) {
+              try { resumen = JSON.parse(parsed.pedido); } catch { resumen = parsed; }
+            } else {
+              resumen = parsed;
+            }
+          } catch {
+            console.warn('[summarize] JSON parse falló, reintentando con regex no-greedy');
+            const m2 = finalResult.text.match(/\{[^{}]*\}/);
+            if (m2) {
+              try { resumen = JSON.parse(m2[0]); } catch { /* sin datos */ }
+            }
+          }
+        }
+      }
+
+      // Si hay comprobante extraído, asegurar que el resumen lo incluye
+      if (comprobanteDesc) resumen.comprobante = comprobanteDesc;
+
+      // ── Procesar comprobante extraído ────────────────────────────────────────
+      let estadoPago: 'pagado_verificado' | 'solo_comprobante' | null = null;
+      let pagoAlerta: { nombre: string; monto: string | null; hora: string | null } | null = null;
+
+      if (comprobanteExtraido?.cliente) {
+        const nombreCliente = comprobanteExtraido.cliente;
+        const montoNum = comprobanteExtraido.monto ? parseFloat(comprobanteExtraido.monto) : null;
+        const nameNorm = nombreCliente.toUpperCase()
+          .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z\s]/g, '').replace(/\s+/g, ' ').trim();
+
+        // 1. Guardar nombre en panel_clientes
+        await panelDb.from('panel_clientes').update({ nombre: nombreCliente }).eq('id', clienteId);
+
+        // 1b. CONEXIÓN PRINCIPAL: vincular teléfono WA al perfil en customers
+        if (panelPhone) {
+          const waPhone = panelPhone.replace(/\D/g, '');
+          try {
+            // fn_link_customer_wa busca por nombre exacto o fuzzy (>0.6) y escribe wa_number
+            const { data: customerId } = await supabase.rpc('fn_link_customer_wa', {
+              p_canonical_name: nameNorm,
+              p_wa_number: waPhone,
+              p_user_id: userId,
+            });
+
+            if (!customerId) {
+              // Auto-aprendizaje: cliente nuevo que llega solo por WhatsApp
+              // Crear el perfil en customers para que aparezca en la app principal
+              await supabase.from('customers').insert({
+                full_name: nombreCliente,
+                canonical_name: nameNorm,
+                normalized_name: nameNorm.toLowerCase(),
+                wa_number: waPhone,
+                phone: waPhone,
+                active_label: null,
+                active_label_type: null,
+                user_id: userId,
+                is_active: true,
+                source: 'whatsapp',
+              });
+              console.log(`[summarize] Cliente nuevo creado en customers: "${nombreCliente}" wa=${waPhone}`);
+            } else {
+              console.log(`[summarize] customers.wa_number actualizado: "${nombreCliente}" (id=${customerId}) wa=${waPhone}`);
+            }
+          } catch (e: any) {
+            console.warn('[summarize] fn_link_customer_wa (no crítico):', e?.message);
+          }
+        }
+
+        // 2. Verificar si existe pago de MacroDroid con monto similar en las últimas 24h
+        if (montoNum && montoNum > 0) {
+          const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const { data: pagosMatch } = await supabase
+            .from('pagos')
+            .select('id, nombre, pago, date')
+            .eq('user_id', userId)
+            .eq('method', 'Notificación bancaria')
+            .gte('date', since24h)
+            .gte('pago', montoNum * 0.97)
+            .lte('pago', montoNum * 1.03);
+
+          estadoPago = pagosMatch?.length ? 'pagado_verificado' : 'solo_comprobante';
+        } else {
+          estadoPago = 'solo_comprobante';
+        }
+
+        // 3. Si solo hay comprobante sin MacroDroid, preparar alerta para el operador
+        if (estadoPago === 'solo_comprobante') {
+          pagoAlerta = { nombre: nombreCliente, monto: comprobanteExtraido.monto, hora: comprobanteExtraido.hora };
+        }
+
+        // 4. Actualizar estado en panel_clientes
+        await panelDb.from('panel_clientes').update({ estado: estadoPago }).eq('id', clienteId);
+
+        // 5. Vincular con el Sistema Pulpo (identity_profiles): teléfono WA ↔ nombre del comprobante
+        if (panelPhone) {
+          try {
+            const waPhone = panelPhone.replace(/\D/g, '');
+            const match = await findOrCreateProfile(supabase, userId, {
+              name: nombreCliente,
+              phone: waPhone,
+            });
+
+            // Actualizar panel_phone y/o display_name si faltan
+            const updates: Record<string, string> = {};
+            if (!match.profile.panel_phone) updates.panel_phone = waPhone;
+            if (nombreCliente.length > (match.profile.display_name?.trim()?.length ?? 0)) updates.display_name = nombreCliente;
+            if (Object.keys(updates).length > 0) {
+              await supabase.from('identity_profiles').update(updates).eq('id', match.profile.id);
+            }
+
+            // AUTO-MERGE: si existe otro perfil con el mismo nombre, fusionarlo aquí
+            // Cubre el caso: MacroDroid creó perfil con nombre (sin tel) + WhatsApp creó perfil con tel (sin nombre)
+            const { data: duplicates } = await supabase
+              .from('identity_profiles')
+              .select('id, display_name, phone, panel_phone, store_phone, cliente_id, merged_from')
+              .eq('user_id', userId)
+              .neq('id', match.profile.id);
+
+            const duplicate = duplicates?.find(p => {
+              const pNorm = (p.display_name ?? '').toUpperCase()
+                .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z\s]/g, '').replace(/\s+/g, ' ').trim();
+              return pNorm === nameNorm && pNorm.length > 0;
+            });
+
+            if (duplicate) {
+              // Mover toda la evidencia del duplicado al perfil actual
+              await supabase.from('identity_evidence')
+                .update({ profile_id: match.profile.id })
+                .eq('profile_id', duplicate.id)
+                .eq('user_id', userId);
+
+              // Heredar campos que el perfil actual no tenga
+              const mergeUpdates: Record<string, unknown> = {
+                merged_from: [...(match.profile.merged_from ?? []), duplicate.id],
+              };
+              if (!match.profile.phone && duplicate.phone) mergeUpdates.phone = duplicate.phone;
+              if (!match.profile.panel_phone && duplicate.panel_phone) mergeUpdates.panel_phone = duplicate.panel_phone;
+              if (!match.profile.store_phone && duplicate.store_phone) mergeUpdates.store_phone = duplicate.store_phone;
+              if (!(match.profile as any).cliente_id && duplicate.cliente_id) mergeUpdates.cliente_id = duplicate.cliente_id;
+
+              await supabase.from('identity_profiles').update(mergeUpdates).eq('id', match.profile.id);
+              await supabase.from('identity_profiles').delete().eq('id', duplicate.id).eq('user_id', userId);
+              console.log(`[summarize] Pulpo auto-merge: eliminado duplicado ${duplicate.id} → fusionado en ${match.profile.id}`);
+            }
+
+            // Depositar evidencia de WhatsApp
+            await depositEvidence(supabase, userId, match.profile.id, {
+              source: 'whatsapp',
+              event_type: 'comprobante_pago',
+              phone: waPhone,
+              name_raw: nombreCliente,
+              amount: comprobanteExtraido?.monto ? parseFloat(comprobanteExtraido.monto) : undefined,
+              event_at: new Date().toISOString(),
+              payload: { estado: estadoPago, hora: comprobanteExtraido?.hora },
+            });
+            console.log(`[summarize] Pulpo: "${nombreCliente}" ↔ ${waPhone} → perfil ${match.profile.id} (${match.match_type})`);
+          } catch (e: any) {
+            console.warn('[summarize] Pulpo link (no crítico):', e?.message);
+          }
         }
       }
 
       // Guardar resumen en la tabla del panel
-      await supabase.from('panel_clientes').update({
+      await panelDb.from('panel_clientes').update({
         resumen: JSON.stringify(resumen),
         resumen_at: new Date().toISOString(),
       }).eq('id', clienteId);
 
-      res.json({ ok: true, resumen });
+      res.json({
+        ok: true,
+        resumen,
+        comprobante_extraido: comprobanteExtraido,
+        estado_pago: estadoPago,
+        pago_alerta: pagoAlerta,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message });
     }

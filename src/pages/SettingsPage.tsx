@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { AiSettingsPanel } from '../components/AiSettingsPanel';
+import { IdentityPanel } from '../components/IdentityPanel';
+import { WhatsappConnectionPanel } from '../components/WhatsappConnectionPanel';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Package, BarChart3, Trash2, Search, Check, CheckCircle2,
   LogOut, Printer, FileSpreadsheet, Eye, Pencil, X, Wallet,
-  Calendar, Zap, Database, Minus, Plus,
+  Calendar, Zap, Database, Minus, Plus, Users,
 } from 'lucide-react';
 import { Payment } from '../types';
 import { db, doc, updateDoc, deleteDoc, writeBatch } from '../lib/firebase-compat';
@@ -46,7 +48,7 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
 }
 
 // ─── Tab type ────────────────────────────────────────────────────────────────
-type Tab = 'ia' | 'datos' | 'sistema';
+type Tab = 'ia' | 'datos' | 'sistema' | 'identidad';
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 function SettingsView({ payments, onLogout, userId = '' }: {
@@ -77,6 +79,7 @@ function SettingsView({ payments, onLogout, userId = '' }: {
       <div className="flex gap-1 p-1 bg-gray-100 rounded-2xl">
         {([
           { id: 'ia', label: 'Inteligencia Artificial', icon: <Zap size={13} /> },
+          { id: 'identidad', label: 'Identidad', icon: <Users size={13} /> },
           { id: 'datos', label: 'Datos', icon: <Database size={13} /> },
           { id: 'sistema', label: 'Sistema', icon: <Package size={13} /> },
         ] as { id: Tab; label: string; icon: React.ReactNode }[]).map(tab => (
@@ -91,7 +94,7 @@ function SettingsView({ payments, onLogout, userId = '' }: {
           >
             {tab.icon}
             <span className="hidden sm:inline">{tab.label}</span>
-            <span className="sm:hidden">{tab.id === 'ia' ? 'IA' : tab.id === 'datos' ? 'Datos' : 'Sistema'}</span>
+            <span className="sm:hidden">{tab.id === 'ia' ? 'IA' : tab.id === 'identidad' ? 'ID' : tab.id === 'datos' ? 'Datos' : 'Sistema'}</span>
           </button>
         ))}
       </div>
@@ -103,6 +106,15 @@ function SettingsView({ payments, onLogout, userId = '' }: {
             {userId
               ? <AiSettingsPanel userId={userId} />
               : <p className="text-center text-sm text-gray-400 py-8">Inicia sesión para ver la configuración de IA</p>
+            }
+          </motion.div>
+        )}
+
+        {activeTab === 'identidad' && (
+          <motion.div key="identidad" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className="space-y-4">
+            {userId
+              ? <IdentityPanel userId={userId} />
+              : <p className="text-center text-sm text-gray-400 py-8">Inicia sesión para ver los perfiles de identidad</p>
             }
           </motion.div>
         )}
@@ -468,6 +480,9 @@ function TabSistema() {
 
   return (
     <div className="space-y-4">
+      {/* WhatsApp Connection */}
+      <WhatsappConnectionPanel />
+
       {/* Casilleros — ultra compacto */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <div className="flex items-center justify-between">
