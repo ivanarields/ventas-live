@@ -212,7 +212,9 @@ import {
   Eye,
   EyeOff,
   Printer,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 import { 
   format, 
@@ -956,7 +958,7 @@ export default function App() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentTab, setCurrentTab] = useState<'home' | 'entrega' | 'payments' | 'finance' | 'tienda' | 'settings' | 'panel_pedidos'>('home');
+  const [currentTab, setCurrentTab] = useState<'home' | 'entrega' | 'payments' | 'finance' | 'tienda' | 'settings'>('home');
   const [selectedPaymentDates, setSelectedPaymentDates] = useState<Date[]>([new Date()]);
   const [selectedPaymentTime, setSelectedPaymentTime] = useState<string>("");
   const [isPaymentCalendarOpen, setIsPaymentCalendarOpen] = useState(false);
@@ -1584,6 +1586,7 @@ export default function App() {
           {currentTab === 'finance' && (
             <FinanceView
               transactions={transactions}
+              payments={payments}
               categories={categories}
               key="finance"
               onAdd={() => { setEditingTransaction(null); setShowAddModal('transaction'); }}
@@ -1599,7 +1602,6 @@ export default function App() {
             </motion.div>
           )}
           {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} userId={user?.id ?? ''} key="settings" />}
-          {currentTab === 'panel_pedidos' && <PanelPedidos />}
         </AnimatePresence>
       </main>
 
@@ -1611,7 +1613,6 @@ export default function App() {
         <TabButton active={currentTab === 'finance'} icon={TrendingUp} onClick={() => setCurrentTab('finance')} />
         <TabButton active={currentTab === 'tienda'} icon={Store} onClick={() => setCurrentTab('tienda')} />
         <TabButton active={currentTab === 'settings'} icon={Settings} onClick={() => setCurrentTab('settings')} />
-        <TabButton active={currentTab === 'panel_pedidos'} icon={ClipboardList} onClick={() => setCurrentTab('panel_pedidos')} />
       </nav>
 
       {/* Add Modals */}
@@ -1968,6 +1969,7 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
 function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedidos: any[]; customers: any[]; onSelectPerson: (id: string) => void; onRefresh: () => void }) {
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<'casilleros' | 'pedidos'>('casilleros');
 
   const activos = pedidos.filter(p => {
     const s = (p.status ?? '').toLowerCase();
@@ -2027,16 +2029,32 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           </p>
         </div>
         <div className="flex gap-1.5">
-          <div className="flex items-center gap-1 bg-gray-100 rounded-full px-2.5 py-1">
-            <div className="w-2 h-2 rounded-full bg-blue-400" />
-            <span className="text-[10px] font-bold text-gray-500">1 bolsa</span>
-          </div>
-          <div className="flex items-center gap-1 bg-gray-100 rounded-full px-2.5 py-1">
-            <div className="w-2 h-2 rounded-full bg-brand" />
-            <span className="text-[10px] font-bold text-gray-500">2+ bolsas</span>
-          </div>
+          <button
+            onClick={() => setActiveSubTab('casilleros')}
+            className="flex items-center gap-1 rounded-full px-2.5 py-1 transition-all"
+            style={activeSubTab === 'casilleros'
+              ? { background: '#ff2d78', color: 'white' }
+              : { background: '#f3f4f6', color: '#6b7280' }}
+          >
+            <div className="w-2 h-2 rounded-full bg-blue-400/80" />
+            <span className="text-[10px] font-bold">Casilleros</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('pedidos')}
+            className="flex items-center gap-1 rounded-full px-2.5 py-1 transition-all"
+            style={activeSubTab === 'pedidos'
+              ? { background: '#ff2d78', color: 'white' }
+              : { background: '#f3f4f6', color: '#6b7280' }}
+          >
+            <div className="w-2 h-2 rounded-full" style={{ background: activeSubTab === 'pedidos' ? 'rgba(255,255,255,0.6)' : '#ff2d78' }} />
+            <span className="text-[10px] font-bold">Pedidos</span>
+          </button>
         </div>
       </div>
+
+      {activeSubTab === 'pedidos' && <PanelPedidos />}
+
+      {activeSubTab === 'casilleros' && <>
 
       {/* ── NUMÉRICOS activos ── */}
       {NUMERIC.some(code => byLabel(code).length > 0) && (
@@ -2180,6 +2198,8 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           </motion.div>
         </div>
       )}
+
+      </>}
     </motion.div>
   );
 }
@@ -3075,7 +3095,7 @@ function ContextMenu({ onClose, onDuplicate, onDelete }: any) {
   );
 }
 
-function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any) {
+function FinanceView({ transactions, payments, categories, onAdd, onEdit, onRefresh }: any) {
   const [showDetails, setShowDetails] = useState<'income' | 'expense' | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -3150,25 +3170,54 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
     }
   };
 
-  const income = transactions.filter((t: any) => t.type === 'income').reduce((acc: number, t: any) => acc + t.amount, 0);
+  // Agrupar pagos por día como entradas de "Ventas"
+  const salesByDay = useMemo(() => {
+    const grouped: Record<string, number> = {};
+    (payments ?? []).forEach((p: any) => {
+      const raw = p.date || p.fecha;
+      if (!raw) return;
+      const d = new Date(raw);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      grouped[key] = (grouped[key] || 0) + (p.pago || 0);
+    });
+    return Object.entries(grouped).map(([dateKey, amount]) => ({
+      id: `sales-${dateKey}`,
+      type: 'income' as const,
+      category: 'Ventas',
+      amount,
+      date: new Date(`${dateKey}T12:00:00`),
+      isSales: true,
+    }));
+  }, [payments]);
+
+  // Historial unificado: transacciones manuales + ventas por día, orden cronológico inverso
+  const allEntries = useMemo(() => {
+    return [...transactions, ...salesByDay].sort((a: any, b: any) => {
+      const da = new Date(b.date || b.fecha).getTime();
+      const db2 = new Date(a.date || a.fecha).getTime();
+      return da - db2;
+    });
+  }, [transactions, salesByDay]);
+
+  const totalSales = salesByDay.reduce((acc: number, s: any) => acc + s.amount, 0);
+  const income = transactions.filter((t: any) => t.type === 'income').reduce((acc: number, t: any) => acc + t.amount, 0) + totalSales;
   const expenses = transactions.filter((t: any) => t.type === 'expense').reduce((acc: number, t: any) => acc + t.amount, 0);
   const balance = income - expenses;
 
-  // Preparar datos para el análisis detallado
+  // Datos para el análisis por categoría
   const incomeData: CategoryData[] = useMemo(() => {
-    const grouped = transactions
-      .filter((t: any) => t.type === 'income')
-      .reduce((acc: any, t: any) => {
-        acc[t.category] = (acc[t.category] || 0) + t.amount;
-        return acc;
-      }, {});
-
+    const grouped: Record<string, number> = {};
+    if (totalSales > 0) grouped['Ventas'] = totalSales;
+    transactions.filter((t: any) => t.type === 'income').forEach((t: any) => {
+      const key = t.category || 'Sin categoría';
+      grouped[key] = (grouped[key] || 0) + t.amount;
+    });
     return Object.entries(grouped).map(([name, value], index) => ({
       name,
       value: value as number,
       color: COLORS[index % COLORS.length]
     }));
-  }, [transactions]);
+  }, [transactions, totalSales]);
 
   const expenseData: CategoryData[] = useMemo(() => {
     const grouped = transactions
@@ -3186,7 +3235,7 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
   }, [transactions]);
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, x: 10 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -10 }}
@@ -3216,19 +3265,19 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-3">
-        <div 
+        <div
           onClick={() => setShowDetails('income')}
           className="card-modern p-4 bg-emerald-50/30 border-emerald-100 cursor-pointer active:scale-95 transition-transform"
         >
           <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-emerald-500 rounded-lg text-white">
+            <div className="p-1.5 bg-emerald-600 rounded-lg text-white">
               <TrendingUp className="w-3 h-3" />
             </div>
             <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider">Ingresos Totales</span>
           </div>
-          <h3 className="text-xl font-extrabold text-base-text">Bs {income.toLocaleString()}</h3>
+          <h3 className="text-xl font-extrabold text-gray-700">Bs {income.toLocaleString()}</h3>
         </div>
-        <div 
+        <div
           onClick={() => setShowDetails('expense')}
           className="card-modern p-4 bg-rose-50/30 border-rose-100 cursor-pointer active:scale-95 transition-transform"
         >
@@ -3238,7 +3287,7 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
             </div>
             <span className="text-[9px] font-bold text-rose-600 uppercase tracking-wider">Gastos Totales</span>
           </div>
-          <h3 className="text-xl font-extrabold text-base-text">Bs {expenses.toLocaleString()}</h3>
+          <h3 className="text-xl font-extrabold text-gray-700">Bs {expenses.toLocaleString()}</h3>
         </div>
       </div>
 
@@ -3249,29 +3298,31 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
           <span className="text-[10px] font-bold text-brand uppercase tracking-wider">Balance: Bs {balance.toLocaleString()}</span>
         </div>
         <div className="divide-y divide-gray-100/50">
-          {transactions.length === 0 ? (
+          {allEntries.length === 0 ? (
             <div className="text-center py-10 opacity-20">
               <TrendingDown className="w-8 h-8 mx-auto mb-2" />
               <p className="text-[10px] font-bold uppercase tracking-widest">Sin movimientos</p>
             </div>
           ) : (
-            transactions.map((t: any, tIdx: number) => {
-              const categoryObj = categories.find((c: any) => c.name === t.category);
-              const Icon = categoryObj ? (CATEGORY_ICONS[categoryObj.icon] || MoreHorizontal) : MoreHorizontal;
-              const displayTitle = t.subcategory || t.category;
-              
+            allEntries.map((t: any, tIdx: number) => {
+              const isSales = t.isSales === true;
+              const categoryObj = isSales ? null : categories.find((c: any) => c.name === t.category);
+              const Icon = isSales ? Megaphone : (categoryObj ? (CATEGORY_ICONS[categoryObj.icon] || MoreHorizontal) : MoreHorizontal);
+              const displayTitle = isSales ? 'Ventas' : (t.subcategory || t.category);
+
               return (
-                <motion.div 
-                  key={`tx-${t.id}-${tIdx}`} 
-                  onPointerDown={(e) => handlePointerDown(e, t)}
-                  onPointerUp={handlePointerUp}
-                  onPointerMove={handlePointerMove}
-                  onPointerCancel={handlePointerUp}
+                <motion.div
+                  key={`tx-${t.id}-${tIdx}`}
+                  onPointerDown={isSales ? undefined : (e) => handlePointerDown(e, t)}
+                  onPointerUp={isSales ? undefined : handlePointerUp}
+                  onPointerMove={isSales ? undefined : handlePointerMove}
+                  onPointerCancel={isSales ? undefined : handlePointerUp}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
                   }}
                   onClick={(e) => {
+                    if (isSales) return;
                     if (isLongPressActive.current) {
                       e.preventDefault();
                       e.stopPropagation();
@@ -3280,22 +3331,26 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
                     onEdit(t);
                   }}
                   whileTap={{ scale: 0.98 }}
-                  className="py-2.5 flex items-center justify-between hover:bg-gray-50/50 active:bg-gray-100/50 transition-colors cursor-pointer group relative select-none touch-pan-y"
+                  className={cn(
+                    "py-2.5 flex items-center justify-between transition-colors relative select-none touch-pan-y",
+                    isSales ? "opacity-90" : "hover:bg-gray-50/50 active:bg-gray-100/50 cursor-pointer group"
+                  )}
                   style={{ WebkitTouchCallout: 'none' }}
                 >
                   <div className="flex items-center gap-3">
                     <div className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110",
-                      t.type === 'income' ? 'bg-emerald-400/80 text-white' : 'bg-rose-400/80 text-white'
+                      "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
+                      !isSales && "transition-transform group-hover:scale-110",
+                      t.type === 'income' ? 'bg-emerald-600 text-white' : 'bg-rose-400/80 text-white'
                     )}>
                       <Icon className="w-4 h-4" />
                     </div>
                     <div className="flex flex-col">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-black text-base-text uppercase tracking-wider leading-tight">
+                        <span className="text-[11px] font-black text-gray-700 uppercase tracking-wider leading-tight">
                           {displayTitle}
                         </span>
-                        {t.isRecurring && <RefreshCw className="w-2.5 h-2.5 text-brand/60" />}
+                        {!isSales && t.isRecurring && <RefreshCw className="w-2.5 h-2.5 text-brand/60" />}
                       </div>
                       <span className="text-[8px] font-bold text-base-text-muted/60 uppercase tracking-tighter mt-0.5">
                         {formatTransactionDate(t.date)}
@@ -3309,12 +3364,12 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
                     )}>
                       <span className={cn(
                         "text-[11px] font-black tracking-tight",
-                        t.type === 'income' ? "text-emerald-500/80" : "text-rose-500/80"
+                        t.type === 'income' ? "text-emerald-600" : "text-rose-500/80"
                       )}>
                         {t.type === 'income' ? '+' : '-'}Bs {t.amount.toLocaleString()}
                       </span>
                     </div>
-                    {t.status === 'pending' && (
+                    {!isSales && t.status === 'pending' && (
                       <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                     )}
                   </div>
@@ -3327,7 +3382,7 @@ function FinanceView({ transactions, categories, onAdd, onEdit, onRefresh }: any
 
       <AnimatePresence>
         {contextMenu && (
-          <ContextMenu 
+          <ContextMenu
             onClose={() => setContextMenu(null)}
             onDuplicate={() => handleDuplicate(contextMenu.transaction)}
             onDelete={() => handleDelete(contextMenu.transaction.id)}

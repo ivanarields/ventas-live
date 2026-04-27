@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ExternalLink, Plus, Edit2, Trash2, Package, ShoppingBag,
   Check, X, Image as ImageIcon, ChevronDown, ChevronUp,
-  Send, AlertCircle, RefreshCw, Camera, Loader2,
+  Send, AlertCircle, RefreshCw, Camera, Loader2, Copy,
 } from 'lucide-react';
 
 const MAX_PHOTOS = 3;
@@ -360,6 +360,15 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     if (res.ok) await loadAll();
   };
 
+  const [copied, setCopied] = useState(false);
+  const storeUrl = `${window.location.origin}/tienda`;
+  const handleCopy = () => {
+    navigator.clipboard.writeText(storeUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <div className="space-y-4 pb-8">
       {/* Header */}
@@ -368,16 +377,27 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
           <h2 className="text-xl font-black text-gray-900">Panel de Tienda</h2>
           <p className="text-xs text-gray-400 font-medium">Leydi American</p>
         </div>
-        <a
-          href="/tienda"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black border transition-all hover:scale-105"
-          style={{ borderColor: BRAND, color: BRAND, background: '#fff0f5' }}
-        >
-          <ExternalLink size={12} />
-          Ver tienda
-        </a>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-black border transition-all"
+            style={{ borderColor: '#e5e7eb', color: copied ? '#10b981' : '#9ca3af', background: 'white' }}
+            title="Copiar link de tienda"
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            {copied ? 'Copiado' : 'Copiar'}
+          </button>
+          <a
+            href="/tienda"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-black border transition-all hover:scale-105"
+            style={{ borderColor: BRAND, color: BRAND, background: '#fff0f5' }}
+          >
+            <ExternalLink size={12} />
+            Ver tienda
+          </a>
+        </div>
       </div>
 
       {/* Sub-tabs */}
