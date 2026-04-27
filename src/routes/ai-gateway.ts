@@ -12,8 +12,8 @@ import {
   buildProductCatalogPrompt,
   buildImageClassifierPrompt,
   buildReceiptQrPrompt,
-} from '../ai/prompts/index';
-import { findOrCreateProfile, depositEvidence } from '../services/identityService';
+} from '../ai/prompts/index.js';
+import { findOrCreateProfile, depositEvidence } from '../services/identityService.js';
 
 export function createAiRouter(supabase: SupabaseClient, supabasePanel?: SupabaseClient) {
   const router = Router();
