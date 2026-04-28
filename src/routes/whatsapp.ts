@@ -63,6 +63,23 @@ export function createWhatsappRouter(supabase: SupabaseClient) {
   }
 
   // ─────────────────────────────────────────────────────────
+  // GET /api/whatsapp/status
+  // Proxy al bridge de Railway. Retorna { connected, qrDataUrl }
+  // ─────────────────────────────────────────────────────────
+  router.get('/status', async (_req: Request, res: Response) => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const r = await fetch(`${BRIDGE_URL}/status`, { signal: controller.signal });
+      clearTimeout(timeout);
+      const data = await r.json();
+      res.json(data);
+    } catch {
+      res.status(503).json({ connected: false, qrDataUrl: null, error: 'connector_unreachable' });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
   // GET /api/whatsapp/health
   // Proxy al bridge de Railway. Retorna { connected, timestamp }
   // ─────────────────────────────────────────────────────────
