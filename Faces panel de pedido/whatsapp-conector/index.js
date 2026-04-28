@@ -3,6 +3,8 @@ const { Client, LocalAuth } = pkg;
 import qrcodeImg from 'qrcode';
 import axios from 'axios';
 import http from 'http';
+import { registerSendRoutes } from './send.js';
+
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -181,3 +183,8 @@ client.on('message_create', async (msg) => {
 });
 
 client.initialize();
+
+// Registrar rutas de envío (POST /api/send y GET /api/health)
+registerSendRoutes(server, client, () => connected);
+
+

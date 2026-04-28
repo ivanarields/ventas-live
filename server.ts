@@ -1,4 +1,4 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -8,6 +8,9 @@ import { supabaseStore } from "./src/lib/supabaseStore.js";
 import { supabasePanel } from "./src/lib/supabasePanel.js";
 import { createAiRouter } from "./src/routes/ai-gateway.js";
 import { createIdentityRouter } from "./src/routes/identity.js";
+import { createWhatsappRouter, enqueueStoreConfirmation } from "./src/routes/whatsapp.js";
+
+
 import { ingestManualPayment } from "./src/services/identityService.js";
 import {
   CATEGORIAS_VALIDAS,
@@ -832,6 +835,8 @@ const PORT = Number(process.env.PORT || 3001);
 
   app.use('/api/ai', createAiRouter(supabaseServer, supabasePanel));
   app.use('/api/identity', createIdentityRouter(supabaseServer, supabaseStore, supabasePanel));
+  app.use('/api/whatsapp', createWhatsappRouter(supabaseServer));
+
 
   // ── Proxy al conector de WhatsApp (QR y estado de conexión) ──────────────────
   const WA_CONNECTOR_URL = process.env.WHATSAPP_CONNECTOR_URL || 'http://localhost:3000';
@@ -1313,6 +1318,17 @@ const PORT = Number(process.env.PORT || 3001);
       .single();
 
     if (error || !data) return false;
+    
+    // 0. Encolar mensaje de WhatsApp confirmando el pedido
+    if (data.customer_wa) {
+      enqueueStoreConfirmation(
+        supabaseStore, 
+        (data.user_id || 'mobile'), 
+        data.customer_wa, 
+        data.id
+      ).catch(e => console.error('[whatsapp-queue] Error encolando confirmación:', e));
+    }
+
 
     // 1. Ocultar productos vendidos
     try {
@@ -1512,9 +1528,72 @@ const PORT = Number(process.env.PORT || 3001);
     }
   });
 
-  // ── Endpoint 3: Match manual / webhook externo ────────────────
-  // Para verificaciones manuales o desde herramientas externas
+  // ── Endpoint 5: Espejo de Fotos de WhatsApp para la Tienda ──────
+  // Devuelve las fotos enviadas por un número de WhatsApp (para conciliación de Live)
+  app.get('/api/store/whatsapp-photos', async (req, res) => {
+    try {
+      const { phone } = req.query;
+      if (!phone) return res.status(400).json({ error: 'phone requerido' });
+
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      
+      // 1. Buscar el cliente en el panel
+      const { data: cliente } = await supabasePanel
+        .from('panel_clientes')
+        .select('id')
+        .eq('phone', cleanPhone)
+        .single();
+
+      if (!cliente) return res.json([]);
+
+      // 2. Traer mensajes con media de los últimos 7 días
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: mensajes, error } = await supabasePanel
+        .from('panel_mensajes')
+        .select('id, media_url, media_type, created_at, content')
+        .eq('cliente_id', cliente.id)
+        .eq('direction', 'in')
+        .eq('has_media', true)
+        .gt('created_at', weekAgo)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      res.json(mensajes ?? []);
+    } catch (err: any) {
+      console.error('[store/whatsapp-photos]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint 6: Generar Link de Live y Encolar Notificación ──────
+  app.post('/api/store/notify-live-ready', async (req, res) => {
+    try {
+      const { customerId, phone } = req.body;
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId || !phone) return res.status(400).json({ error: 'userId y phone requeridos' });
+
+      const cleanPhone = phone.replace(/\D/g, '');
+      const storeLink = `${process.env.STORE_URL || 'https://tienda.ventas-live.com'}/live-confirmation?phone=${cleanPhone}`;
+
+      const message = `¡Hola! 👗 Ya tenemos tus prendas del Live listas para confirmación. Ingresa aquí para seleccionar las tuyas: ${storeLink}\n\n(Necesitarás tu PIN de la tienda)`;
+
+      const { ok, error, queued } = await enqueueStoreConfirmation(
+        supabaseServer,
+        userId,
+        phone,
+        `LIVE-${Date.now()}`,
+        message
+      );
+
+      if (!ok) throw new Error(error);
+      res.json({ ok: true, queued });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
   app.post('/api/store/match-payment', async (req, res) => {
+
     try {
       const { amount, senderPhone, orderRef, orderId, source } = req.body;
 

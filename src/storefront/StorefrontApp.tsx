@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { Rocket } from 'lucide-react';
 import { ProductGallery } from './components/ProductGallery';
 import { ProductDetail } from './components/ProductDetail';
 import { Checkout } from './components/Checkout';
 import { CartView } from './components/CartView';
 import { StoreProfile } from './components/StoreProfile';
+import { LiveConfirmation } from './components/LiveConfirmation';
+
 import { Product, productsApi } from './services/productsApi';
 
 export interface CartItem {
@@ -20,13 +23,38 @@ export function cartCount(items: CartItem[]): number {
   return items.reduce((acc, i) => acc + i.quantity, 0);
 }
 
-type View = 'welcome' | 'gallery' | 'detail' | 'checkout' | 'cart' | 'profile';
+type View = 'welcome' | 'gallery' | 'detail' | 'checkout' | 'cart' | 'profile' | 'live-confirmation';
+
 
 export default function StorefrontApp() {
   const [view, setViewInternal]             = useState<View>('welcome');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSize, setSelectedSize]     = useState<string>('');
   const [cart, setCart]                     = useState<CartItem[]>([]);
+
+  // PWA Install Prompt
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setIsInstallable(false);
+    }
+  };
 
   // Sincronización con Hash URL
   useEffect(() => {
@@ -51,10 +79,11 @@ export default function StorefrontApp() {
         return;
       }
 
-      if (['gallery', 'cart', 'checkout', 'profile'].includes(hash)) {
+      if (['gallery', 'cart', 'checkout', 'profile', 'live-confirmation'].includes(hash)) {
         setViewInternal(hash as View);
         return;
       }
+
       
       setViewInternal('welcome');
     };
@@ -142,6 +171,8 @@ export default function StorefrontApp() {
           <WelcomeScreen 
             onEnter={() => setView('gallery')} 
             onOpenProfile={() => setView('profile')} 
+            isInstallable={isInstallable}
+            onInstall={handleInstallClick}
           />
         )}
 
@@ -192,12 +223,18 @@ export default function StorefrontApp() {
             onLogout={() => setView('welcome')}
           />
         )}
+        {view === 'live-confirmation' && (
+          <LiveConfirmation
+            onBack={() => setView('gallery')}
+          />
+        )}
+
       </div>
     </div>
   );
 }
 
-function WelcomeScreen({ onEnter, onOpenProfile }: { onEnter: () => void, onOpenProfile: () => void }) {
+function WelcomeScreen({ onEnter, onOpenProfile, isInstallable, onInstall }: { onEnter: () => void, onOpenProfile: () => void, isInstallable: boolean, onInstall: () => void }) {
   const mainCategories = ['Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos'];
 
   // La carga inicial ahora se hace bajo demanda (paginada) en el componente ProductGallery
@@ -206,6 +243,27 @@ function WelcomeScreen({ onEnter, onOpenProfile }: { onEnter: () => void, onOpen
   return (
     <div className="flex flex-col min-h-screen relative overflow-hidden bg-white">
       
+      {/* PWA Banner */}
+      {isInstallable && (
+        <div className="absolute top-4 left-4 right-16 z-40 flex items-center justify-between bg-white/90 backdrop-blur rounded-2xl px-3 py-2.5 border border-[#ff2d78]/10 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#ff2d78] flex items-center justify-center shadow-md shadow-[#ff2d78]/20">
+              <Rocket className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <p className="text-[12px] font-black text-gray-900 leading-tight">Instalar app</p>
+              <p className="text-[9px] font-medium text-gray-500">Más rápida, sin barras</p>
+            </div>
+          </div>
+          <button 
+            onClick={onInstall} 
+            className="bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] text-white font-black py-1.5 px-3 rounded-full text-[10px] shadow-sm active:scale-95 transition-all"
+          >
+            Instalar
+          </button>
+        </div>
+      )}
+
       {/* Botón de Perfil */}
       <button 
         onClick={onOpenProfile}

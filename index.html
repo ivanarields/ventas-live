@@ -4,7 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" id="manifest-link" href="/manifest.json">
+    <script>
+      if (window.location.pathname.startsWith('/tienda')) {
+        document.getElementById('manifest-link').href = '/manifest-tienda.json';
+      }
+    </script>
     <meta name="theme-color" content="#000000">
     <link rel="apple-touch-icon" href="/icon-192.png">
   </head>

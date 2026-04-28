@@ -4789,6 +4789,29 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const [showQuickLink, setShowQuickLink] = useState(false);
   const [noteText, setNoteText] = useState(person.notes || '');
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isNotifying, setIsNotifying] = useState(false);
+
+  const handleNotifyLive = async () => {
+    if (!person.phone) {
+      alert('Esta clienta no tiene un número vinculado para notificar.');
+      return;
+    }
+    setIsNotifying(true);
+    try {
+      const res = await fetch('/api/store/notify-live-ready', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: person.phone })
+      });
+      if (!res.ok) throw new Error('Error al notificar');
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.3 }, colors: ['#ff2d78', '#ffffff'] });
+    } catch (err) {
+      alert('Error al enviar notificación por WhatsApp');
+    } finally {
+      setIsNotifying(false);
+    }
+  };
+
 
   const handleQuickLink = async () => {
     if (!quickPhone) return;
@@ -5488,7 +5511,19 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             </div>
           </div>
           <button 
+            onClick={handleNotifyLive}
+            disabled={isNotifying || !person.phone}
+            className={cn(
+              "p-2 rounded-full transition-all",
+              person.phone ? "text-brand hover:bg-pink-50" : "text-gray-200 cursor-not-allowed"
+            )}
+            title="Notificar Live Listo (WhatsApp)"
+          >
+            {isNotifying ? <Loader2 size={20} className="animate-spin" /> : <Video size={20} />}
+          </button>
+          <button 
             onClick={() => setConfirmDeleteProfile(true)}
+
             className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
             title="Eliminar Perfil Completo"
           >

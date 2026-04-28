@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Package, BarChart3, Trash2, Search, Check, CheckCircle2,
   LogOut, Printer, FileSpreadsheet, Eye, Pencil, X, Wallet,
-  Calendar, Zap, Database, Minus, Plus, Users, ChevronDown,
+  Calendar, Zap, Database, Minus, Plus, Users,
 } from 'lucide-react';
 import { Payment } from '../types';
 import { db, doc, updateDoc, deleteDoc, writeBatch } from '../lib/firebase-compat';
@@ -47,44 +47,7 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
-// ─── Accordion Item ──────────────────────────────────────────────────────────
-function AccordionSection({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="bg-white rounded-2xl overflow-hidden border border-gray-100">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3.5"
-      >
-        <div className="flex items-center gap-2.5">
-          <span className="text-[#ff2d78]">{icon}</span>
-          <span className="text-[13px] font-black text-gray-800">{label}</span>
-        </div>
-        <ChevronDown
-          size={16}
-          className="text-gray-400 transition-transform duration-200"
-          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
-        />
-      </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="content"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="overflow-hidden"
-          >
-            <div className="px-4 pb-4 pt-1 border-t border-gray-50">
-              {children}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
+type TabId = 'sistema' | 'ia' | 'datos' | 'identidad';
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 function SettingsView({ payments, onLogout, userId = '' }: {
@@ -93,6 +56,15 @@ function SettingsView({ payments, onLogout, userId = '' }: {
   userId?: string;
   key?: string;
 }) {
+  const [activeTab, setActiveTab] = useState<TabId>('sistema');
+
+  const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+    { id: 'sistema', label: 'Sistema', icon: <Package size={13} /> },
+    { id: 'ia',      label: 'IA',      icon: <Zap size={13} /> },
+    { id: 'datos',   label: 'Datos',   icon: <Database size={13} /> },
+    { id: 'identidad', label: 'ID',    icon: <Users size={13} /> },
+  ];
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 10 }}
@@ -109,28 +81,50 @@ function SettingsView({ payments, onLogout, userId = '' }: {
         </button>
       </div>
 
-      {/* Acordeón */}
-      <AccordionSection icon={<Zap size={15} />} label="Inteligencia Artificial">
-        {userId
-          ? <AiSettingsPanel userId={userId} />
-          : <p className="text-center text-sm text-gray-400 py-4">Inicia sesión para ver la configuración de IA</p>
-        }
-      </AccordionSection>
+      {/* ─── Tabs horizontales ─── */}
+      <div className="flex gap-1 bg-gray-100 rounded-2xl p-1">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${
+              activeTab === tab.id
+                ? 'bg-white text-[#ff2d78] shadow-sm'
+                : 'text-gray-400 hover:text-gray-500'
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      <AccordionSection icon={<Users size={15} />} label="Identidad">
-        {userId
-          ? <IdentityPanel userId={userId} />
-          : <p className="text-center text-sm text-gray-400 py-4">Inicia sesión para ver los perfiles de identidad</p>
-        }
-      </AccordionSection>
+      {/* ─── Contenido del tab activo ─── */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+        >
+          {activeTab === 'sistema' && <TabSistema />}
 
-      <AccordionSection icon={<Database size={15} />} label="Datos y Exportación">
-        <TabDatos payments={payments} />
-      </AccordionSection>
+          {activeTab === 'ia' && (
+            userId
+              ? <AiSettingsPanel userId={userId} />
+              : <p className="text-center text-sm text-gray-400 py-8">Inicia sesión para ver la configuración de IA</p>
+          )}
 
-      <AccordionSection icon={<Package size={15} />} label="Sistema">
-        <TabSistema />
-      </AccordionSection>
+          {activeTab === 'datos' && <TabDatos payments={payments} />}
+
+          {activeTab === 'identidad' && (
+            userId
+              ? <IdentityPanel userId={userId} />
+              : <p className="text-center text-sm text-gray-400 py-8">Inicia sesión para ver los perfiles de identidad</p>
+          )}
+        </motion.div>
+      </AnimatePresence>
     </motion.div>
   );
 }
