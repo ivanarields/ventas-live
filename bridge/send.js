@@ -18,9 +18,16 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
  * @param {() => boolean}        isConnected - Función que devuelve el estado actual
  */
 export function registerSendRoutes(server, client, isConnected) {
-  // Acumulamos listeners en el evento 'request' del servidor
   server.on('request', async (req, res) => {
-    // ─── CORS para desarrollo local ───
+    // Solo manejar nuestras rutas — todo lo demás lo atiende index.js
+    const isOurRoute =
+      req.method === 'OPTIONS' ||
+      (req.method === 'GET'  && req.url === '/api/health') ||
+      (req.method === 'POST' && req.url === '/api/send');
+
+    if (!isOurRoute) return;
+
+    // CORS solo para nuestras rutas
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-webhook-secret');
