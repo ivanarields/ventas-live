@@ -14,6 +14,18 @@ import {
   buildReceiptQrPrompt,
 } from '../ai/prompts/index.js';
 import { findOrCreateProfile, depositEvidence } from '../services/identityService.js';
+import {
+  boliviaDateKey,
+  ensurePanelLiveOrder,
+  matchLivePaymentWithMacrodroid,
+  normalizeLivePhone,
+  parseLiveMonto,
+  receiptAtFromMessage,
+  recomputeLiveOrderTotals,
+  syncMainPedidoForLiveOrder,
+  upsertLiveEvidence,
+  upsertWhatsappLivePayment,
+} from '../services/liveSalesService.js';
 
 export function createAiRouter(supabase: SupabaseClient, supabasePanel?: SupabaseClient) {
   const router = Router();
@@ -124,6 +136,61 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
     return { cliente, monto: monto || null, hora };
   }
 
+  function normalizePanelPhoneForLiveSales(raw: string | null | undefined): string | null {
+    return normalizeLivePhone(raw);
+  }
+
+  function configuredLiveSalesTestPhones(): Set<string> {
+    const raw = process.env.LIVE_SALES_TEST_PHONES || process.env.LIVE_SALES_TEST_PHONE || '';
+    return new Set(
+      raw
+        .split(',')
+        .map(phone => normalizePanelPhoneForLiveSales(phone))
+        .filter(Boolean) as string[],
+    );
+  }
+
+  function isLiveSalesTestPhone(phone: string | null): boolean {
+    const normalized = normalizePanelPhoneForLiveSales(phone);
+    if (!normalized) return false;
+    const allowed = configuredLiveSalesTestPhones();
+    return allowed.size > 0 && allowed.has(normalized);
+  }
+
+  function parseComprobanteMonto(raw: string | null | undefined): number | null {
+    return parseLiveMonto(raw);
+  }
+
+  function parseReceiptTextFallback(raw: string | null | undefined): { nombre: string | null; monto: number | null } {
+    if (!raw) return { nombre: null, monto: null };
+    const text = raw.replace(/\s+/g, ' ').trim();
+    const amountMatch = text.match(/(\d+(?:[.,]\d+)?)\s*(?:bs|bob|bolivianos)?/i);
+    const monto = amountMatch ? parseComprobanteMonto(amountMatch[1]) : null;
+    let nombre: string | null = null;
+
+    if (amountMatch?.index != null && amountMatch.index > 0) {
+      const beforeAmount = text
+        .slice(0, amountMatch.index)
+        .replace(/^comprobante\s*[:\-]\s*/i, '')
+        .trim();
+      const pieces = beforeAmount.split(/\s+-\s+|:/).map(p => p.trim()).filter(Boolean);
+      const candidate = pieces[pieces.length - 1] ?? beforeAmount;
+      const normalized = candidate
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z\u00D1.\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const words = normalized.split(/\s+/).filter(Boolean);
+      if (words.length >= 2 && !/\b(BANCO|YAPE|QR|CUENTA|DEPOSITO|TRANSFERENCIA)\b/.test(normalized)) {
+        nombre = normalized;
+      }
+    }
+
+    return { nombre, monto };
+  }
+
   // Devuelve el nombre de la dueña configurado en el perfil del usuario.
   // Fallback al valor por defecto si no hay perfil o el campo está vacío.
   async function getOwnerName(userId: string): Promise<string> {
@@ -212,19 +279,14 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 
     const keys = await getAiKeys(params.userId);
     const model = config.model || 'gemini-2.5-flash-lite';
-    const MAX_ATTEMPTS = keys.length + 2; // margen para esperar cooldowns
+    const MAX_ATTEMPTS = Math.max(1, keys.length);
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const apiKey = selectKey(keys);
 
       if (!apiKey) {
         // Todas en cooldown — esperar al más próximo reset (máx 65s)
-        const waitMs = msUntilNextKey(keys);
-        if (waitMs > 0 && waitMs <= 65000) {
-          console.warn(`[ai-gateway] Todas las keys en cooldown. Esperando ${Math.ceil(waitMs / 1000)}s...`);
-          await new Promise(r => setTimeout(r, waitMs + 500));
-          continue;
-        }
+        console.warn(`[ai-gateway] Todas las keys en cooldown para ${params.feature}; no se espera dentro del request.`);
         break;
       }
 
@@ -248,7 +310,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 
         const resp = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) }
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) }
         );
         const latencyMs = Date.now() - start;
 
@@ -264,7 +326,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
           const errText = await resp.text();
           console.error(`[ai-gateway] HTTP ${resp.status}:`, errText.slice(0, 200));
           await logAiUsage({ userId: params.userId, feature: params.feature, model, latencyMs, success: false, errorMessage: `HTTP ${resp.status}` });
-          return null;
+          break;
         }
 
         const data = await resp.json();
@@ -282,12 +344,100 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       } catch (err: any) {
         const latencyMs = Date.now() - start;
         await logAiUsage({ userId: params.userId, feature: params.feature, model, latencyMs, success: false, errorMessage: err?.message });
-        return null;
+        continue;
       }
     }
 
     console.error(`[ai-gateway] Sin keys disponibles para ${params.feature}.`);
-    return null;
+    return callOpenRouter(params, model);
+  }
+
+  async function callOpenRouter(params: {
+    userId: string; feature: string; prompt: string;
+    imageParts?: { inlineData: { mimeType: string; data: string } }[];
+    maxTokens?: number; temperature?: number; jsonMode?: boolean;
+  }, geminiModel: string): Promise<{ text: string; model: string; latencyMs: number } | null> {
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    if (!apiKey) return null;
+
+    const model = (process.env.OPENROUTER_MODEL?.trim())
+      || (geminiModel.startsWith('gemini-') ? `google/${geminiModel}` : geminiModel);
+    const start = Date.now();
+
+    try {
+      const content: any[] = [{ type: 'text', text: params.prompt }];
+      for (const part of params.imageParts ?? []) {
+        content.push({
+          type: 'image_url',
+          image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` },
+        });
+      }
+
+      const body: any = {
+        model,
+        messages: [{ role: 'user', content: content.length === 1 ? params.prompt : content }],
+        temperature: params.temperature ?? 0.2,
+        max_tokens: params.maxTokens ?? 400,
+      };
+      if (params.jsonMode) body.response_format = { type: 'json_object' };
+
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': process.env.APP_URL || 'https://ventas-live.vercel.app',
+          'X-Title': 'Ventas Live',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      });
+      const latencyMs = Date.now() - start;
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error(`[openrouter] HTTP ${resp.status}:`, errText.slice(0, 200));
+        await logAiUsage({
+          userId: params.userId,
+          feature: params.feature,
+          model: `openrouter:${model}`,
+          latencyMs,
+          success: false,
+          errorMessage: `HTTP ${resp.status}`,
+        });
+        return null;
+      }
+
+      const data = await resp.json();
+      const contentResp = data.choices?.[0]?.message?.content;
+      const textResp = Array.isArray(contentResp)
+        ? contentResp.map((item: any) => item?.text ?? '').join('').trim()
+        : String(contentResp ?? '').trim();
+
+      await logAiUsage({
+        userId: params.userId,
+        feature: params.feature,
+        model: `openrouter:${model}`,
+        latencyMs,
+        success: !!textResp,
+        inputTokens: data.usage?.prompt_tokens,
+        outputTokens: data.usage?.completion_tokens,
+        errorMessage: textResp ? null : 'Respuesta vacia',
+      });
+
+      return textResp ? { text: textResp, model: `openrouter:${model}`, latencyMs } : null;
+    } catch (err: any) {
+      const latencyMs = Date.now() - start;
+      await logAiUsage({
+        userId: params.userId,
+        feature: params.feature,
+        model: `openrouter:${model}`,
+        latencyMs,
+        success: false,
+        errorMessage: err?.message,
+      });
+      return null;
+    }
   }
 
 
@@ -675,7 +825,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       // Leer mensajes de la tabla del panel de WhatsApp
       const { data: mensajes, error: dbErr } = await panelDb
         .from('panel_mensajes')
-        .select('content, media_url, media_type, has_media, direction')
+        .select('id, content, media_url, media_type, has_media, direction, created_at')
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: true });
 
@@ -683,7 +833,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       if (!mensajes?.length) return res.status(404).json({ error: 'Sin mensajes' });
 
       const textos: string[]    = [];
-      const fotoUrls: string[]  = [];
+      const fotoItems: Array<{ id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null }> = [];
       const audioUrls: string[] = [];
 
       for (const m of mensajes) {
@@ -692,10 +842,24 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
           const mt: string = m.media_type || '';
           const isImage = mt.startsWith('image/') || /\.(jpg|jpeg|png|webp)/i.test(m.media_url);
           const isAudio = mt.startsWith('audio/') || mt.startsWith('video/') || /\.(ogg|mp3|mp4|m4a)/i.test(m.media_url);
-          if (isImage) fotoUrls.push(m.media_url);
+          if (isImage) fotoItems.push({
+            id: (m as any).id ?? null,
+            url: m.media_url,
+            mediaType: mt || null,
+            createdAt: m.created_at ?? null,
+            content: m.content ?? null,
+          });
           else if (isAudio) audioUrls.push(m.media_url);
         }
       }
+      const fotoUrls = fotoItems.map((item) => item.url);
+      const fotoUrlsRecientes = [...fotoItems]
+        .sort((a, b) => {
+          const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+          const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+          return tb - ta;
+        })
+        .map((item) => item.url);
 
       // Helper: descargar URL → base64
       async function fetchBase64(url: string): Promise<{ b64: string; mime: string } | null> {
@@ -733,6 +897,23 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       // y ADEMÁS revisamos todas las fotos restantes buscando el comprobante.
       const descripciones: string[] = [];
       let comprobanteExtraido: { cliente: string | null; monto: string | null; hora: string | null } | null = null;
+      let comprobanteDetectado = false;
+      let comprobanteMediaUrl: string | null = null;
+      let comprobanteTexto: string | null = null;
+      const comprobantesDetectados: Array<{
+        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null };
+        texto: string;
+        extraido: { cliente: string | null; monto: string | null; hora: string | null } | null;
+      }> = [];
+      const prendasDetectadas: Array<{
+        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null };
+        descripcion: string;
+      }> = [];
+      const analisisFotos = new Map<string, {
+        tipo: 'comprobante' | 'prenda' | 'otro' | 'sin_datos';
+        desc: string;
+        extraido: { cliente: string | null; monto: string | null; hora: string | null } | null;
+      }>();
 
       const CLASIFICADOR_PROMPT = `Analiza esta imagen y responde con UNA SOLA línea:
 - Si es un COMPROBANTE de pago, transferencia o captura de QR bancario: escribe "COMPROBANTE: [nombre del pagador] - [monto] Bs - [banco o app]".
@@ -740,10 +921,20 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 - Si es otra cosa: escribe "OTRO: [descripción breve]".
 Responde SOLO con una línea, sin explicaciones.`;
 
-      async function clasificarYExtraer(url: string): Promise<void> {
-        const media = await fetchBase64(url);
-        if (!media) return;
-        const mime = url.endsWith('.png') ? 'image/png' : url.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+      async function clasificarYExtraer(
+        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null },
+        options: { addDescription?: boolean } = {},
+      ): Promise<'comprobante' | 'prenda' | 'otro' | 'sin_datos'> {
+        const cacheKey = item.id ?? item.url;
+        const cached = analisisFotos.get(cacheKey);
+        if (cached) {
+          if (cached.desc && options.addDescription !== false) descripciones.push(cached.desc);
+          return cached.tipo;
+        }
+
+        const media = await fetchBase64(item.url);
+        if (!media) return 'sin_datos';
+        const mime = media.mime || item.mediaType || (item.url.endsWith('.png') ? 'image/png' : item.url.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
         const imagePart = { inlineData: { mimeType: mime, data: media.b64 } };
 
         const classResult = await callGemini({
@@ -752,9 +943,19 @@ Responde SOLO con una línea, sin explicaciones.`;
           imageParts: [imagePart], maxTokens: 200, temperature: 0,
         });
         const desc = classResult?.text?.trim() ?? '';
-        if (desc) descripciones.push(desc);
+        if (desc && options.addDescription !== false) descripciones.push(desc);
+        const upperDesc = desc.toUpperCase();
+        const esComprobante = upperDesc.startsWith('COMPROBANTE');
+        const esPrenda = upperDesc.startsWith('PRENDA');
 
-        if (desc.toUpperCase().startsWith('COMPROBANTE') && !comprobanteExtraido) {
+        if (esComprobante) {
+          comprobanteDetectado = true;
+          comprobanteMediaUrl = comprobanteMediaUrl ?? item.url;
+          comprobanteTexto = comprobanteTexto ?? desc;
+        }
+
+        let extraido: { cliente: string | null; monto: string | null; hora: string | null } | null = null;
+        if (esComprobante) {
           const extractResult = await callGemini({
             userId, feature: 'chat_summary',
             prompt: comprobantePrompt,
@@ -765,26 +966,38 @@ Responde SOLO con una línea, sin explicaciones.`;
             if (match) {
               try {
                 const raw = JSON.parse(match[0]);
-                comprobanteExtraido = normalizeComprobanteResponse(raw);
+                extraido = normalizeComprobanteResponse(raw);
+                if (extraido && !comprobanteExtraido) {
+                  comprobanteExtraido = extraido;
+                  const datos = [
+                    extraido.cliente,
+                    extraido.monto ? `${extraido.monto} Bs` : null,
+                    extraido.hora,
+                  ].filter(Boolean).join(' - ');
+                  comprobanteTexto = datos || comprobanteTexto;
+                }
               } catch { /* ignorar */ }
             }
           }
+          comprobantesDetectados.push({ item, texto: desc, extraido });
+        } else if (esPrenda) {
+          prendasDetectadas.push({ item, descripcion: desc.replace(/^PRENDA:\s*/i, '').trim() || desc });
         }
+
+        const tipo = esComprobante ? 'comprobante' : esPrenda ? 'prenda' : 'otro';
+        analisisFotos.set(cacheKey, { tipo, desc, extraido });
+        return tipo;
       }
 
-      // Primeras 3 fotos: descripciones para el resumen
-      for (const url of fotoUrls.slice(0, 3)) {
-        await clasificarYExtraer(url);
-      }
+      // Comprobante: revisar primero las fotos recientes para no reutilizar comprobantes viejos.
+      const fotoItemsRecientes = [...fotoItems].sort((a, b) => {
+        const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+        const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+        return tb - ta;
+      });
 
-      // Si no encontramos comprobante aún y hay más fotos, revisar las restantes
-      // en orden INVERSO (más reciente primero) para capturar el comprobante más nuevo.
-      if (!comprobanteExtraido && fotoUrls.length > 3) {
-        // Máximo 5 fotos adicionales (8 totales) para no agotar la cuota de Gemini
-        for (const url of [...fotoUrls.slice(3)].reverse().slice(0, 5)) {
-          await clasificarYExtraer(url);
-          if (comprobanteExtraido) break;
-        }
+      for (const item of fotoItemsRecientes.slice(0, 8)) {
+        await clasificarYExtraer(item, { addDescription: false });
       }
 
       // Generar resumen final del pedido
@@ -792,19 +1005,26 @@ Responde SOLO con una línea, sin explicaciones.`;
         ? `${comprobanteExtraido.cliente}${comprobanteExtraido.monto ? ' - ' + comprobanteExtraido.monto + ' Bs' : ''}${comprobanteExtraido.hora ? ' - ' + comprobanteExtraido.hora : ''}`
         : null;
 
-      const promptFinal = `Eres un asistente que analiza conversaciones de WhatsApp de una tienda de ropa en Bolivia.
+      const promptFinal = `Eres un asistente que resume conversaciones de WhatsApp para ventas live de ropa en Bolivia.
 
 MENSAJES DE TEXTO:
 ${textos.join('\n') || '(ninguno)'}
 
-ANÁLISIS DE FOTOGRAFÍAS:
+CLASIFICACION INTERNA DE FOTOS:
 ${descripciones.map((d, i) => `Foto ${i+1}: ${d}`).join('\n') || '(ninguna)'}
 
 TRANSCRIPCIÓN DE AUDIOS:
 ${transcripciones.map((t, i) => `Audio ${i+1}: "${t}"`).join('\n') || '(ninguno)'}
 
-Genera este JSON exacto (sin backticks, sin texto antes o después):
-{"pedido":"qué quiere el cliente","cantidad":"número o no especificado","talla":"talla o no especificada","pago":"forma de pago o no especificado","entrega":"cuándo o dónde o no especificado","comprobante":${comprobanteDesc ? JSON.stringify(comprobanteDesc) : '"Si hay un comprobante de pago en las fotos, escribe: nombre del pagador - monto Bs - banco. Si no hay comprobante, escribe null"'},"notas":"observaciones adicionales o null"}`;
+Reglas:
+- No describas colores, tallas, modelos ni caracteristicas de prendas.
+- Resume solo el avance de la conversacion: si eligio prendas, cuantas fotos/prendas parecen relevantes, cuantos comprobantes/pagos hay, si falta verificar algo.
+- Si no puedes contar prendas con seguridad, escribe "no especificado".
+- En "pedido" escribe una frase corta operativa, no una lista de prendas.
+- En "pago" resume cantidad/montos de pagos o comprobantes detectados.
+
+Genera este JSON exacto (sin backticks, sin texto antes o despues):
+{"pedido":"resumen operativo de la conversacion","cantidad":"cantidad de prendas elegidas o no especificado","talla":"no especificada","pago":"cantidad y monto de pagos/comprobantes o no especificado","entrega":"cuando o donde o no especificado","comprobante":${comprobanteDesc ? JSON.stringify(comprobanteDesc) : '"Si hay un comprobante de pago en las fotos, escribe: nombre del pagador - monto Bs - banco. Si no hay comprobante, escribe null"'},"notas":"pendientes de verificacion u observaciones o null"}`;
 
       const finalResult = await callGemini({
         userId, feature: 'chat_summary',
@@ -812,7 +1032,15 @@ Genera este JSON exacto (sin backticks, sin texto antes o después):
         maxTokens: 400, temperature: 0, jsonMode: true,
       });
 
-      let resumen: Record<string, string | null> = { pedido: 'Sin respuesta de IA' };
+      let resumen: Record<string, string | null> = {
+        pedido: textos.length > 0 ? textos.slice(-3).join(' ') : 'Conversacion recibida',
+        cantidad: fotoItems.length > 0 ? String(fotoItems.length) : 'no especificado',
+        talla: 'no especificada',
+        pago: comprobantesDetectados.length > 0 ? `${comprobantesDetectados.length} comprobante(s)` : 'no especificado',
+        entrega: 'no especificado',
+        comprobante: comprobanteDesc,
+        notas: null,
+      };
       if (finalResult?.text) {
         const match = finalResult.text.match(/\{[\s\S]*?\}/s);
         if (match) {
@@ -840,7 +1068,8 @@ Genera este JSON exacto (sin backticks, sin texto antes o después):
       // ── Procesar comprobante extraído ────────────────────────────────────────
       let estadoPago: 'pagado_verificado' | 'solo_comprobante' | null = null;
       let pagoAlerta: { nombre: string; monto: string | null; hora: string | null } | null = null;
-
+      let tarjetaVenta: Record<string, unknown> | null = null;
+      let pedidosVentaLive: any[] = [];
       if (comprobanteExtraido?.cliente) {
         const nombreCliente = comprobanteExtraido.cliente;
         const montoNum = comprobanteExtraido.monto ? parseFloat(comprobanteExtraido.monto) : null;
@@ -979,6 +1208,182 @@ Genera este JSON exacto (sin backticks, sin texto antes o después):
         }
       }
 
+      if (panelPhone && comprobantesDetectados.length > 0) {
+        try {
+          const phone = normalizePanelPhoneForLiveSales(panelPhone);
+          if (!phone) throw new Error('Telefono invalido para venta live');
+
+          const touchedOrderIds = new Set<string>();
+
+          for (const comprobante of comprobantesDetectados) {
+            const fallback = parseReceiptTextFallback(comprobante.texto);
+            const nombreDetectado = comprobante.extraido?.cliente ?? fallback.nombre;
+            const montoDetectado = parseLiveMonto(comprobante.extraido?.monto) ?? fallback.monto;
+            const comprobanteAt = receiptAtFromMessage(comprobante.item.createdAt, comprobante.extraido?.hora);
+            const fechaPedido = boliviaDateKey(comprobanteAt);
+            const comprobanteTextoFinal = [
+              nombreDetectado,
+              montoDetectado ? `Bs ${montoDetectado}` : null,
+              comprobante.extraido?.hora,
+            ].filter(Boolean).join(' - ') || comprobante.texto;
+
+            const order = await ensurePanelLiveOrder(panelDb, {
+              clienteId,
+              phone,
+              fechaPedido,
+              nombreDetectado,
+              isTest: false,
+            });
+            touchedOrderIds.add(order.id);
+
+            await upsertLiveEvidence(panelDb, {
+              pedidoLiveId: order.id,
+              clienteId,
+              panelMensajeId: comprobante.item.id,
+              tipo: 'comprobante',
+              mediaUrl: comprobante.item.url,
+              mediaType: comprobante.item.mediaType,
+              content: comprobante.item.content,
+              descripcion: comprobanteTextoFinal,
+              messageCreatedAt: comprobante.item.createdAt,
+              metadata: { extracted: comprobante.extraido, classifier_text: comprobante.texto },
+            });
+
+            for (const prenda of prendasDetectadas) {
+              if (boliviaDateKey(prenda.item.createdAt ?? comprobanteAt) !== fechaPedido) continue;
+              await upsertLiveEvidence(panelDb, {
+                pedidoLiveId: order.id,
+                clienteId,
+                panelMensajeId: prenda.item.id,
+                tipo: 'prenda',
+                mediaUrl: prenda.item.url,
+                mediaType: prenda.item.mediaType,
+                content: prenda.item.content,
+                descripcion: prenda.descripcion,
+                messageCreatedAt: prenda.item.createdAt,
+                metadata: { source: 'ai_classifier' },
+              });
+            }
+
+            let pagoLive = await upsertWhatsappLivePayment(panelDb, {
+              pedidoLiveId: order.id,
+              clienteId,
+              phone,
+              fechaPedido,
+              nombreDetectado,
+              monto: montoDetectado,
+              comprobanteHora: comprobante.extraido?.hora,
+              comprobanteAt,
+              comprobanteTexto: comprobanteTextoFinal,
+              comprobanteMediaUrl: comprobante.item.url,
+              panelMensajeId: comprobante.item.id,
+              isTest: false,
+            });
+
+            let updatedOrder = await recomputeLiveOrderTotals(panelDb, order.id);
+            updatedOrder = await syncMainPedidoForLiveOrder(panelDb, supabase, userId, updatedOrder);
+            pagoLive = await matchLivePaymentWithMacrodroid(panelDb, supabase, {
+              userId,
+              pagoLive,
+              mainCustomerId: updatedOrder.main_customer_id,
+              windowMinutes: 5,
+            });
+
+            if (pagoLive?.estado === 'verificado_macrodroid') {
+              estadoPago = 'pagado_verificado';
+            } else if (!estadoPago) {
+              estadoPago = 'solo_comprobante';
+            }
+            if (pagoLive?.estado !== 'verificado_macrodroid' && nombreDetectado) {
+              pagoAlerta = {
+                nombre: nombreDetectado,
+                monto: montoDetectado != null ? String(montoDetectado) : null,
+                hora: comprobante.extraido?.hora ?? null,
+              };
+            }
+            updatedOrder = await recomputeLiveOrderTotals(panelDb, order.id);
+            updatedOrder = await syncMainPedidoForLiveOrder(panelDb, supabase, userId, updatedOrder);
+          }
+
+          if (touchedOrderIds.size > 0) {
+            const { data: orders } = await panelDb
+              .from('pedidos_venta_live')
+              .select('*')
+              .in('id', [...touchedOrderIds])
+              .order('fecha_pedido', { ascending: false });
+            pedidosVentaLive = orders ?? [];
+          }
+        } catch (e: any) {
+          console.warn('[summarize] pedidos venta live no guardados:', e?.message);
+        }
+      }
+
+      if (comprobanteDetectado && panelPhone) {
+        try {
+          const phone = normalizePanelPhoneForLiveSales(panelPhone);
+          const resumenComprobante = typeof resumen.comprobante === 'string' && resumen.comprobante !== 'null'
+            ? resumen.comprobante
+            : null;
+          const comprobanteTextoFinal = comprobanteDesc ?? resumenComprobante ?? comprobanteTexto;
+          const fallbackComprobante = parseReceiptTextFallback(comprobanteTextoFinal);
+          const nombreDetectado = comprobanteExtraido?.cliente ?? fallbackComprobante.nombre;
+          const montoDetectado = parseComprobanteMonto(comprobanteExtraido?.monto) ?? fallbackComprobante.monto;
+          const estadoPanel = estadoPago ?? 'solo_comprobante';
+          const cardEstado = nombreDetectado && montoDetectado && estadoPago === 'pagado_verificado'
+            ? 'comprobante_recibido'
+            : 'revision_manual';
+
+          await panelDb.from('panel_clientes').update({
+            ...(nombreDetectado ? { nombre: nombreDetectado } : {}),
+            estado: estadoPanel,
+          }).eq('id', clienteId);
+
+          const payload = {
+            cliente_id: clienteId,
+            phone,
+            nombre_detectado: nombreDetectado,
+            monto_detectado: montoDetectado,
+            resumen,
+            comprobante_texto: comprobanteTextoFinal,
+            comprobante_media_url: comprobanteMediaUrl ?? fotoUrls[fotoUrls.length - 1] ?? null,
+            estado: cardEstado,
+            is_test: false,
+          };
+
+          const { data: existing, error: existingError } = await panelDb
+            .from('tarjetas_venta_live')
+            .select('*')
+            .eq('phone', phone)
+            .neq('estado', 'archivado')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (existingError) throw existingError;
+
+          if (existing) {
+            const { data, error } = await panelDb
+              .from('tarjetas_venta_live')
+              .update(payload)
+              .eq('id', existing.id)
+              .select('*')
+              .single();
+            if (error) throw error;
+            tarjetaVenta = data;
+          } else {
+            const { data, error } = await panelDb
+              .from('tarjetas_venta_live')
+              .insert(payload)
+              .select('*')
+              .single();
+            if (error) throw error;
+            tarjetaVenta = data;
+          }
+        } catch (e: any) {
+          console.warn('[summarize] tarjeta venta live no guardada:', e?.message);
+        }
+      }
+
       // Guardar resumen en la tabla del panel
       await panelDb.from('panel_clientes').update({
         resumen: JSON.stringify(resumen),
@@ -991,6 +1396,8 @@ Genera este JSON exacto (sin backticks, sin texto antes o después):
         comprobante_extraido: comprobanteExtraido,
         estado_pago: estadoPago,
         pago_alerta: pagoAlerta,
+        tarjeta_venta: tarjetaVenta,
+        pedidos_venta_live: pedidosVentaLive,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message });

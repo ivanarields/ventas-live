@@ -28,6 +28,17 @@ async function processMessage(req: Request) {
     const item = await req.json();
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+    async function audit(status: string, extra: Record<string, unknown> = {}) {
+      try {
+        await supabase.from('panel_raw_webhooks').insert({
+          payload: { ...item, ingest_status: status, ...extra },
+          status,
+        });
+      } catch (e) {
+        console.error('[panel_raw_webhooks]', e);
+      }
+    }
+
     // Datos ya normalizados por el Bridge
     const hasMedia = item.hasMedia === true;
     // Priorizar fromPhone (número real extraído por getContact())
@@ -43,13 +54,27 @@ async function processMessage(req: Request) {
 
     const mediaUrl: string | null = item.mediaUrl || null;
     const mediaMimetype: string | null = item.mediaMimetype || null;
+    const messageId: string | null = typeof item.id === 'string' && item.id.trim()
+      ? item.id.trim()
+      : null;
+    const content: string | null = typeof item.body === 'string' && item.body.trim()
+      ? item.body.trim()
+      : null;
+    const hasUsableMedia = hasMedia && !!mediaUrl;
 
     if (!clientPhone) {
       console.error('No se pudo determinar el teléfono del cliente');
+      await audit('skipped_no_phone');
       return;
     }
 
-    console.log(`📨 Mensaje | Tipo: ${hasMedia ? 'Media' : 'Texto'} | De: ${clientPhone} | Media URL: ${mediaUrl || 'ninguna'}`);
+    if (!content && !hasUsableMedia) {
+      console.log(`Mensaje vacío ignorado | De: ${clientPhone}`);
+      await audit('skipped_empty');
+      return;
+    }
+
+    console.log(`📨 Mensaje | Tipo: ${hasUsableMedia ? 'Media' : 'Texto'} | De: ${clientPhone} | Media URL: ${mediaUrl || 'ninguna'}`);
 
     // Upsert cliente
     const { data: clienteData, error: clienteError } = await supabase
@@ -66,14 +91,68 @@ async function processMessage(req: Request) {
       return;
     }
 
+    if (messageId) {
+      const { data: existingById } = await supabase
+        .from('panel_mensajes')
+        .select('id')
+        .eq('whatsapp_message_id', messageId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingById) {
+        console.log(`Mensaje duplicado ignorado por id: ${messageId}`);
+        await audit('skipped_duplicate_id', { cliente_id: clienteData.id });
+        return;
+      }
+    }
+
+    if (mediaUrl) {
+      const since10m = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: existingMedia } = await supabase
+        .from('panel_mensajes')
+        .select('id')
+        .eq('cliente_id', clienteData.id)
+        .eq('direction', direction)
+        .eq('media_url', mediaUrl)
+        .gte('created_at', since10m)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingMedia) {
+        console.log(`Media duplicada ignorada: ${mediaUrl}`);
+        await audit('skipped_duplicate_media', { cliente_id: clienteData.id });
+        return;
+      }
+    }
+
+    if (content && !mediaUrl) {
+      const since15s = new Date(Date.now() - 15 * 1000).toISOString();
+      const { data: existingText } = await supabase
+        .from('panel_mensajes')
+        .select('id')
+        .eq('cliente_id', clienteData.id)
+        .eq('direction', direction)
+        .eq('content', content)
+        .gte('created_at', since15s)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingText) {
+        console.log(`Texto duplicado ignorado para ${clientPhone}`);
+        await audit('skipped_duplicate_text', { cliente_id: clienteData.id });
+        return;
+      }
+    }
+
     // Insertar mensaje (media_url ya tiene la URL pública o null)
     const { error: mensajeError } = await supabase.from('panel_mensajes').insert({
       cliente_id: clienteData.id,
       direction,
-      content: item.body || null,
-      has_media: hasMedia,
+      content,
+      has_media: hasUsableMedia,
       media_url: mediaUrl,
       media_type: mediaMimetype,
+      whatsapp_message_id: messageId,
     });
 
     if (mensajeError) {
@@ -194,10 +273,7 @@ async function processMessage(req: Request) {
     }
 
     // Log de auditoría (payload liviano, sin base64)
-    await supabase.from('panel_raw_webhooks').insert({
-      payload: item,
-      status: 'processed',
-    });
+    await audit('processed', { cliente_id: clienteData.id });
 
   } catch (err) {
     console.error('Error general:', err);

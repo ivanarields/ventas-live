@@ -236,7 +236,7 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
                     decoding="async"
                     className="w-full h-full object-cover"
                   />
-                  {!p.available ? (
+                  {p.stock === 0 ? (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div className="absolute inset-0 bg-black/30" />
                       <span className="relative bg-red-600 text-white text-[11px] font-black px-5 py-2 rounded-lg uppercase tracking-widest shadow-lg -rotate-12"
@@ -266,7 +266,7 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
                       {p.price} <span className="text-[10px] text-gray-400 font-bold">Bs</span>
                     </p>
                     <button
-                      disabled={!p.available || !!reservedMap[String(p.id)]}
+                      disabled={p.stock === 0 || !!reservedMap[String(p.id)]}
                       onClick={e => {
                         e.stopPropagation();
                         onAddToCart(p, p.sizes[0] ?? '');

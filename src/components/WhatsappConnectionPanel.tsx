@@ -3,11 +3,12 @@ import { MessageCircle, RefreshCw, CheckCircle2, AlertTriangle, Send, Settings2 
 import { WhatsappQueue } from './WhatsappQueue';
 import { WhatsappHealthBadge } from './WhatsappHealthBadge';
 
-
 interface WaStatus {
   connected: boolean;
   qrDataUrl: string | null;
   error?: string;
+  service?: string;
+  timestamp?: string;
 }
 
 export function WhatsappConnectionPanel() {
@@ -15,21 +16,20 @@ export function WhatsappConnectionPanel() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'connection' | 'queue'>('connection');
 
-
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/whatsapp/status');
-      if (res.ok) setStatus(await res.json());
-      else setStatus({ connected: false, qrDataUrl: null, error: 'connector_unreachable' });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data) setStatus(data);
+      else setStatus({ connected: false, qrDataUrl: null, error: data?.error || 'bridge_unreachable' });
     } catch {
-      setStatus({ connected: false, qrDataUrl: null, error: 'connector_unreachable' });
+      setStatus({ connected: false, qrDataUrl: null, error: 'bridge_unreachable' });
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
     fetchStatus();
-    // Si no está conectado, refrescar cada 20 segundos para capturar nuevo QR
     const interval = setInterval(() => {
       if (!status?.connected) fetchStatus();
     }, 20000);
@@ -38,7 +38,6 @@ export function WhatsappConnectionPanel() {
 
   return (
     <div className="bg-white rounded-[20px] border border-gray-100 flex flex-col h-full overflow-hidden">
-      {/* Header con tabs */}
       <div className="flex items-center justify-between border-b border-gray-50 px-4 pt-4 pb-2">
         <div className="flex gap-2">
           <button
@@ -49,7 +48,7 @@ export function WhatsappConnectionPanel() {
                 : 'text-gray-400 hover:bg-gray-50'
             }`}
           >
-            <Settings2 size={13} /> Conexión
+            <Settings2 size={13} /> Conexion
           </button>
           <button
             onClick={() => setActiveTab('queue')}
@@ -59,7 +58,7 @@ export function WhatsappConnectionPanel() {
                 : 'text-gray-400 hover:bg-gray-50'
             }`}
           >
-            <Send size={13} /> Mensajería
+            <Send size={13} /> Mensajeria
           </button>
         </div>
         <WhatsappHealthBadge className="hidden sm:inline-flex" />
@@ -71,20 +70,17 @@ export function WhatsappConnectionPanel() {
             {loading ? (
               <div className="flex items-center gap-3 py-4">
                 <RefreshCw size={16} className="animate-spin text-gray-400" />
-                <span className="text-sm text-gray-400">Verificando conexión...</span>
+                <span className="text-sm text-gray-400">Verificando conexion...</span>
               </div>
-            ) : status?.error === 'connector_unreachable' ? (
+            ) : status?.error === 'connector_unreachable' || status?.error === 'bridge_unreachable' ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={16} className="text-orange-400" />
-                  <p className="text-sm font-extrabold text-gray-800">Conector apagado</p>
+                  <p className="text-sm font-extrabold text-gray-800">Bridge de WhatsApp sin respuesta</p>
                 </div>
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  El servicio de WhatsApp no está corriendo. Inicialo con:
+                  El servicio de Railway no respondio al chequeo. Los mensajes pueden detenerse hasta que el bridge se reinicie o vuelva a estar conectado.
                 </p>
-                <code className="block text-[10px] bg-gray-50 rounded-xl px-3 py-2 text-gray-600 font-mono break-all">
-                  node "Faces panel de pedido/whatsapp-conector/index.js"
-                </code>
                 <button
                   onClick={fetchStatus}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-orange-50 text-orange-600 text-xs font-bold hover:bg-orange-100 transition-colors"
@@ -98,12 +94,12 @@ export function WhatsappConnectionPanel() {
                   <CheckCircle2 size={18} className="text-green-500" />
                   <p className="text-sm font-extrabold text-gray-800">WhatsApp conectado</p>
                 </div>
-                <p className="text-xs text-gray-500">El bridge está activo y recibiendo mensajes.</p>
+                <p className="text-xs text-gray-500">El bridge esta activo y recibiendo mensajes.</p>
                 <button
                   onClick={fetchStatus}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-50 text-gray-400 text-[10px] font-bold hover:bg-gray-100 transition-colors"
                 >
-                  <RefreshCw size={11} /> Forzar actualización
+                  <RefreshCw size={11} /> Forzar actualizacion
                 </button>
               </div>
             ) : status?.qrDataUrl ? (
@@ -120,9 +116,9 @@ export function WhatsappConnectionPanel() {
                 />
 
                 <div className="bg-gray-50 rounded-xl p-3 space-y-1 text-[10px] leading-tight">
-                  <p className="font-extrabold text-gray-700">Cómo escanear:</p>
+                  <p className="font-extrabold text-gray-700">Como escanear:</p>
                   <ol className="text-gray-500 space-y-0.5 list-decimal list-inside">
-                    <li>Abrí WhatsApp en el celular</li>
+                    <li>Abri WhatsApp en el celular</li>
                     <li>Dispositivos vinculados</li>
                     <li>Vincular dispositivo</li>
                   </ol>
@@ -138,7 +134,7 @@ export function WhatsappConnectionPanel() {
                   <RefreshCw size={16} className="animate-spin text-gray-400" />
                   <p className="text-sm font-extrabold text-gray-800">Iniciando...</p>
                 </div>
-                <p className="text-xs text-gray-500">El QR aparecerá en unos segundos.</p>
+                <p className="text-xs text-gray-500">El QR aparecera en unos segundos.</p>
               </div>
             )}
           </div>

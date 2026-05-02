@@ -26,6 +26,11 @@ const STORE_SUPABASE_URL = Deno.env.get('STORE_SUPABASE_URL') ?? '';
 const STORE_SERVICE_KEY  = Deno.env.get('STORE_SERVICE_ROLE_KEY') ?? '';
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const PANEL_SUPABASE_URL = Deno.env.get('PANEL_SUPABASE_URL') ?? '';
+const PANEL_SERVICE_KEY  = Deno.env.get('PANEL_SUPABASE_SERVICE_KEY') ?? '';
+const supabasePanel = PANEL_SUPABASE_URL && PANEL_SERVICE_KEY
+  ? createClient(PANEL_SUPABASE_URL, PANEL_SERVICE_KEY)
+  : null;
 
 const AUTHORIZED_DEVICES: string[]  = ['android-caja-01'];
 const AUTHORIZED_PACKAGES: string[] = [];
@@ -291,6 +296,211 @@ function parseOperationRef(text: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+const BOLIVIA_OFFSET_MS = 4 * 60 * 60 * 1000;
+
+function boliviaDateKey(value: Date | string | number = new Date()): string {
+  const date = value instanceof Date ? value : new Date(value);
+  return new Date(date.getTime() - BOLIVIA_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function boliviaDayUtcRange(fechaPedido: string): { start: string; end: string } {
+  const start = new Date(`${fechaPedido}T04:00:00.000Z`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function namesMatch(a: unknown, b: unknown): boolean {
+  const ca = canonicalizeName(String(a ?? ''));
+  const cb = canonicalizeName(String(b ?? ''));
+  if (!ca || !cb) return false;
+  if (ca === cb) return true;
+  const short = ca.length <= cb.length ? ca : cb;
+  const long = ca.length > cb.length ? ca : cb;
+  return short.length >= 10 && long.includes(short);
+}
+
+async function findExistingManualWhatsappPayment(input: {
+  customerId: number | null;
+  payerName: string;
+  amount: number;
+  eventAt: string;
+}) {
+  const center = new Date(input.eventAt).getTime();
+  const from = new Date(center - 24 * 60 * 60 * 1000).toISOString();
+  const to = new Date(center + 24 * 60 * 60 * 1000).toISOString();
+
+  let query = supabase
+    .from('pagos')
+    .select('id,nombre,pago,date,created_at,customer_id,method')
+    .eq('user_id', INGEST_USER_ID)
+    .eq('pago', input.amount)
+    .eq('method', 'Verificacion manual WhatsApp')
+    .gte('created_at', from)
+    .lte('created_at', to)
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (input.customerId) query = query.eq('customer_id', input.customerId);
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('[manual whatsapp duplicate check]', error);
+    return null;
+  }
+
+  return (data ?? []).find((p: any) => {
+    if (input.customerId && Number(p.customer_id) === Number(input.customerId)) return true;
+    return namesMatch(p.nombre, input.payerName);
+  }) ?? null;
+}
+
+async function ensureDailyPedidoFromPayment(input: {
+  customerId: number | null;
+  customerName: string;
+  amount: number;
+  eventAt: string;
+}) {
+  if (!input.customerId) return null;
+  const fechaPedido = boliviaDateKey(input.eventAt);
+  const range = boliviaDayUtcRange(fechaPedido);
+
+  const { data: existing, error: existingError } = await supabase
+    .from('pedidos')
+    .select('*')
+    .eq('user_id', INGEST_USER_ID)
+    .eq('customer_id', input.customerId)
+    .gte('date', range.start)
+    .lt('date', range.end)
+    .order('created_at', { ascending: true })
+    .limit(1);
+  if (existingError) {
+    console.error('[daily pedido select]', existingError);
+    return null;
+  }
+
+  const current = existing?.[0] ?? null;
+  if (current) {
+    const status = String(current.status ?? '').toLowerCase();
+    const keepStatus = ['listo', 'preparado', 'ready', 'entregado'].includes(status);
+    const { data: pagosDelDia } = await supabase
+      .from('pagos')
+      .select('pago')
+      .eq('user_id', INGEST_USER_ID)
+      .eq('customer_id', input.customerId)
+      .gte('date', range.start)
+      .lt('date', range.end);
+    const totalPagado = (pagosDelDia ?? []).reduce((sum: number, pago: any) => sum + (Number(pago.pago) || 0), 0);
+    const total = Math.round(Math.max(Number(current.total_amount) || 0, totalPagado) * 100) / 100;
+    const { data, error } = await supabase
+      .from('pedidos')
+      .update({
+        customer_name: input.customerName,
+        total_amount: total,
+        status: keepStatus ? current.status : 'procesar',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', current.id)
+      .eq('user_id', INGEST_USER_ID)
+      .select()
+      .single();
+    if (error) console.error('[daily pedido update]', error);
+    return data ?? current;
+  }
+
+  const { data, error } = await supabase
+    .from('pedidos')
+    .insert({
+      customer_id: input.customerId,
+      customer_name: input.customerName,
+      item_count: 0,
+      bag_count: 1,
+      label: '',
+      label_type: '',
+      status: 'procesar',
+      total_amount: input.amount,
+      date: range.start,
+      user_id: INGEST_USER_ID,
+      source: 'macrodroid',
+    })
+    .select()
+    .single();
+  if (error) console.error('[daily pedido insert]', error);
+  return data ?? null;
+}
+
+async function matchPanelLivePayments(input: {
+  pagoId: number;
+  customerId: number | null;
+  pedidoId?: number | null;
+  payerName: string;
+  amount: number;
+  eventAt: string;
+}) {
+  if (!supabasePanel) return;
+  const center = new Date(input.eventAt).getTime();
+  const from = new Date(center - 5 * 60 * 1000).toISOString();
+  const to = new Date(center + 5 * 60 * 1000).toISOString();
+
+  try {
+    const { data: candidates, error } = await supabasePanel
+      .from('pagos_venta_live')
+      .select('id,pedido_live_id,nombre_detectado,monto,comprobante_at,estado')
+      .eq('monto', input.amount)
+      .gte('comprobante_at', from)
+      .lte('comprobante_at', to)
+      .in('estado', ['pendiente_whatsapp', 'revision_manual'])
+      .order('comprobante_at', { ascending: true });
+    if (error) throw error;
+
+    const match = (candidates ?? []).find((p: any) => namesMatch(p.nombre_detectado, input.payerName));
+    if (!match) return;
+
+    await supabasePanel
+      .from('pagos_venta_live')
+      .update({
+        estado: 'verificado_macrodroid',
+        main_pago_id: input.pagoId,
+        match_score: 1,
+        match_reason: 'macrodroid_monto_nombre_hora_5m',
+      })
+      .eq('id', match.id);
+
+    const { data: pagos } = await supabasePanel
+      .from('pagos_venta_live')
+      .select('monto,estado')
+      .eq('pedido_live_id', match.pedido_live_id);
+
+    let totalComprobantes = 0;
+    let totalVerificado = 0;
+    let hasRevision = false;
+    let hasPending = false;
+    for (const p of pagos ?? []) {
+      const monto = Number(p.monto) || 0;
+      if (p.estado === 'rechazado' || p.estado === 'posible_duplicado') continue;
+      totalComprobantes += monto;
+      if (p.estado === 'verificado_macrodroid' || p.estado === 'verificado_manual') totalVerificado += monto;
+      else if (p.estado === 'revision_manual') hasRevision = true;
+      else if (monto > 0) hasPending = true;
+    }
+    const totalPendiente = Math.max(0, Math.round((totalComprobantes - totalVerificado) * 100) / 100);
+    const estado = hasRevision ? 'revision_manual' : (hasPending || totalPendiente > 0) ? 'con_pagos_pendientes' : 'pagos_verificados';
+
+    await supabasePanel
+      .from('pedidos_venta_live')
+      .update({
+        total_comprobantes: totalComprobantes,
+        total_verificado: totalVerificado,
+        total_pendiente: totalPendiente,
+        estado,
+        main_customer_id: input.customerId,
+        main_pedido_id: input.pedidoId ?? null,
+      })
+      .eq('id', match.pedido_live_id);
+  } catch (err) {
+    console.error('[panel live match]', err);
+  }
+}
+
 // ─── HTTP handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   try {
@@ -328,6 +538,9 @@ Deno.serve(async (req) => {
     text_lines:           cleanTemplate(body.text_lines) || null,
     action_names:         cleanTemplate(body.action_names) || null,
   };
+  const eventAt = payload.captured_at_ms
+    ? new Date(payload.captured_at_ms).toISOString()
+    : new Date().toISOString();
 
   if (AUTHORIZED_PACKAGES.length > 0 && payload.app_package && !AUTHORIZED_PACKAGES.includes(payload.app_package)) {
     return jsonResponse({ ok: false, skipped: true, reason: 'package_not_allowed' });
@@ -485,9 +698,49 @@ Deno.serve(async (req) => {
         if (newCust) customerId = newCust.id;
       }
 
+      const existingManualPago = await findExistingManualWhatsappPayment({
+        customerId,
+        payerName: payerNameRaw,
+        amount,
+        eventAt,
+      });
+
+      if (existingManualPago) {
+        console.log(`[pagos duplicate] MacroDroid cubierto por verificacion manual WhatsApp #${existingManualPago.id}`);
+
+        const dailyPedido = await ensureDailyPedidoFromPayment({
+          customerId,
+          customerName: payerNameRaw,
+          amount,
+          eventAt,
+        });
+
+        await matchPanelLivePayments({
+          pagoId: Number(existingManualPago.id),
+          customerId,
+          pedidoId: dailyPedido?.id ? Number(dailyPedido.id) : null,
+          payerName: payerNameRaw,
+          amount,
+          eventAt,
+        });
+
+        await supabase
+          .from('raw_notification_events')
+          .update({ ingest_status: 'duplicate_manual_whatsapp' })
+          .eq('id', rawRow.id);
+
+        return jsonResponse({
+          ok: true,
+          duplicate: true,
+          duplicate_source: 'manual_whatsapp',
+          existing_pago_id: existingManualPago.id,
+          raw_hash: rawHash,
+        });
+      }
+
       const { data: pago, error: pagoErr } = await supabase.from('pagos').insert({
         nombre: payerNameRaw, pago: amount, method: 'Notificación bancaria',
-        status: 'pending', date: new Date().toISOString(),
+        status: 'pending', date: eventAt,
         user_id: INGEST_USER_ID, customer_id: customerId,
       }).select().single();
 
@@ -533,7 +786,7 @@ Deno.serve(async (req) => {
               amount,
               name_raw: payerNameRaw,
               name_normalized: nameNorm,
-              event_at: new Date().toISOString(),
+              event_at: eventAt,
               payload: { customer_id: customerId, app_package: payload.app_package, name_source: nameSource },
             });
           } catch (e) {
@@ -541,10 +794,20 @@ Deno.serve(async (req) => {
           }
         })();
 
-        await supabase.from('pedidos').insert({
-          customer_id: customerId, customer_name: payerNameRaw,
-          item_count: 0, bag_count: 1, status: 'procesar',
-          total_amount: amount, user_id: INGEST_USER_ID,
+        const dailyPedido = await ensureDailyPedidoFromPayment({
+          customerId,
+          customerName: payerNameRaw,
+          amount,
+          eventAt,
+        });
+
+        await matchPanelLivePayments({
+          pagoId: Number(pago.id),
+          customerId,
+          pedidoId: dailyPedido?.id ? Number(dailyPedido.id) : null,
+          payerName: payerNameRaw,
+          amount,
+          eventAt,
         });
 
         // Aprender patrón de extracciones confiables (regex o Gemini)

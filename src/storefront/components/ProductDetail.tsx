@@ -90,7 +90,7 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
         </button>
 
         {/* Badge vendido */}
-        {!product.available && (
+        {product.stock === 0 && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2">
             <span className="bg-red-600 text-white text-[11px] font-black px-4 py-1.5 rounded-lg uppercase tracking-widest shadow-lg">
               VENDIDO
@@ -206,7 +206,7 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
       </div>
 
       {/* ── FOOTER FIJO (Z-INDEX 50 PARA SIEMPRE ESTAR ARRIBA) ── */}
-      {product.available && (
+      {product.stock > 0 && (
         <div
           className="fixed bottom-0 left-0 right-0 max-w-[430px] mx-auto px-4 pt-3 pb-5 border-t border-gray-100 z-50"
           style={{ background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(10px)' }}

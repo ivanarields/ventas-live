@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, RefreshCw, Package, Trash2, Sparkles, Clock, Image, MessageSquare, AlertCircle, CheckCircle, ShieldCheck, AlertTriangle, Filter, CreditCard } from 'lucide-react';
+import { ChevronLeft, RefreshCw, Package, Trash2, Sparkles, Clock, Image, AlertCircle, CheckCircle, ShieldCheck, AlertTriangle, Filter, CreditCard } from 'lucide-react';
 
 const PANEL_URL   = 'https://vwaocoaeenavxkcshyuf.supabase.co';
 const PANEL_KEY   = 'sb_publishable_Rdo7g5SEvzS7BfJCn33k3g_dcuU64Vz';
 // El resumen ahora pasa por el gateway Express (round-robin de 5 keys coordinado).
 // La Edge Function de Supabase queda como backup pero ya no es el camino principal.
 const SUMM_URL    = '/api/ai/summarize-conversation';
+const LIVE_SALES_URL = '/api/live-sales';
 const H = { apikey: PANEL_KEY, Authorization: `Bearer ${PANEL_KEY}` };
 
 // Lee el userId del localStorage para autenticar contra el gateway Express.
@@ -35,6 +36,55 @@ interface PagoAlerta {
   nombre: string; monto: string | null; hora: string | null;
 }
 
+type EstadoPagoVentaLive =
+  | 'pendiente_whatsapp'
+  | 'verificado_macrodroid'
+  | 'verificado_manual'
+  | 'revision_manual'
+  | 'rechazado'
+  | 'posible_duplicado';
+
+interface PagoVentaLive {
+  id: string;
+  pedido_live_id: string;
+  nombre_detectado?: string | null;
+  monto?: number | string | null;
+  comprobante_hora?: string | null;
+  comprobante_at?: string | null;
+  comprobante_texto?: string | null;
+  comprobante_media_url?: string | null;
+  estado: EstadoPagoVentaLive;
+  match_reason?: string | null;
+  created_at: string;
+}
+
+interface EvidenciaVentaLive {
+  id: string;
+  tipo: 'prenda' | 'comprobante' | 'texto' | 'audio' | 'otro';
+  descripcion?: string | null;
+  media_url?: string | null;
+}
+
+interface PedidoVentaLive {
+  id: string;
+  cliente_id: string;
+  phone: string;
+  fecha_pedido: string;
+  nombre_detectado?: string | null;
+  estado: string;
+  total_comprobantes?: number | string | null;
+  total_verificado?: number | string | null;
+  total_pendiente?: number | string | null;
+  main_pedido_id?: number | string | null;
+  pagos?: PagoVentaLive[];
+  evidencias?: EvidenciaVentaLive[];
+}
+
+interface DayOrdersResponse {
+  ok: boolean;
+  orders: PedidoVentaLive[];
+}
+
 function fmt(p: string) {
   if (!p) return 'Sin número';
   if (p.length > 15) return `Grupo ${p.slice(-6)}`;
@@ -53,9 +103,61 @@ async function api<T>(path: string): Promise<T> {
   return r.json();
 }
 
-// ─── Detalle de un pedido ────────────────────────────────────────
-function DetallePedido({ cliente, onVolver, onBorrar }: {
-  cliente: Cliente; onVolver: () => void; onBorrar: (id: string) => void;
+async function appApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const userId = getUserId();
+  const r = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-user-id': userId,
+      ...(init.headers || {}),
+    },
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || `Error ${r.status}`);
+  return data as T;
+}
+
+function formatMontoLive(monto: number | string | null | undefined) {
+  if (monto == null || monto === '') return 'Bs 0.00';
+  const n = Number(monto);
+  if (!Number.isFinite(n)) return String(monto);
+  return `Bs ${n.toFixed(2)}`;
+}
+
+function fechaLive(fecha: string) {
+  return new Date(`${fecha}T00:00:00`).toLocaleDateString('es-BO', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function estadoPagoLiveLabel(estado: EstadoPagoVentaLive) {
+  const labels: Record<EstadoPagoVentaLive, string> = {
+    pendiente_whatsapp: 'Pendiente',
+    verificado_macrodroid: 'MacroDroid',
+    verificado_manual: 'Manual',
+    revision_manual: 'Revision',
+    rechazado: 'Rechazado',
+    posible_duplicado: 'Duplicado',
+  };
+  return labels[estado] || estado;
+}
+
+function estadoPagoLiveClass(estado: EstadoPagoVentaLive) {
+  if (estado === 'verificado_macrodroid' || estado === 'verificado_manual') return 'bg-green-50 text-green-700 border-green-200';
+  if (estado === 'revision_manual' || estado === 'pendiente_whatsapp') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (estado === 'posible_duplicado') return 'bg-blue-50 text-blue-700 border-blue-200';
+  return 'bg-red-50 text-red-700 border-red-200';
+}
+
+// ─── Detalle de una conversacion ─────────────────────────────────
+function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
+  cliente: Cliente;
+  onVolver: () => void;
+  onBorrar: (id: string) => void;
+  onTarjetaChange: (clienteId: string, hasLiveOrder: boolean) => void;
 }) {
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [resumen, setResumen]   = useState<ResumenIA | null>(null);
@@ -65,6 +167,9 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pagoAlerta, setPagoAlerta] = useState<PagoAlerta | null>(null);
   const [estadoPago, setEstadoPago] = useState<string | null>(cliente.estado ?? null);
+  const [pedidosLive, setPedidosLive] = useState<PedidoVentaLive[]>([]);
+  const [pedidosLiveCargando, setPedidosLiveCargando] = useState(false);
+  const [pagoAccionId, setPagoAccionId] = useState<string | null>(null);
 
   const fotos = mensajes.filter(m => m.has_media && m.media_url && isImage(m.media_url));
 
@@ -82,8 +187,26 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
     return data;
   }, [cliente.id]);
 
+  const cargarPedidosLive = useCallback(async () => {
+    setPedidosLiveCargando(true);
+    try {
+      const params = new URLSearchParams({ clienteId: cliente.id, phone: cliente.phone });
+      const data = await appApi<DayOrdersResponse>(`${LIVE_SALES_URL}/day-orders?${params.toString()}`);
+      const orders = data.orders ?? [];
+      setPedidosLive(orders);
+      onTarjetaChange(cliente.id, orders.length > 0);
+      return orders;
+    } catch (e) {
+      console.error('[live-sales/day-orders]', e);
+      return [];
+    } finally {
+      setPedidosLiveCargando(false);
+    }
+  }, [cliente.id, cliente.phone, onTarjetaChange]);
+
   // Al abrir: cargar mensajes y verificar si resumen está desactualizado
   useEffect(() => {
+    cargarPedidosLive();
     cargarMensajes().then(msgs => {
       const ultimo = msgs[msgs.length - 1]?.created_at;
       const resumenAt = cliente.resumen_at;
@@ -112,20 +235,47 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
       }
       if (j.estado_pago) setEstadoPago(j.estado_pago);
       if (j.pago_alerta) setPagoAlerta(j.pago_alerta);
+      if (Array.isArray(j.pedidos_venta_live) && j.pedidos_venta_live.length > 0) {
+        cargarPedidosLive();
+      }
       if (j.error) console.error('[summarize]', j.error);
     } catch (e) { console.error(e); }
     setGenerando(false);
   };
 
+  const verificarPagoManual = async (pagoId: string) => {
+    setPagoAccionId(pagoId);
+    try {
+      await appApi(`${LIVE_SALES_URL}/payments/${pagoId}/verify-manual`, { method: 'POST' });
+      await cargarPedidosLive();
+    } catch (e) {
+      console.error('[live-sales/verify-manual]', e);
+    } finally {
+      setPagoAccionId(null);
+    }
+  };
+
+  const rechazarPago = async (pagoId: string) => {
+    setPagoAccionId(pagoId);
+    try {
+      await appApi(`${LIVE_SALES_URL}/payments/${pagoId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'rechazado_por_operador' }),
+      });
+      await cargarPedidosLive();
+    } catch (e) {
+      console.error('[live-sales/reject]', e);
+    } finally {
+      setPagoAccionId(null);
+    }
+  };
+
   const borrarConversacion = async () => {
-    // Borrar mensajes de la DB
-    await fetch(`${PANEL_URL}/rest/v1/panel_mensajes?cliente_id=eq.${cliente.id}`, {
-      method: 'DELETE', headers: { ...H, Prefer: 'return=minimal' },
+    await appApi(`${LIVE_SALES_URL}/test-cleanup`, {
+      method: 'POST',
+      body: JSON.stringify({ phone: cliente.phone }),
     });
-    // Borrar cliente
-    await fetch(`${PANEL_URL}/rest/v1/panel_clientes?id=eq.${cliente.id}`, {
-      method: 'DELETE', headers: { ...H, Prefer: 'return=minimal' },
-    });
+    onTarjetaChange(cliente.id, false);
     onBorrar(cliente.id);
     onVolver();
   };
@@ -141,7 +291,7 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
           <button onClick={onVolver} className="flex items-center gap-1 text-[#ff2d78] font-bold text-sm">
             <ChevronLeft size={18} /> Volver
           </button>
-          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Detalle del pedido</span>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Detalle de conversación</span>
           <button onClick={() => setConfirmDelete(true)} className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-400 hover:bg-red-100">
             <Trash2 size={15} />
           </button>
@@ -174,25 +324,6 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
         </div>
       </div>
 
-      {/* Contadores */}
-      <div className="grid grid-cols-2 gap-3 px-4 mt-4">
-        <div className="bg-white rounded-2xl p-3 text-center border border-slate-100 shadow-sm">
-          <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-1">
-            <Image size={15} className="text-blue-500" />
-          </div>
-          <p className="text-xl font-black text-blue-600">{fotos.length}</p>
-          <p className="text-[10px] font-bold text-slate-400 uppercase">Fotos</p>
-        </div>
-        <div className="bg-white rounded-2xl p-3 text-center border border-slate-100 shadow-sm">
-          <div className="w-8 h-8 rounded-full bg-pink-50 flex items-center justify-center mx-auto mb-1">
-            <MessageSquare size={15} className="text-[#ff2d78]" />
-          </div>
-          <p className="text-xl font-black text-[#ff2d78]">{mensajes.filter(m=>m.content).length}</p>
-          <p className="text-[10px] font-bold text-slate-400 uppercase">Mensajes</p>
-        </div>
-      </div>
-
-      {/* RESUMEN IA */}
       {/* ALERTA: comprobante sin pago en MacroDroid */}
       {pagoAlerta && (
         <div className="mx-4 mt-4 bg-amber-50 border border-amber-300 rounded-2xl p-4">
@@ -211,12 +342,107 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
         </div>
       )}
 
+      <div className="mx-4 mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CreditCard size={14} className="text-[#ff2d78]" />
+            <p className="text-xs font-bold uppercase tracking-widest text-slate-600">Pedido del dia</p>
+          </div>
+          <button onClick={cargarPedidosLive} disabled={pedidosLiveCargando}
+            className="flex items-center gap-1 text-xs text-[#ff2d78] font-bold disabled:opacity-40">
+            <RefreshCw size={11} className={pedidosLiveCargando ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+        <div className="p-4">
+          {pedidosLiveCargando && pedidosLive.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <RefreshCw size={12} className="animate-spin" /> Cargando pedido...
+            </div>
+          ) : pedidosLive.length > 0 ? (
+            <div className="space-y-3">
+              {pedidosLive.map(order => {
+                const pagos = order.pagos ?? [];
+                const verificados = pagos.filter(p => p.estado === 'verificado_macrodroid' || p.estado === 'verificado_manual').length;
+                const pendientes = pagos.filter(p => p.estado === 'pendiente_whatsapp' || p.estado === 'revision_manual').length;
+                return (
+                  <div key={order.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-[#ff2d78]">{fechaLive(order.fecha_pedido)}</p>
+                        <p className="text-xs text-slate-500 font-bold mt-0.5">
+                          {pagos.length} comprobante{pagos.length !== 1 ? 's' : ''} - {verificados} verificado{verificados !== 1 ? 's' : ''} - {pendientes} pendiente{pendientes !== 1 ? 's' : ''}
+                        </p>
+                        {order.main_pedido_id && (
+                          <p className="text-[10px] text-green-700 font-black mt-1">Pedido principal en procesar</p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[9px] uppercase font-bold text-slate-400">Total</p>
+                        <p className="text-sm font-black text-slate-800">{formatMontoLive(order.total_comprobantes)}</p>
+                        {Number(order.total_pendiente ?? 0) > 0 && (
+                          <p className="text-[10px] font-black text-amber-700">Pendiente {formatMontoLive(order.total_pendiente)}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {pagos.map(pago => (
+                        <div key={pago.id} className="bg-white rounded-xl border border-slate-100 p-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-black text-slate-800 truncate">{pago.nombre_detectado || 'Nombre pendiente'}</p>
+                              <p className="text-[10px] text-slate-400">
+                                {pago.comprobante_hora || (pago.comprobante_at ? new Date(pago.comprobante_at).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' }) : 'Sin hora')}
+                              </p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="text-xs font-black text-green-700">{formatMontoLive(pago.monto)}</p>
+                              <span className={`inline-flex mt-1 px-2 py-0.5 rounded-full border text-[9px] font-black ${estadoPagoLiveClass(pago.estado)}`}>
+                                {estadoPagoLiveLabel(pago.estado)}
+                              </span>
+                            </div>
+                          </div>
+                          {pago.comprobante_media_url && (
+                            <button onClick={() => setFotoGrande(pago.comprobante_media_url!)}
+                              className="mt-2 text-[10px] text-blue-600 font-black flex items-center gap-1">
+                              <Image size={10} /> Ver comprobante
+                            </button>
+                          )}
+                          {(pago.estado === 'pendiente_whatsapp' || pago.estado === 'revision_manual') && (
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                              <button onClick={() => verificarPagoManual(pago.id)} disabled={pagoAccionId === pago.id}
+                                className="py-2 rounded-xl bg-green-50 text-green-700 border border-green-200 text-[10px] font-black disabled:opacity-50">
+                                Verificar manual
+                              </button>
+                              <button onClick={() => rechazarPago(pago.id)} disabled={pagoAccionId === pago.id}
+                                className="py-2 rounded-xl bg-red-50 text-red-600 border border-red-200 text-[10px] font-black disabled:opacity-50">
+                                Rechazar
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-5">
+              <p className="text-sm font-bold text-slate-400">Sin pedido del dia todavia</p>
+              <p className="text-xs text-slate-300 mt-1">Cuando la IA detecte comprobantes, apareceran aqui.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* RESUMEN IA */}
       <div className="mx-4 mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles size={14} className="text-[#ff2d78]" />
-            <p className="text-xs font-bold uppercase tracking-widest text-slate-600">Resumen del pedido</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-slate-600">Resumen de conversación</p>
             {tieneNuevosMensajes && (
               <span className="bg-orange-100 text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full">Mensajes nuevos</span>
             )}
@@ -236,35 +462,23 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
             </div>
           ) : resumen ? (
             <div className="space-y-3">
-              {resumen.pedido && (
-                <div className="bg-pink-50 rounded-xl p-3">
-                  <p className="text-[10px] font-bold uppercase text-[#ff2d78] mb-1">📦 Pedido</p>
+              {resumen.pedido && resumen.pedido !== 'no especificado' && (
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <p className="text-[10px] font-bold uppercase text-[#ff2d78] mb-1">📦 Solicitud detectada</p>
                   <p className="text-sm text-slate-700 font-medium leading-relaxed">{resumen.pedido}</p>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
                 {resumen.cantidad && resumen.cantidad !== 'no especificado' && (
-                  <div className="bg-slate-50 rounded-xl p-2.5">
-                    <p className="text-[9px] font-bold uppercase text-slate-400 mb-0.5">Cantidad</p>
+                  <div className="bg-blue-50 rounded-xl p-2.5">
+                    <p className="text-[9px] font-bold uppercase text-blue-500 mb-0.5">Prendas elegidas</p>
                     <p className="text-sm font-bold text-slate-700">{resumen.cantidad}</p>
-                  </div>
-                )}
-                {resumen.talla && resumen.talla !== 'no especificada' && (
-                  <div className="bg-slate-50 rounded-xl p-2.5">
-                    <p className="text-[9px] font-bold uppercase text-slate-400 mb-0.5">Talla</p>
-                    <p className="text-sm font-bold text-slate-700">{resumen.talla}</p>
                   </div>
                 )}
                 {resumen.pago && resumen.pago !== 'no especificado' && (
                   <div className="bg-green-50 rounded-xl p-2.5">
-                    <p className="text-[9px] font-bold uppercase text-green-500 mb-0.5">Pago</p>
+                    <p className="text-[9px] font-bold uppercase text-green-500 mb-0.5">Pagos mencionados</p>
                     <p className="text-sm font-bold text-green-700">{resumen.pago}</p>
-                  </div>
-                )}
-                {resumen.entrega && resumen.entrega !== 'no especificado' && (
-                  <div className="bg-blue-50 rounded-xl p-2.5">
-                    <p className="text-[9px] font-bold uppercase text-blue-500 mb-0.5">Entrega</p>
-                    <p className="text-sm font-bold text-blue-700">{resumen.entrega}</p>
                   </div>
                 )}
               </div>
@@ -302,7 +516,7 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
       {fotos.length > 0 && (
         <div className="mx-4 mt-4">
           <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">
-            Fotografías del pedido ({fotos.length})
+            Fotografías de la conversación ({fotos.length})
           </p>
           <div className="grid grid-cols-3 gap-2">
             {fotos.map((m, i) => {
@@ -344,7 +558,7 @@ function DetallePedido({ cliente, onVolver, onBorrar }: {
             </div>
             <h3 className="text-base font-black text-slate-800 text-center mb-2">¿Borrar conversación?</h3>
             <p className="text-xs text-slate-500 text-center mb-5">
-              Se eliminarán todos los mensajes y archivos de {fmt(cliente.phone)}. Esta acción no se puede deshacer.
+              Se eliminarán los mensajes, archivos y pedidos live de prueba de {fmt(cliente.phone)}. Esta acción no se puede deshacer.
             </p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmDelete(false)}
@@ -371,10 +585,21 @@ export function PanelPedidos() {
   const [cargando, setCargando] = useState(true);
   const [detalle, setDetalle]   = useState<Cliente | null>(null);
   const [soloConPago, setSoloConPago] = useState(false);
+  const [pedidosLivePorCliente, setPedidosLivePorCliente] = useState<Record<string, PedidoVentaLive>>({});
 
   const cargar = useCallback(async () => {
     const data = await api<Cliente[]>('panel_clientes?select=id,phone,nombre,last_interaction,resumen,resumen_at,estado&order=last_interaction.desc');
     setClientes(Array.isArray(data) ? data : []);
+    try {
+      const liveOrders = await appApi<DayOrdersResponse>(`${LIVE_SALES_URL}/day-orders?includeArchived=false`);
+      const nextOrders: Record<string, PedidoVentaLive> = {};
+      for (const order of liveOrders.orders ?? []) {
+        if (order.cliente_id && !nextOrders[order.cliente_id]) nextOrders[order.cliente_id] = order;
+      }
+      setPedidosLivePorCliente(nextOrders);
+    } catch (e) {
+      console.error('[live-sales/day-orders:list]', e);
+    }
     setCargando(false);
   }, []);
 
@@ -384,11 +609,28 @@ export function PanelPedidos() {
     return () => clearInterval(t);
   }, []);
 
-  const onBorrar = (id: string) => setClientes(prev => prev.filter(c => c.id !== id));
+  const onTarjetaChange = useCallback((clienteId: string, hasLiveOrder: boolean) => {
+    setPedidosLivePorCliente(prev => {
+      if (hasLiveOrder) return prev;
+      const next = { ...prev };
+      delete next[clienteId];
+      return next;
+    });
+  }, []);
+
+  const onBorrar = (id: string) => {
+    setClientes(prev => prev.filter(c => c.id !== id));
+    onTarjetaChange(id, false);
+    setPedidosLivePorCliente(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
 
   if (detalle) {
     const actual = clientes.find(c => c.id === detalle.id) || detalle;
-    return <DetallePedido cliente={actual} onVolver={() => setDetalle(null)} onBorrar={onBorrar} />;
+    return <DetallePedido cliente={actual} onVolver={() => setDetalle(null)} onBorrar={onBorrar} onTarjetaChange={onTarjetaChange} />;
   }
 
   return (
@@ -399,7 +641,7 @@ export function PanelPedidos() {
           <div>
             <h1 className="text-xl font-black text-slate-800 flex items-center gap-2">
               <Package size={20} className="text-[#ff2d78]" />
-              Panel de Pedidos
+              Panel WhatsApp
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
               {clientes.length} conversación{clientes.length !== 1 ? 'es' : ''}
@@ -429,7 +671,7 @@ export function PanelPedidos() {
         {cargando ? (
           <div className="flex flex-col items-center py-24 gap-3">
             <div className="w-7 h-7 rounded-full border-[3px] border-[#ff2d78] border-t-transparent animate-spin" />
-            <p className="text-sm text-slate-400">Cargando pedidos...</p>
+            <p className="text-sm text-slate-400">Cargando conversaciones...</p>
           </div>
         ) : clientes.length === 0 ? (
           <div className="bg-white rounded-3xl p-10 text-center border border-pink-100 shadow-sm mt-6">
@@ -439,7 +681,7 @@ export function PanelPedidos() {
           </div>
         ) : (
           clientes
-            .filter(c => !soloConPago || c.estado === 'pagado_verificado' || c.estado === 'solo_comprobante')
+            .filter(c => !soloConPago || c.estado === 'pagado_verificado' || c.estado === 'solo_comprobante' || !!pedidosLivePorCliente[c.id])
             .map(c => {
               let resumenObj: ResumenIA | null = null;
               try {
@@ -457,6 +699,7 @@ export function PanelPedidos() {
               const tieneResumen = !!resumenObj?.pedido;
               const displayName = c.nombre || fmt(c.phone);
               const initial = (c.nombre ? c.nombre[0] : fmt(c.phone)[0]).toUpperCase();
+              const pedidoLive = pedidosLivePorCliente[c.id];
 
               return (
                 <button key={c.id} onClick={() => setDetalle(c)}
@@ -484,6 +727,11 @@ export function PanelPedidos() {
                       {c.estado === 'solo_comprobante' && (
                         <div className="flex items-center gap-0.5 bg-amber-50 text-amber-700 text-[9px] font-black px-1.5 py-0.5 rounded-lg border border-amber-200">
                           <AlertTriangle size={9} /> Verificar
+                        </div>
+                      )}
+                      {pedidoLive && (
+                        <div className="flex items-center gap-0.5 bg-pink-50 text-[#ff2d78] text-[9px] font-black px-1.5 py-0.5 rounded-lg border border-pink-200">
+                          <CreditCard size={9} /> {formatMontoLive(pedidoLive.total_comprobantes)}
                         </div>
                       )}
                       {tieneResumen

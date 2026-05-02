@@ -419,7 +419,7 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
                 .map((i: any) => i.productId)
                 .filter(Boolean);
               if (productIds.length > 0) {
-                await supabaseStore.from('products').update({ available: false }).in('id', productIds);
+                await supabaseStore.from('products').update({ stock: 0 }).in('id', productIds);
                 console.log(`[live-sales] ${productIds.length} productos marcados como vendidos de orden #${storeOrder.id}`);
               }
             } catch (prodErr) {

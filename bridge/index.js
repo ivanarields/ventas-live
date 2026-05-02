@@ -3,7 +3,7 @@ const { Client, LocalAuth } = pkg;
 import qrcodeImg from 'qrcode';
 import axios from 'axios';
 import http from 'http';
-import { registerSendRoutes } from './send.js';
+import { handleBridgeApiRoute } from './send.js';
 
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -23,9 +23,12 @@ const IS_RAILWAY     = !!process.env.RAILWAY_ENVIRONMENT;
 // ─── Estado global para el QR ───
 let qrDataUrl  = null;   // imagen base64 del QR
 let connected  = false;
+let client     = null;
 
 // ─── Servidor HTTP para mostrar el QR por URL ───
 const server = http.createServer(async (req, res) => {
+  if (await handleBridgeApiRoute(req, res, client, () => connected)) return;
+
   // Endpoint JSON para la app principal
   if (req.url === '/status') {
     res.setHeader('Content-Type', 'application/json');
@@ -90,7 +93,7 @@ async function uploadMedia(base64, mimetype, phone, timestamp) {
 }
 
 // ─── Cliente WhatsApp ───
-const client = new Client({
+client = new Client({
   authStrategy: new LocalAuth({ dataPath: join(__dirname, '.wwebjs_auth') }),
   puppeteer: {
     headless: true,
@@ -185,6 +188,3 @@ client.on('message_create', async (msg) => {
 client.initialize();
 
 // Registrar rutas de envío (POST /api/send y GET /api/health)
-registerSendRoutes(server, client, () => connected);
-
-
