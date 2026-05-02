@@ -7,6 +7,7 @@ export interface Product {
   images: string[];
   sizes: string[];
   available: boolean;
+  stock: number;
   category: string;
   priority_order?: number;
 }
@@ -32,6 +33,7 @@ function mapRow(row: any): Product {
     images,
     sizes: Array.isArray(row.sizes) ? row.sizes : [],
     available: row.available ?? true,
+    stock: row.stock ?? 1,
     category: row.category ?? 'General',
     priority_order: row.priority_order ?? 0,
   };
