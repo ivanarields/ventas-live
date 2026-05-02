@@ -836,7 +836,7 @@ const PORT = Number(process.env.PORT || 3001);
 
   app.use('/api/ai', createAiRouter(supabaseServer, supabasePanel));
   app.use('/api/identity', createIdentityRouter(supabaseServer, supabaseStore, supabasePanel));
-  app.use('/api/live-sales', createLiveSalesRouter(supabasePanel, supabaseServer));
+  app.use('/api/live-sales', createLiveSalesRouter(supabasePanel, supabaseServer, supabaseStore));
   app.use('/api/whatsapp', createWhatsappRouter(supabaseServer));
   // ==========================================================================
 
