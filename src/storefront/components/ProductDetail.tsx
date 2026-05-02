@@ -89,11 +89,11 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
           </svg>
         </button>
 
-        {/* Badge agotado */}
+        {/* Badge vendido */}
         {!product.available && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2">
-            <span className="bg-gray-900/80 backdrop-blur-md text-white text-[11px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-sm">
-              Agotado
+            <span className="bg-red-600 text-white text-[11px] font-black px-4 py-1.5 rounded-lg uppercase tracking-widest shadow-lg">
+              VENDIDO
             </span>
           </div>
         )}

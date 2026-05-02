@@ -393,7 +393,7 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
 
           const { data: storeOrder, error: storeErr } = await supabaseStore
             .from('store_orders')
-            .select('id')
+            .select('id,items')
             .or(`customer_wa.eq.${phoneRaw},customer_wa.eq.${phoneShort}`)
             .eq('total', monto)
             .eq('status', 'pending')
@@ -412,6 +412,19 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
                 payment_ref: 'whatsapp_manual',
               })
               .eq('id', storeOrder.id);
+
+            // Marcar productos como vendidos
+            try {
+              const productIds = (storeOrder.items ?? [])
+                .map((i: any) => i.productId)
+                .filter(Boolean);
+              if (productIds.length > 0) {
+                await supabaseStore.from('products').update({ available: false }).in('id', productIds);
+                console.log(`[live-sales] ${productIds.length} productos marcados como vendidos de orden #${storeOrder.id}`);
+              }
+            } catch (prodErr) {
+              console.error('[live-sales] Error marcando productos vendidos:', prodErr);
+            }
 
             console.log(`[live-sales] Orden de tienda #${storeOrder.id} marcada como pagada via verificación manual`);
           }

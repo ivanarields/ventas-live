@@ -223,7 +223,7 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
             {products.map(p => (
               <div
                 key={p.id}
-                onClick={() => p.available && !reservedMap[String(p.id)] && onProductSelect(p)}
+                onClick={() => !reservedMap[String(p.id)] && onProductSelect(p)}
                 className="bg-white rounded-2xl overflow-hidden flex flex-col cursor-pointer active:scale-[0.97] transition-transform"
                 style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}
               >
@@ -237,9 +237,11 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
                     className="w-full h-full object-cover"
                   />
                   {!p.available ? (
-                    <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] flex items-center justify-center">
-                      <span className="bg-gray-900 text-white text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">
-                        Agotado
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="absolute inset-0 bg-black/30" />
+                      <span className="relative bg-red-600 text-white text-[11px] font-black px-5 py-2 rounded-lg uppercase tracking-widest shadow-lg -rotate-12"
+                        style={{ textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
+                        VENDIDO
                       </span>
                     </div>
                   ) : reservedMap[String(p.id)] ? (
