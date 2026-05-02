@@ -8,6 +8,7 @@ import { supabaseStore } from "./src/lib/supabaseStore.js";
 import { supabasePanel } from "./src/lib/supabasePanel.js";
 import { createAiRouter } from "./src/routes/ai-gateway.js";
 import { createIdentityRouter } from "./src/routes/identity.js";
+import { createLiveSalesRouter } from "./src/routes/live-sales.js";
 import { createWhatsappRouter, enqueueStoreConfirmation } from "./src/routes/whatsapp.js";
 
 
@@ -835,21 +836,8 @@ const PORT = Number(process.env.PORT || 3001);
 
   app.use('/api/ai', createAiRouter(supabaseServer, supabasePanel));
   app.use('/api/identity', createIdentityRouter(supabaseServer, supabaseStore, supabasePanel));
+  app.use('/api/live-sales', createLiveSalesRouter(supabasePanel, supabaseServer));
   app.use('/api/whatsapp', createWhatsappRouter(supabaseServer));
-
-
-  // ── Proxy al conector de WhatsApp (QR y estado de conexión) ──────────────────
-  const WA_CONNECTOR_URL = process.env.WHATSAPP_CONNECTOR_URL || 'http://localhost:3000';
-  app.get('/api/whatsapp/status', async (_req, res) => {
-    try {
-      const r = await fetch(`${WA_CONNECTOR_URL}/status`);
-      if (!r.ok) return res.json({ connected: false, qrDataUrl: null, error: 'connector_unreachable' });
-      const data = await r.json() as { connected: boolean; qrDataUrl: string | null };
-      res.json(data);
-    } catch {
-      res.json({ connected: false, qrDataUrl: null, error: 'connector_unreachable' });
-    }
-  });
   // ==========================================================================
 
   app.get("/api/products", async (req, res) => {
@@ -1372,9 +1360,13 @@ const PORT = Number(process.env.PORT || 3001);
           }
         } else {
           // Crear perfil unificado global
+          const name = finalName || 'Cliente Tienda Web';
           const { data: newCust } = await supabaseServer.from('customers').insert({
             phone: waNumber,
-            full_name: finalName || 'Cliente Tienda Web',
+            full_name: name,
+            normalized_name: name.toLowerCase().trim(),
+            canonical_name: name.toUpperCase().trim(),
+            user_id: data.user_id || 'store-auto',
           } as any).select('id').single();
           globalCustomerId = newCust?.id;
         }
@@ -1396,6 +1388,39 @@ const PORT = Number(process.env.PORT || 3001);
           source: 'WEB',     // Campo nuevo (024_add_web_fields)
           web_items_list: itemsList, // Campo nuevo
         } as any);
+
+        // 3. Registrar el pago en ChehiAppAbril (página de pagos)
+        try {
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+
+          const { data: existingPago } = await supabaseServer
+            .from('pagos')
+            .select('id')
+            .eq('customer_id', globalCustomerId)
+            .eq('pago', data.total)
+            .eq('method', 'Tienda Online')
+            .gte('created_at', todayStart.toISOString())
+            .limit(1);
+
+          if (!existingPago?.length) {
+            await supabaseServer.from('pagos').insert({
+              nombre: finalName || data.customer_name || 'Cliente Tienda',
+              pago: data.total,
+              method: 'Tienda Online',
+              status: 'completed',
+              date: now,
+              customer_id: globalCustomerId,
+              user_id: data.user_id || 'store-auto',
+            } as any);
+
+            console.log(`[store-pago] 💰 Pago Tienda Online creado en Chehi para pedido #${orderId}`);
+          } else {
+            console.log(`[store-pago] ⏭️ Pago ya existe para pedido #${orderId}, omitido`);
+          }
+        } catch (pagoErr) {
+          console.error('[store-pago] Error al crear pago en Chehi:', pagoErr);
+        }
       }
 
     } catch (e) {
