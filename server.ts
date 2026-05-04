@@ -13,6 +13,7 @@ import { createWhatsappRouter, enqueueStoreConfirmation } from "./src/routes/wha
 
 
 import { ingestManualPayment } from "./src/services/identityService.js";
+import { isStrongNameMatch } from "./src/services/nameMatching.js";
 import {
   CATEGORIAS_VALIDAS,
   TALLAS_VALIDAS,
@@ -50,6 +51,230 @@ const cleanName = (name: string) => {
 
   return cleaned;
 };
+
+const phoneDigits = (value: unknown) => String(value ?? '').replace(/\D/g, '');
+
+const phoneVariants = (...values: unknown[]) => {
+  const set = new Set<string>();
+  for (const value of values) {
+    const digits = phoneDigits(value);
+    if (!digits) continue;
+    set.add(digits);
+    if (digits.startsWith('591') && digits.length > 3) set.add(digits.slice(3));
+    if (!digits.startsWith('591')) set.add(`591${digits}`);
+  }
+  return [...set];
+};
+
+const isMissingDbObject = (error: any) => {
+  const code = error?.code;
+  const message = String(error?.message ?? '').toLowerCase();
+  return code === '42P01' || code === '42703' || code === 'PGRST204' || message.includes('does not exist') || message.includes('schema cache');
+};
+
+async function safeSelect(client: any, table: string, columns: string, apply: (query: any) => any) {
+  try {
+    const { data, error } = await apply(client.from(table).select(columns));
+    if (error) {
+      if (isMissingDbObject(error)) return [];
+      throw error;
+    }
+    return data ?? [];
+  } catch (error: any) {
+    if (isMissingDbObject(error)) return [];
+    throw error;
+  }
+}
+
+async function safeDelete(
+  client: any,
+  table: string,
+  key: string,
+  deleted: Record<string, number>,
+  apply: (query: any) => any,
+) {
+  try {
+    const { count, error } = await apply(client.from(table).delete({ count: 'exact' }));
+    if (error) {
+      if (isMissingDbObject(error)) return;
+      throw error;
+    }
+    deleted[key] = (deleted[key] ?? 0) + (count ?? 0);
+  } catch (error: any) {
+    if (isMissingDbObject(error)) return;
+    throw error;
+  }
+}
+
+async function deleteStoreAuthUsers(phones: string[]) {
+  const shortPhones = phones.map(phoneDigits).filter(Boolean).map(p => p.startsWith('591') ? p.slice(3) : p);
+  const emails = [...new Set(shortPhones.map(p => `${p}@tiendaleydi.com`))];
+  for (const email of emails) {
+    try {
+      const { data } = await supabaseStore.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const user = data.users.find((u: any) => u.email === email);
+      if (user?.id) await supabaseStore.auth.admin.deleteUser(user.id);
+    } catch (error: any) {
+      console.warn('[root-delete] No se pudo borrar usuario de tienda:', email, error?.message);
+    }
+  }
+}
+
+async function deletePersonFromRoot(input: {
+  userId: string;
+  customerId?: string | number | null;
+  name?: string | null;
+  phone?: string | null;
+}) {
+  const deleted: Record<string, number> = {};
+
+  const selectedCustomers = input.customerId
+    ? await safeSelect(supabaseServer, 'customers', '*', (q) => q.eq('id', input.customerId).eq('user_id', input.userId))
+    : [];
+
+  const baseCustomer = selectedCustomers[0] ?? null;
+  const canonical = cleanName(input.name ?? baseCustomer?.full_name ?? baseCustomer?.canonical_name ?? baseCustomer?.normalized_name ?? '');
+  const phones = phoneVariants(input.phone, baseCustomer?.phone, baseCustomer?.wa_number, baseCustomer?.whatsapp_number);
+
+  const allCustomers = await safeSelect(supabaseServer, 'customers', '*', (q) => q.eq('user_id', input.userId));
+  const customerIds = [...new Set((allCustomers as any[])
+    .filter((c: any) => {
+      if (input.customerId && String(c.id) === String(input.customerId)) return true;
+      const nameMatch = canonical && [c.full_name, c.canonical_name, c.normalized_name].some(v => cleanName(v) === canonical);
+      const customerPhones = phoneVariants(c.phone, c.wa_number, c.whatsapp_number);
+      const phoneMatch = phones.length > 0 && customerPhones.some(p => phones.includes(p));
+      return nameMatch || phoneMatch;
+    })
+    .map((c: any) => Number(c.id))
+    .filter(Boolean))];
+
+  const pagos = await safeSelect(supabaseServer, 'pagos', 'id,nombre,customer_id', (q) => q.eq('user_id', input.userId));
+  const pagoIds = [...new Set((pagos as any[])
+    .filter((p: any) => customerIds.includes(Number(p.customer_id)) || (canonical && cleanName(p.nombre) === canonical))
+    .map((p: any) => Number(p.id))
+    .filter(Boolean))];
+
+  const pedidos = await safeSelect(supabaseServer, 'pedidos', 'id,customer_id,customer_name', (q) => q.eq('user_id', input.userId));
+  const pedidoIds = [...new Set((pedidos as any[])
+    .filter((p: any) => customerIds.includes(Number(p.customer_id)) || (canonical && cleanName(p.customer_name) === canonical))
+    .map((p: any) => Number(p.id))
+    .filter(Boolean))];
+
+  const labelOrders = customerIds.length > 0
+    ? await safeSelect(supabaseServer, 'orders', 'id', (q) => q.in('customer_id', customerIds))
+    : [];
+  const orderIds = [...new Set((labelOrders as any[]).map((o: any) => Number(o.id)).filter(Boolean))];
+
+  const profileRows = await safeSelect(supabaseServer, 'identity_profiles', 'id,cliente_id,phone,display_name,store_phone,panel_phone', (q) => q.eq('user_id', input.userId));
+  const profileIds = [...new Set((profileRows as any[])
+    .filter((p: any) => {
+      const identityPhones = phoneVariants(p.phone, p.store_phone, p.panel_phone);
+      return customerIds.includes(Number(p.cliente_id)) ||
+        (canonical && cleanName(p.display_name) === canonical) ||
+        (phones.length > 0 && identityPhones.some(v => phones.includes(v)));
+    })
+    .map((p: any) => String(p.id))
+    .filter(Boolean))];
+
+  if (profileIds.length > 0) {
+    await safeDelete(supabaseServer, 'identity_evidence', 'identidad_evidencia', deleted, (q) => q.in('profile_id', profileIds));
+  }
+  if (pagoIds.length > 0) {
+    await safeDelete(supabaseServer, 'identity_evidence', 'identidad_evidencia', deleted, (q) => q.eq('user_id', input.userId).eq('source', 'manual_payment').in('source_id', pagoIds.map(String)));
+  }
+  if (profileIds.length > 0) {
+    await safeDelete(supabaseServer, 'identity_profiles', 'identidad_perfiles', deleted, (q) => q.in('id', profileIds));
+  }
+
+  const rawIdsFromCandidates = canonical
+    ? await safeSelect(supabaseServer, 'parsed_payment_candidates', 'raw_event_id', (q) => q.eq('payer_name_canonical', canonical))
+    : [];
+  const rawIds = [...new Set((rawIdsFromCandidates as any[]).map((r: any) => r.raw_event_id).filter(Boolean))];
+  if (rawIds.length > 0) {
+    await safeDelete(supabaseServer, 'raw_notification_events', 'notificaciones_banco', deleted, (q) => q.in('id', rawIds));
+  }
+
+  if (phones.length > 0) {
+    await safeDelete(supabaseServer, 'whatsapp_message_queue', 'cola_whatsapp', deleted, (q) => q.in('phone', phones));
+  }
+
+  if (orderIds.length > 0) {
+    for (const orderId of orderIds) {
+      try {
+        await supabaseServer.rpc('fn_release_container', {
+          p_order_id: orderId,
+          p_released_by: 'root-delete',
+          p_reason: 'ROOT_DELETE',
+        });
+      } catch {
+        // Si no tenía casillero activo, seguimos borrando el resto.
+      }
+    }
+    await safeDelete(supabaseServer, 'container_allocations', 'casilleros_asignaciones', deleted, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'order_bags', 'bolsas', deleted, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'orders', 'pedidos_etiquetas', deleted, (q) => q.in('id', orderIds));
+  }
+
+  if (pedidoIds.length > 0) {
+    await safeDelete(supabaseServer, 'pedidos', 'pedidos', deleted, (q) => q.in('id', pedidoIds).eq('user_id', input.userId));
+  }
+  if (pagoIds.length > 0) {
+    await safeDelete(supabaseServer, 'pagos', 'pagos', deleted, (q) => q.in('id', pagoIds).eq('user_id', input.userId));
+  }
+  if (customerIds.length > 0) {
+    await safeDelete(supabaseServer, 'customers', 'perfiles', deleted, (q) => q.in('id', customerIds).eq('user_id', input.userId));
+  }
+
+  // Tienda online
+  const storeCustomers = phones.length > 0
+    ? await safeSelect(supabaseStore, 'store_customers', 'id,whatsapp,display_name', (q) => q.in('whatsapp', phones))
+    : [];
+  const storeCustomerIds = [...new Set((storeCustomers as any[]).map((c: any) => Number(c.id)).filter(Boolean))];
+  const storeOrders = await safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_wa,customer_name', (q) => q.select('*'));
+  const storeOrderIds = [...new Set((storeOrders as any[])
+    .filter((o: any) => {
+      const orderPhones = phoneVariants(o.customer_wa, o.customer_phone);
+      return storeCustomerIds.includes(Number(o.customer_id)) ||
+        (canonical && cleanName(o.customer_name) === canonical) ||
+        (phones.length > 0 && orderPhones.some(v => phones.includes(v)));
+    })
+    .map((o: any) => Number(o.id))
+    .filter(Boolean))];
+  if (storeOrderIds.length > 0) {
+    await safeDelete(supabaseStore, 'payment_events', 'tienda_pagos_banco', deleted, (q) => q.in('matched_order_id', storeOrderIds));
+    await safeDelete(supabaseStore, 'wa_messages', 'tienda_whatsapp', deleted, (q) => q.in('matched_order_id', storeOrderIds));
+    await safeDelete(supabaseStore, 'store_orders', 'tienda_pedidos', deleted, (q) => q.in('id', storeOrderIds));
+  }
+  if (phones.length > 0) {
+    await safeDelete(supabaseStore, 'payment_events', 'tienda_pagos_banco', deleted, (q) => q.in('sender_wa', phones));
+    await safeDelete(supabaseStore, 'wa_messages', 'tienda_whatsapp', deleted, (q) => q.in('from_wa', phones));
+  }
+  if (storeCustomerIds.length > 0) {
+    await safeDelete(supabaseStore, 'store_customers', 'tienda_perfiles', deleted, (q) => q.in('id', storeCustomerIds));
+  }
+  if (phones.length > 0) await deleteStoreAuthUsers(phones);
+
+  // Panel WhatsApp
+  const panelClientes = phones.length > 0
+    ? await safeSelect(supabasePanel, 'panel_clientes', 'id,phone', (q) => q.in('phone', phones))
+    : [];
+  const panelClienteIds = [...new Set((panelClientes as any[]).map((c: any) => String(c.id)).filter(Boolean))];
+  if (phones.length > 0) {
+    await safeDelete(supabasePanel, 'tarjetas_venta_live', 'panel_tarjetas', deleted, (q) => q.in('phone', phones));
+    await safeDelete(supabasePanel, 'pedidos_venta_live', 'panel_pedidos', deleted, (q) => q.in('phone', phones));
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos', deleted, (q) => q.in('phone', phones));
+  }
+  if (panelClienteIds.length > 0) {
+    await safeDelete(supabasePanel, 'evidencias_venta_live', 'panel_evidencias', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'pedidos_venta_live', 'panel_pedidos', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'tarjetas_venta_live', 'panel_tarjetas', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'panel_mensajes', 'panel_chats', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'panel_clientes', 'panel_perfiles', deleted, (q) => q.in('id', panelClienteIds));
+  }
+
+  return { success: true, customerIds, canonical, phones, deleted };
+}
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -275,12 +500,39 @@ const PORT = Number(process.env.PORT || 3001);
     const userId = req.headers["x-user-id"] as string;
     if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
     const { name, canonicalName, phone } = req.body;
+    const candidateName = canonicalName ?? cleanName(name);
+
+    const { data: existingCustomers } = await supabaseServer
+      .from("customers")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .limit(300);
+
+    const matches = (existingCustomers ?? []).filter((c: any) =>
+      isStrongNameMatch(c.canonical_name || c.full_name || c.normalized_name, candidateName)
+    );
+
+    if (matches.length === 1) {
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (phone && !matches[0].phone) updates.phone = phone;
+      const { data, error } = await supabaseServer
+        .from("customers")
+        .update(updates)
+        .eq("id", matches[0].id)
+        .eq("user_id", userId)
+        .select()
+        .single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json(data);
+    }
+
     const { data, error } = await supabaseServer
       .from("customers")
       .insert({
         full_name: name,
-        normalized_name: canonicalName ?? cleanName(name),
-        canonical_name: canonicalName ?? cleanName(name),
+        normalized_name: candidateName,
+        canonical_name: candidateName,
         phone: phone ?? "",
         active_label: "",
         active_label_type: "",
@@ -307,15 +559,90 @@ const PORT = Number(process.env.PORT || 3001);
   });
 
   app.delete("/api/clientes/:id", async (req, res) => {
-    const userId = req.headers["x-user-id"] as string;
-    if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
-    const { error } = await supabaseServer
-      .from("customers")
-      .update({ is_active: false })
-      .eq("id", req.params.id)
-      .eq("user_id", userId);
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ success: true });
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+      const result = await deletePersonFromRoot({
+        userId,
+        customerId: req.params.id,
+        name: req.body?.name,
+        phone: req.body?.phone,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("[/api/clientes/:id DELETE] root delete error:", error);
+      res.status(500).json({ error: error?.message ?? "Error interno" });
+    }
+  });
+
+  app.post("/api/admin/root-delete", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+      const { customerId, name, phone } = req.body ?? {};
+      if (!customerId && !name && !phone) {
+        return res.status(400).json({ error: "Falta cliente, nombre o teléfono" });
+      }
+      const result = await deletePersonFromRoot({ userId, customerId, name, phone });
+      res.json(result);
+    } catch (error: any) {
+      console.error("[/api/admin/root-delete] error:", error);
+      res.status(500).json({ error: error?.message ?? "Error interno" });
+    }
+  });
+
+  app.get("/api/admin/store-profiles", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+      const [storeCustomers, storeOrders] = await Promise.all([
+        safeSelect(supabaseStore, 'store_customers', 'id,whatsapp,display_name,total_orders,total_spent,created_at', (q) => q.order('created_at', { ascending: false }).limit(300)),
+        safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
+      ]);
+
+      const groups: Record<string, any> = {};
+
+      for (const customer of storeCustomers as any[]) {
+        const phone = phoneDigits(customer.whatsapp);
+        const key = phone || `store-${customer.id}`;
+        groups[key] = {
+          key,
+          source: 'store',
+          storeCustomerId: customer.id,
+          name: customer.display_name || 'Cliente tienda',
+          phone,
+          orders: [],
+          total: Number(customer.total_spent ?? 0),
+        };
+      }
+
+      for (const order of storeOrders as any[]) {
+        const phone = phoneDigits(order.customer_wa);
+        const key = phone || `store-order-${order.id}`;
+        if (!groups[key]) {
+          groups[key] = {
+            key,
+            source: 'store',
+            storeCustomerId: order.customer_id ?? null,
+            name: order.customer_name || 'Cliente tienda',
+            phone,
+            orders: [],
+            total: 0,
+          };
+        }
+        groups[key].orders.push(order);
+        groups[key].total += Number(order.total ?? 0);
+        if ((!groups[key].name || groups[key].name === 'Cliente tienda') && order.customer_name) {
+          groups[key].name = order.customer_name;
+        }
+      }
+
+      res.json(Object.values(groups));
+    } catch (error: any) {
+      console.error("[/api/admin/store-profiles] error:", error);
+      res.status(500).json({ error: error?.message ?? "Error interno" });
+    }
   });
 
   // ==========================================================================
@@ -331,7 +658,76 @@ const PORT = Number(process.env.PORT || 3001);
       .eq("user_id", userId)
       .order("date", { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
-    res.json(data ?? []);
+
+    const pagos = data ?? [];
+    const pagoIds = pagos.map((p: any) => Number(p.id)).filter(Number.isFinite);
+    let liveByPagoId = new Map<number, any>();
+
+    if (pagoIds.length > 0) {
+      const { data: livePagos, error: liveError } = await supabasePanel
+        .from('pagos_venta_live')
+        .select('id,main_pago_id,estado,match_reason')
+        .in('main_pago_id', pagoIds);
+
+      if (!liveError) {
+        liveByPagoId = new Map((livePagos ?? []).map((p: any) => [Number(p.main_pago_id), p]));
+      } else {
+        console.warn('[pagos-lista] no se pudo enriquecer con panel WhatsApp:', liveError.message);
+      }
+    }
+
+    const enriched = pagos.map((p: any) => {
+      const livePago = liveByPagoId.get(Number(p.id));
+      const method = String(p.method ?? '').toLowerCase();
+      let verification_origin: 'automatic' | 'manual' | 'whatsapp_pending' | 'macrodroid_only' | 'other' = 'other';
+
+      if (livePago?.estado === 'pendiente_whatsapp' || livePago?.estado === 'revision_manual') {
+        verification_origin = 'whatsapp_pending';
+      } else if (livePago?.estado === 'verificado_manual' || method.includes('manual')) {
+        verification_origin = 'manual';
+      } else if (livePago?.estado === 'verificado_macrodroid') {
+        verification_origin = 'automatic';
+      } else if (method.includes('notificación bancaria') || method.includes('notificacion bancaria')) {
+        verification_origin = 'macrodroid_only';
+      }
+
+      return {
+        ...p,
+        verification_origin,
+        live_payment_id: livePago?.id ?? null,
+        live_payment_status: livePago?.estado ?? null,
+      };
+    });
+
+    const { data: pendingLivePagos, error: pendingLiveError } = await supabasePanel
+      .from('pagos_venta_live')
+      .select('id,nombre_detectado,monto,estado,comprobante_at,created_at,phone,main_pago_id')
+      .in('estado', ['pendiente_whatsapp', 'revision_manual'])
+      .is('main_pago_id', null)
+      .order('created_at', { ascending: false });
+
+    if (pendingLiveError) {
+      console.warn('[pagos-lista] no se pudo incluir pendientes WhatsApp:', pendingLiveError.message);
+    }
+
+    const pendingWhatsapp = (pendingLivePagos ?? []).map((p: any) => ({
+      id: `live:${p.id}`,
+      nombre: p.nombre_detectado || 'COMPROBANTE WHATSAPP PENDIENTE',
+      pago: Number(p.monto ?? 0),
+      method: 'Comprobante WhatsApp pendiente',
+      status: 'pending',
+      verified: false,
+      date: p.comprobante_at ?? p.created_at,
+      customer_id: null,
+      user_id: userId,
+      phone: p.phone ?? null,
+      verification_origin: 'whatsapp_pending',
+      live_payment_id: p.id,
+      live_payment_status: p.estado,
+      is_live_pending: true,
+    }));
+
+    res.json([...pendingWhatsapp, ...enriched]);
   });
 
   app.post("/api/pagos", async (req, res) => {
@@ -387,6 +783,15 @@ const PORT = Number(process.env.PORT || 3001);
   app.delete("/api/pagos/:id", async (req, res) => {
     const userId = req.headers["x-user-id"] as string;
     if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+    await safeDelete(supabaseServer, 'identity_evidence', 'identidad_evidencia', {}, (q) =>
+      q.eq('user_id', userId).eq('source', 'manual_payment').eq('source_id', String(req.params.id))
+    );
+
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos', {}, (q) =>
+      q.eq('main_pago_id', Number(req.params.id))
+    );
+
     const { error } = await supabaseServer
       .from("pagos")
       .delete()
@@ -1668,6 +2073,36 @@ const PORT = Number(process.env.PORT || 3001);
     }
   });
 
+
+  // ── Puente MacroDroid → Supabase ─────────────────────────────────────────
+  // MacroDroid envía aquí. Vercel siempre está encendido y reenvía a Supabase.
+  // Así el celular nunca ve un timeout por cold start de Supabase.
+  app.post('/api/ingest-notification', async (req, res) => {
+    try {
+      const deviceId     = req.headers['x-device-id']     as string ?? '';
+      const deviceSecret = req.headers['x-device-secret'] as string ?? '';
+
+      const supabaseUrl = process.env.SUPABASE_URL!;
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/ingest-notification`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-device-id': deviceId,
+            'x-device-secret': deviceSecret,
+          },
+          body: JSON.stringify(req.body),
+        }
+      );
+
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } catch (err: any) {
+      console.error('[ingest-notification bridge]', err?.message);
+      res.status(500).json({ error: 'Error enviando a Supabase', detail: err?.message });
+    }
+  });
 
   if (process.env.NODE_ENV !== "production") {
     try {

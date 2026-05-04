@@ -31,6 +31,27 @@ test('usa la hora real del mensaje de WhatsApp aunque la IA lea mal la hora del 
   assert.equal(match?.id, 241);
 });
 
+test('usa la hora del comprobante cuando WhatsApp llega tarde', () => {
+  const pagoLive = {
+    nombre_detectado: name,
+    monto: 2,
+    comprobante_at: '2026-05-04T10:36:00.000Z',
+    message_created_at: '2026-05-04T10:47:41.000Z',
+  };
+
+  const match = findMacrodroidMatchForLivePayment(pagoLive, [
+    {
+      id: 272,
+      nombre: name,
+      pago: 2,
+      date: '2026-05-04T10:36:34.874Z',
+      customer_id: 282,
+    },
+  ], { windowMinutes: 5 });
+
+  assert.equal(match?.id, 272);
+});
+
 test('no verifica si solo coincide monto pero el nombre es distinto', () => {
   const pagoLive = {
     nombre_detectado: name,
@@ -99,4 +120,27 @@ test('si no hay hora de mensaje, cae a la hora del comprobante', () => {
   };
 
   assert.equal(resolveLivePaymentMatchAt(pagoLive), '2026-05-01T03:20:00.000Z');
+});
+
+test('dos comprobantes con mismo nombre/monto no comparten el mismo pago MacroDroid', () => {
+  const base = {
+    nombre_detectado: name,
+    monto: 3,
+    comprobante_at: '2026-05-01T07:55:00.000Z',
+    message_created_at: '2026-05-01T07:55:00.000Z',
+  };
+
+  const candidates = [
+    { id: 275, nombre: name, pago: 3, date: '2026-05-01T07:54:00.000Z', customer_id: null },
+    { id: 276, nombre: name, pago: 3, date: '2026-05-01T07:55:30.000Z', customer_id: null },
+  ];
+
+  // Primer comprobante toma el pago #275
+  const match1 = findMacrodroidMatchForLivePayment(base, candidates);
+  assert.equal(match1?.id, 275);
+
+  // Segundo comprobante, con el #275 ya excluido, debe tomar el #276
+  const remainingCandidates = candidates.filter(c => c.id !== 275);
+  const match2 = findMacrodroidMatchForLivePayment(base, remainingCandidates);
+  assert.equal(match2?.id, 276);
 });

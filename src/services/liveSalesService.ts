@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isContextualNameMatch, isStrongNameMatch, normalizePersonName } from './nameMatching.js';
 
 export type PagoVentaLiveEstado =
   | 'pendiente_whatsapp'
@@ -28,13 +29,7 @@ export function normalizeLivePhone(raw: unknown): string | null {
 }
 
 export function canonicalName(raw: unknown): string {
-  return String(raw ?? '')
-    .toUpperCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Z\u00D1\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizePersonName(raw);
 }
 
 export function namesMatch(a: unknown, b: unknown): boolean {
@@ -42,6 +37,7 @@ export function namesMatch(a: unknown, b: unknown): boolean {
   const cb = canonicalName(b);
   if (!ca || !cb) return false;
   if (ca === cb) return true;
+  if (isContextualNameMatch(ca, cb)) return true;
   const short = ca.length <= cb.length ? ca : cb;
   const long = ca.length > cb.length ? ca : cb;
   return short.length >= 10 && long.includes(short);
@@ -79,13 +75,33 @@ export function parseLiveMonto(raw: unknown): number | null {
 
 export function resolveLivePaymentMatchAt(pagoLive: any): string | null {
   return (
+    pagoLive?.comprobante_at ??
     pagoLive?.message_created_at ??
     pagoLive?.panel_message_created_at ??
     pagoLive?.whatsapp_message_created_at ??
     pagoLive?.comprobante_message_created_at ??
-    pagoLive?.comprobante_at ??
     null
   );
+}
+
+export function resolveLivePaymentMatchTimes(pagoLive: any): string[] {
+  const values = [
+    pagoLive?.comprobante_at,
+    pagoLive?.message_created_at,
+    pagoLive?.panel_message_created_at,
+    pagoLive?.whatsapp_message_created_at,
+    pagoLive?.comprobante_message_created_at,
+  ];
+  const seen = new Set<string>();
+  return values.filter((value): value is string => {
+    if (!value) return false;
+    const time = new Date(value).getTime();
+    if (!Number.isFinite(time)) return false;
+    const iso = new Date(time).toISOString();
+    if (seen.has(iso)) return false;
+    seen.add(iso);
+    return true;
+  });
 }
 
 export function findMacrodroidMatchForLivePayment(
@@ -97,24 +113,29 @@ export function findMacrodroidMatchForLivePayment(
   } = {},
 ) {
   const monto = parseLiveMonto(pagoLive?.monto);
-  const matchAt = resolveLivePaymentMatchAt(pagoLive);
-  if (!monto || !matchAt || !pagoLive?.nombre_detectado) return null;
-
-  const center = new Date(matchAt).getTime();
-  if (!Number.isFinite(center)) return null;
+  const matchTimes = resolveLivePaymentMatchTimes(pagoLive);
+  if (!monto || matchTimes.length === 0 || !pagoLive?.nombre_detectado) return null;
 
   const windowMs = (input.windowMinutes ?? 5) * 60 * 1000;
-  const from = center - windowMs;
-  const to = center + windowMs;
 
-  return (candidates ?? []).find((p: any) => {
-    const paidAt = new Date(p.date).getTime();
-    if (!Number.isFinite(paidAt) || paidAt < from || paidAt > to) return false;
-    if (parseLiveMonto(p.pago) !== monto) return false;
+  for (const matchAt of matchTimes) {
+    const center = new Date(matchAt).getTime();
+    if (!Number.isFinite(center)) continue;
+    const from = center - windowMs;
+    const to = center + windowMs;
 
-    const sameCustomer = input.mainCustomerId && Number(p.customer_id) === Number(input.mainCustomerId);
-    return sameCustomer || namesMatch(pagoLive.nombre_detectado, p.nombre);
-  }) ?? null;
+    const matched = (candidates ?? []).find((p: any) => {
+      const paidAt = new Date(p.date).getTime();
+      if (!Number.isFinite(paidAt) || paidAt < from || paidAt > to) return false;
+      if (parseLiveMonto(p.pago) !== monto) return false;
+
+      const sameCustomer = input.mainCustomerId && Number(p.customer_id) === Number(input.mainCustomerId);
+      return sameCustomer || namesMatch(pagoLive.nombre_detectado, p.nombre);
+    });
+    if (matched) return matched;
+  }
+
+  return null;
 }
 
 export async function ensureMainCustomerForLive(
@@ -138,7 +159,21 @@ export async function ensureMainCustomerForLive(
   if (byNameError) throw byNameError;
 
   let customer = byName?.[0] ?? null;
-  if (!customer && phone) {
+
+  if (!customer) {
+    const { data, error } = await mainDb
+      .from('customers')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    const matches = (data ?? []).filter((c: any) => isStrongNameMatch(c.canonical_name || c.full_name || c.normalized_name, canonical));
+    if (matches.length === 1) customer = matches[0];
+  }
+
+  if (!customer && phone && !canonical) {
     const { data, error } = await mainDb
       .from('customers')
       .select('*')
@@ -405,7 +440,7 @@ export async function syncMainPedidoForLiveOrder(
   userId: string,
   pedidoLive: any,
 ) {
-  const total = parseLiveMonto(pedidoLive.total_comprobantes) ?? 0;
+  const total = parseLiveMonto(pedidoLive.total_verificado) ?? 0;
   const name = pedidoLive.nombre_detectado;
   if (!name || total <= 0) return pedidoLive;
 
@@ -456,18 +491,28 @@ export async function matchLivePaymentWithMacrodroid(
     messageCreatedAt = message?.created_at ?? null;
   }
 
-  const windowMs = (input.windowMinutes ?? 5) * 60 * 1000;
   const pagoLiveForMatch = {
     ...input.pagoLive,
     message_created_at: messageCreatedAt ?? resolveLivePaymentMatchAt(input.pagoLive),
   };
-  const matchAt = resolveLivePaymentMatchAt(pagoLiveForMatch);
-  if (!matchAt) return input.pagoLive;
+  const matchTimes = resolveLivePaymentMatchTimes(pagoLiveForMatch);
+  if (matchTimes.length === 0) return input.pagoLive;
 
-  const center = new Date(matchAt).getTime();
-  if (!Number.isFinite(center)) return input.pagoLive;
-  const from = new Date(center - windowMs).toISOString();
-  const to = new Date(center + windowMs).toISOString();
+  const windowMs = (input.windowMinutes ?? 5) * 60 * 1000;
+  const centers = matchTimes
+    .map(value => new Date(value).getTime())
+    .filter(Number.isFinite);
+  if (centers.length === 0) return input.pagoLive;
+  const from = new Date(Math.min(...centers) - windowMs).toISOString();
+  const to = new Date(Math.max(...centers) + windowMs).toISOString();
+
+  // Excluir pagos MacroDroid que ya están vinculados a otro comprobante verificado
+  const { data: alreadyMatched } = await panelDb
+    .from('pagos_venta_live')
+    .select('main_pago_id')
+    .not('main_pago_id', 'is', null)
+    .eq('estado', 'verificado_macrodroid');
+  const excludeIds = (alreadyMatched ?? []).map((p: any) => p.main_pago_id).filter(Boolean);
 
   let query = mainDb
     .from('pagos')
@@ -477,6 +522,10 @@ export async function matchLivePaymentWithMacrodroid(
     .gte('date', from)
     .lte('date', to)
     .order('date', { ascending: true });
+
+  if (excludeIds.length > 0) {
+    query = query.not('id', 'in', `(${excludeIds.join(',')})`) as typeof query;
+  }
 
   const { data: candidates, error } = await query;
   if (error) throw error;
@@ -582,16 +631,29 @@ export async function upsertWhatsappLivePayment(
     const to = new Date(new Date(input.comprobanteAt).getTime() + 5 * 60 * 1000).toISOString();
     const { data: dupes, error } = await panelDb
       .from('pagos_venta_live')
-      .select('id,nombre_canonico,monto,estado')
+      .select('*')
       .eq('pedido_live_id', input.pedidoLiveId)
-      .eq('monto', monto)
       .gte('comprobante_at', from)
       .lte('comprobante_at', to)
       .neq('estado', 'rechazado')
-      .limit(1);
+      .order('created_at', { ascending: true })
+      .limit(20);
     if (error) throw error;
-    const dupe = (dupes ?? []).find((p: any) => namesMatch(p.nombre_canonico, nombre));
-    duplicateOf = dupe?.id ?? null;
+    const dupe = (dupes ?? []).find((p: any) =>
+      parseLiveMonto(p.monto) === monto && namesMatch(p.nombre_canonico, nombre)
+    );
+    // Si ambos mensajes tienen ID de WhatsApp diferente, son mensajes distintos → nunca fusionar
+    const esMensajeDiferente =
+      input.panelMensajeId && dupe?.panel_mensaje_id &&
+      input.panelMensajeId !== dupe.panel_mensaje_id;
+
+    if (dupe && !esMensajeDiferente && dupe.estado === 'pendiente_whatsapp') {
+      // Mismo mensaje reenviado por error → fusionar
+      existing = dupe;
+    } else if (dupe) {
+      // Mensaje diferente (o dupe ya verificado) → crear registro nuevo
+      duplicateOf = dupe.id;
+    }
   }
 
   const payload = {
