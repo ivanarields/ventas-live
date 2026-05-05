@@ -38,17 +38,26 @@ export interface SyncPedidoInput {
  * - Si ya existe y no cambió la clasificación, actualiza y mantiene la etiqueta.
  */
 export async function syncPedidoLabel(input: SyncPedidoInput): Promise<SyncPedidoResult> {
-  // 1. Upsert cliente
-  const { data: customerIdData, error: customerErr } = await supabase.rpc("fn_upsert_customer", {
-    p_firebase_id: input.firebaseCustomerId,
-    p_full_name: input.customerName,
-    p_normalized_name: input.customerNormalizedName,
-    p_whatsapp_number: input.customerWhatsApp ?? null,
-  });
-  if (customerErr) throw new Error(`upsert customer: ${customerErr.message}`);
-  const customerId = customerIdData as unknown as number;
+  // La app ya usa IDs reales de Supabase. Solo usamos el upsert legacy si llega un ID no numérico.
+  let customerId: number;
+  if (/^\d+$/.test(input.firebaseCustomerId)) {
+    customerId = Number(input.firebaseCustomerId);
+    await supabase
+      .from("orders")
+      .update({ customer_id: customerId })
+      .eq("firebase_id", input.firebasePedidoId);
+  } else {
+    const { data: customerIdData, error: customerErr } = await supabase.rpc("fn_upsert_customer", {
+      p_firebase_id: input.firebaseCustomerId,
+      p_full_name: input.customerName,
+      p_normalized_name: input.customerNormalizedName,
+      p_whatsapp_number: input.customerWhatsApp ?? null,
+    });
+    if (customerErr) throw new Error(`upsert customer: ${customerErr.message}`);
+    customerId = customerIdData as unknown as number;
+  }
 
-  // 2. Upsert pedido + asignación
+  // 1. Upsert pedido + asignación
   const { data, error } = await supabase.rpc("fn_upsert_order_and_assign", {
     p_firebase_id: input.firebasePedidoId,
     p_customer_id: customerId,
@@ -107,12 +116,28 @@ export async function getAllocationHistory(orderId: number): Promise<AllocationR
 }
 
 export async function getCurrentLabelByFirebaseId(firebasePedidoId: string): Promise<string | null> {
-  const { data } = await supabase
+  const { data: order, error: orderError } = await supabase
     .from("orders")
-    .select("id, container_allocations!inner(storage_containers!inner(container_code))")
+    .select("id")
     .eq("firebase_id", firebasePedidoId)
-    .eq("container_allocations.status", "ACTIVE")
     .maybeSingle();
-  // @ts-expect-error relación anidada
-  return data?.container_allocations?.[0]?.storage_containers?.container_code ?? null;
+  if (orderError) throw orderError;
+  if (!order?.id) return null;
+
+  const { data: allocation, error: allocationError } = await supabase
+    .from("container_allocations")
+    .select("container_id")
+    .eq("order_id", order.id)
+    .eq("status", "ACTIVE")
+    .maybeSingle();
+  if (allocationError) throw allocationError;
+  if (!allocation?.container_id) return null;
+
+  const { data: container, error: containerError } = await supabase
+    .from("storage_containers")
+    .select("container_code")
+    .eq("id", allocation.container_id)
+    .maybeSingle();
+  if (containerError) throw containerError;
+  return container?.container_code ?? null;
 }

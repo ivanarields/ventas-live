@@ -106,6 +106,253 @@ async function safeDelete(
   }
 }
 
+async function safeUpdate(
+  client: any,
+  table: string,
+  key: string,
+  updated: Record<string, number>,
+  values: Record<string, any>,
+  apply: (query: any) => any,
+) {
+  try {
+    const { count, error } = await apply(client.from(table).update(values, { count: 'exact' }));
+    if (error) {
+      if (isMissingDbObject(error)) return;
+      throw error;
+    }
+    updated[key] = (updated[key] ?? 0) + (count ?? 0);
+  } catch (error: any) {
+    if (isMissingDbObject(error)) return;
+    throw error;
+  }
+}
+
+function getBoliviaTodayRange() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/La_Paz',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type: string) => Number(parts.find(p => p.type === type)?.value);
+  const year = value('year');
+  const month = value('month');
+  const day = value('day');
+  const start = new Date(Date.UTC(year, month - 1, day, 4, 0, 0));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+async function recalcAllContainers() {
+  const containers = await safeSelect(supabaseServer, 'storage_containers', 'id', (q) => q);
+  for (const container of containers as any[]) {
+    try {
+      await supabaseServer.rpc('fn_recalc_container_state', { p_container_id: container.id });
+    } catch {
+      // Si la función no existe en una base vieja, el reset manual de abajo mantiene los contadores limpios.
+    }
+  }
+}
+
+async function resetLabelsForUser(userId: string, options: { resetPedidoStatus?: boolean; orderIds?: number[] } = {}) {
+  const changed: Record<string, number> = {};
+
+  const allOrders = await safeSelect(supabaseServer, 'orders', 'id', (q) => q.not('id', 'is', null));
+  const orderIds = [...new Set([
+    ...(options.orderIds ?? []),
+    ...(allOrders as any[]).map((o: any) => Number(o.id)),
+  ].map(Number).filter(Boolean))];
+
+  if (orderIds.length > 0) {
+    await safeDelete(supabaseServer, 'container_allocations', 'casilleros_asignaciones', changed, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'order_bags', 'bolsas', changed, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'orders', 'pedidos_etiquetas', changed, (q) => q.in('id', orderIds));
+  }
+
+  const pedidoUpdate: Record<string, any> = { label: '', label_type: '', updated_at: new Date() };
+  if (options.resetPedidoStatus) pedidoUpdate.status = 'procesar';
+  await safeUpdate(supabaseServer, 'pedidos', 'pedidos_limpiados', changed, pedidoUpdate, (q) => q.eq('user_id', userId));
+  await safeUpdate(supabaseServer, 'customers', 'clientes_limpiados', changed, {
+    active_label: '',
+    active_label_type: '',
+    active_bag_count: 0,
+    label_updated_at: new Date(),
+  }, (q) => q.eq('user_id', userId));
+
+  await recalcAllContainers();
+  await safeUpdate(supabaseServer, 'storage_containers', 'casilleros_reseteados', changed, {
+    current_simple_orders: 0,
+    current_bags_used: 0,
+    state: 'AVAILABLE',
+  }, (q) => q.select('id'));
+
+  await safeDelete(supabasePanel, 'evidencias_venta_live', 'panel_evidencias', changed, (q) => q.not('id', 'is', null));
+  await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos', changed, (q) => q.not('id', 'is', null));
+  await safeDelete(supabasePanel, 'pedidos_venta_live', 'panel_pedidos', changed, (q) => q.not('id', 'is', null));
+  await safeDelete(supabasePanel, 'tarjetas_venta_live', 'panel_tarjetas', changed, (q) => q.not('id', 'is', null));
+  await safeDelete(supabasePanel, 'panel_mensajes', 'panel_mensajes', changed, (q) => q.not('id', 'is', null));
+  await safeDelete(supabasePanel, 'panel_clientes', 'panel_conversaciones', changed, (q) => q.not('id', 'is', null));
+
+  return { orderIds, changed };
+}
+
+async function deleteTodayPaymentsForUser(userId: string) {
+  const range = getBoliviaTodayRange();
+  const deleted: Record<string, number> = {};
+
+  const pagos = await safeSelect(supabaseServer, 'pagos', 'id,customer_id', (q) => q.eq('user_id', userId).gte('date', range.start).lt('date', range.end));
+  const pedidos = await safeSelect(supabaseServer, 'pedidos', 'id,customer_id', (q) => q.eq('user_id', userId).gte('date', range.start).lt('date', range.end));
+  const pagoIds = (pagos as any[]).map((p: any) => Number(p.id)).filter(Boolean);
+  const pedidoIds = (pedidos as any[]).map((p: any) => Number(p.id)).filter(Boolean);
+  const customerIds = [...new Set([...(pagos as any[]), ...(pedidos as any[])].map((r: any) => Number(r.customer_id)).filter(Boolean))];
+
+  const orderRows: any[] = [];
+  if (pedidoIds.length > 0) {
+    orderRows.push(...await safeSelect(supabaseServer, 'orders', 'id', (q) => q.in('firebase_id', pedidoIds.map(String))) as any[]);
+  }
+  if (customerIds.length > 0) {
+    orderRows.push(...await safeSelect(supabaseServer, 'orders', 'id', (q) => q.in('customer_id', customerIds).gte('created_at', range.start).lt('created_at', range.end)) as any[]);
+  }
+  const orderIds = [...new Set(orderRows.map((o: any) => Number(o.id)).filter(Boolean))];
+
+  if (orderIds.length > 0) {
+    await safeDelete(supabaseServer, 'container_allocations', 'casilleros_asignaciones', deleted, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'order_bags', 'bolsas', deleted, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'orders', 'pedidos_etiquetas', deleted, (q) => q.in('id', orderIds));
+  }
+
+  if (pagoIds.length > 0) {
+    await safeDelete(supabaseServer, 'identity_evidence', 'identidad_evidencia', deleted, (q) => q.eq('user_id', userId).eq('source', 'manual_payment').in('source_id', pagoIds.map(String)));
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos_vinculados', deleted, (q) => q.in('main_pago_id', pagoIds));
+  }
+  if (pedidoIds.length > 0) {
+    await safeDelete(supabasePanel, 'pedidos_venta_live', 'panel_pedidos_vinculados', deleted, (q) => q.in('main_pedido_id', pedidoIds));
+  }
+
+  const rawEvents = await safeSelect(supabaseServer, 'raw_notification_events', 'id', (q) => q.gte('received_at', range.start).lt('received_at', range.end));
+  const rawIds = (rawEvents as any[]).map((r: any) => r.id).filter(Boolean);
+  if (rawIds.length > 0) {
+    await safeDelete(supabaseServer, 'raw_notification_events', 'notificaciones_banco', deleted, (q) => q.in('id', rawIds));
+  }
+
+  if (pedidoIds.length > 0) {
+    await safeDelete(supabaseServer, 'pedidos', 'pedidos', deleted, (q) => q.eq('user_id', userId).in('id', pedidoIds));
+  }
+  if (pagoIds.length > 0) {
+    await safeDelete(supabaseServer, 'pagos', 'pagos', deleted, (q) => q.eq('user_id', userId).in('id', pagoIds));
+  }
+
+  await recalcAllContainers();
+  return { success: true, date: range.date, pagoIds, pedidoIds, orderIds, deleted };
+}
+
+async function deleteTodayForUser(userId: string) {
+  const range = getBoliviaTodayRange();
+  const deleted: Record<string, number> = {};
+
+  const pagos = await safeSelect(supabaseServer, 'pagos', 'id,customer_id', (q) => q.eq('user_id', userId).gte('date', range.start).lt('date', range.end));
+  const pedidos = await safeSelect(supabaseServer, 'pedidos', 'id,customer_id', (q) => q.eq('user_id', userId).gte('date', range.start).lt('date', range.end));
+  const pagoIds = (pagos as any[]).map((p: any) => Number(p.id)).filter(Boolean);
+  const pedidoIds = (pedidos as any[]).map((p: any) => Number(p.id)).filter(Boolean);
+  const customerIds = [...new Set([...(pagos as any[]), ...(pedidos as any[])].map((r: any) => Number(r.customer_id)).filter(Boolean))];
+
+  const orderRows: any[] = [];
+  if (pedidoIds.length > 0) {
+    orderRows.push(...await safeSelect(supabaseServer, 'orders', 'id', (q) => q.in('firebase_id', pedidoIds.map(String))) as any[]);
+    orderRows.push(...await safeSelect(supabaseServer, 'orders', 'id', (q) => q.in('id', pedidoIds)) as any[]);
+  }
+  if (customerIds.length > 0) {
+    orderRows.push(...await safeSelect(supabaseServer, 'orders', 'id', (q) => q.in('customer_id', customerIds).gte('created_at', range.start).lt('created_at', range.end)) as any[]);
+  }
+  const orderIds = [...new Set(orderRows.map((o: any) => Number(o.id)).filter(Boolean))];
+
+  if (orderIds.length > 0) {
+    await safeDelete(supabaseServer, 'container_allocations', 'casilleros_asignaciones', deleted, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'order_bags', 'bolsas', deleted, (q) => q.in('order_id', orderIds));
+    await safeDelete(supabaseServer, 'orders', 'pedidos_etiquetas', deleted, (q) => q.in('id', orderIds));
+  }
+
+  if (pagoIds.length > 0) {
+    await safeDelete(supabaseServer, 'identity_evidence', 'identidad_evidencia', deleted, (q) => q.eq('user_id', userId).eq('source', 'manual_payment').in('source_id', pagoIds.map(String)));
+  }
+
+  const rawEvents = await safeSelect(supabaseServer, 'raw_notification_events', 'id', (q) => q.gte('received_at', range.start).lt('received_at', range.end));
+  const rawIds = (rawEvents as any[]).map((r: any) => r.id).filter(Boolean);
+  if (rawIds.length > 0) {
+    await safeDelete(supabaseServer, 'raw_notification_events', 'notificaciones_banco', deleted, (q) => q.in('id', rawIds));
+  }
+
+  const panelClientesToday = await safeSelect(supabasePanel, 'panel_clientes', 'id,phone', (q) => q.gte('created_at', range.start).lt('created_at', range.end));
+  const panelPedidosToday = await safeSelect(supabasePanel, 'pedidos_venta_live', 'id,cliente_id,phone', (q) => q.gte('created_at', range.start).lt('created_at', range.end));
+  const panelPagosToday = await safeSelect(supabasePanel, 'pagos_venta_live', 'id,pedido_live_id,cliente_id,phone', (q) => q.gte('created_at', range.start).lt('created_at', range.end));
+  const panelPedidosLinked = pedidoIds.length > 0
+    ? await safeSelect(supabasePanel, 'pedidos_venta_live', 'id,cliente_id,phone', (q) => q.in('main_pedido_id', pedidoIds))
+    : [];
+  const panelPagosLinked = pagoIds.length > 0
+    ? await safeSelect(supabasePanel, 'pagos_venta_live', 'id,pedido_live_id,cliente_id,phone', (q) => q.in('main_pago_id', pagoIds))
+    : [];
+  const panelClienteIds = [...new Set([
+    ...(panelClientesToday as any[]).map((r: any) => r.id),
+    ...(panelPedidosToday as any[]).map((r: any) => r.cliente_id),
+    ...(panelPagosToday as any[]).map((r: any) => r.cliente_id),
+    ...(panelPedidosLinked as any[]).map((r: any) => r.cliente_id),
+    ...(panelPagosLinked as any[]).map((r: any) => r.cliente_id),
+  ].filter(Boolean))];
+  const panelPedidoIds = [...new Set([
+    ...(panelPedidosToday as any[]).map((r: any) => r.id),
+    ...(panelPagosToday as any[]).map((r: any) => r.pedido_live_id),
+    ...(panelPedidosLinked as any[]).map((r: any) => r.id),
+    ...(panelPagosLinked as any[]).map((r: any) => r.pedido_live_id),
+  ].filter(Boolean))];
+  const panelPagoIds = [...new Set([
+    ...(panelPagosToday as any[]).map((r: any) => r.id),
+    ...(panelPagosLinked as any[]).map((r: any) => r.id),
+  ].filter(Boolean))];
+  const panelPhones = [...new Set([
+    ...(panelClientesToday as any[]).map((r: any) => r.phone),
+    ...(panelPedidosToday as any[]).map((r: any) => r.phone),
+    ...(panelPagosToday as any[]).map((r: any) => r.phone),
+    ...(panelPedidosLinked as any[]).map((r: any) => r.phone),
+    ...(panelPagosLinked as any[]).map((r: any) => r.phone),
+  ].map(phoneDigits).filter(Boolean))];
+
+  if (panelPagoIds.length > 0) {
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos_ids', deleted, (q) => q.in('id', panelPagoIds));
+  }
+  if (panelPedidoIds.length > 0) {
+    await safeDelete(supabasePanel, 'evidencias_venta_live', 'panel_evidencias', deleted, (q) => q.in('pedido_live_id', panelPedidoIds));
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos', deleted, (q) => q.in('pedido_live_id', panelPedidoIds));
+    await safeDelete(supabasePanel, 'pedidos_venta_live', 'panel_pedidos', deleted, (q) => q.in('id', panelPedidoIds));
+  }
+  if (panelClienteIds.length > 0) {
+    await safeDelete(supabasePanel, 'evidencias_venta_live', 'panel_evidencias_cliente', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos_cliente', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'pedidos_venta_live', 'panel_pedidos_cliente', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'tarjetas_venta_live', 'panel_tarjetas', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'panel_mensajes', 'panel_mensajes', deleted, (q) => q.in('cliente_id', panelClienteIds));
+    await safeDelete(supabasePanel, 'panel_clientes', 'panel_conversaciones', deleted, (q) => q.in('id', panelClienteIds));
+  }
+  if (panelPhones.length > 0) {
+    await safeDelete(supabasePanel, 'pagos_venta_live', 'panel_pagos_phone', deleted, (q) => q.in('phone', panelPhones));
+    await safeDelete(supabasePanel, 'pedidos_venta_live', 'panel_pedidos_phone', deleted, (q) => q.in('phone', panelPhones));
+    await safeDelete(supabasePanel, 'tarjetas_venta_live', 'panel_tarjetas_phone', deleted, (q) => q.in('phone', panelPhones));
+  }
+
+  if (pedidoIds.length > 0) {
+    await safeDelete(supabaseServer, 'pedidos', 'pedidos', deleted, (q) => q.eq('user_id', userId).in('id', pedidoIds));
+  }
+  if (pagoIds.length > 0) {
+    await safeDelete(supabaseServer, 'pagos', 'pagos', deleted, (q) => q.eq('user_id', userId).in('id', pagoIds));
+  }
+
+  await resetLabelsForUser(userId, { orderIds, resetPedidoStatus: true });
+  return { success: true, date: range.date, pagoIds, pedidoIds, orderIds, panelClienteIds, deleted };
+}
+
 async function deleteStoreAuthUsers(phones: string[]) {
   const shortPhones = phones.map(phoneDigits).filter(Boolean).map(p => p.startsWith('591') ? p.slice(3) : p);
   const emails = [...new Set(shortPhones.map(p => `${p}@tiendaleydi.com`))];
@@ -587,6 +834,45 @@ const PORT = Number(process.env.PORT || 3001);
       res.json(result);
     } catch (error: any) {
       console.error("[/api/admin/root-delete] error:", error);
+      res.status(500).json({ error: error?.message ?? "Error interno" });
+    }
+  });
+
+  app.post("/api/admin/reset-labels", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+      if (req.body?.confirm !== "RESET") return res.status(400).json({ error: "Confirmación inválida" });
+      const result = await resetLabelsForUser(userId, { resetPedidoStatus: true });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("[/api/admin/reset-labels] error:", error);
+      res.status(500).json({ error: error?.message ?? "Error interno" });
+    }
+  });
+
+  app.post("/api/admin/delete-today", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+      if (req.body?.confirm !== "BORRAR HOY") return res.status(400).json({ error: "Confirmación inválida" });
+      const result = await deleteTodayForUser(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[/api/admin/delete-today] error:", error);
+      res.status(500).json({ error: error?.message ?? "Error interno" });
+    }
+  });
+
+  app.post("/api/admin/delete-today-payments", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+      if (req.body?.confirm !== "BORRAR PAGOS HOY") return res.status(400).json({ error: "Confirmación inválida" });
+      const result = await deleteTodayPaymentsForUser(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[/api/admin/delete-today-payments] error:", error);
       res.status(500).json({ error: error?.message ?? "Error interno" });
     }
   });

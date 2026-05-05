@@ -54,6 +54,12 @@ export const clientesApi = {
 export const adminApi = {
   rootDelete: (body: { customerId?: string | number | null; name?: string | null; phone?: string | null }) =>
     apiFetch("/api/admin/root-delete", { method: "POST", body: JSON.stringify(body) }),
+  resetLabels: () =>
+    apiFetch("/api/admin/reset-labels", { method: "POST", body: JSON.stringify({ confirm: "RESET" }) }),
+  deleteToday: () =>
+    apiFetch("/api/admin/delete-today", { method: "POST", body: JSON.stringify({ confirm: "BORRAR HOY" }) }),
+  deleteTodayPayments: () =>
+    apiFetch("/api/admin/delete-today-payments", { method: "POST", body: JSON.stringify({ confirm: "BORRAR PAGOS HOY" }) }),
   storeProfiles: () => apiFetch("/api/admin/store-profiles"),
 };
 

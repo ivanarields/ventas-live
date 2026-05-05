@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { syncPedidoLabel, releasePedidoLabel } from './services/labelingService';
+import { syncPedidoLabel, releasePedidoLabel, getCurrentLabelByFirebaseId } from './services/labelingService';
 import { ShieldAlert, FileSearch, AlertTriangle } from 'lucide-react';
 import { PaymentHistoryTape } from './components/PaymentHistoryTape';
 import { WhatsappPhotos } from './components/WhatsappPhotos';
@@ -286,7 +286,11 @@ async function syncLabelsForCustomer(
     cleanName(p.customerName ?? '') === cleanName(customer.name ?? '')
   );
   const deliveredPedidos = customerPedidos.filter(p => p.status.toLowerCase() === 'entregado');
-  const activePedidos = customerPedidos.filter(p => p.status.toLowerCase() !== 'entregado');
+  // Solo asignar casillero a pedidos que ya están listos — no a los que están en "procesar"
+  const activePedidos = customerPedidos.filter(p => {
+    const s = p.status.toLowerCase();
+    return s === 'listo' || s === 'preparado' || s === 'ready';
+  });
 
   // 1. Liberar pedidos entregados
   for (const p of deliveredPedidos) {
@@ -299,11 +303,10 @@ async function syncLabelsForCustomer(
   }
 
   // 2. Sincronizar pedidos activos (asigna o migra)
-  const labelUpdates: Array<{ id: string; label: string; type: 'number' | 'letter' }> = [];
   for (const p of activePedidos) {
     if (p.id.startsWith('temp-')) continue;
     try {
-      const result = await syncPedidoLabel({
+      await syncPedidoLabel({
         firebaseCustomerId: customerId,
         customerName: customer.name ?? p.customerName ?? '',
         customerNormalizedName: normalizeName(customer.name ?? p.customerName ?? ''),
@@ -313,10 +316,22 @@ async function syncLabelsForCustomer(
         totalItems: p.itemCount || 0,
         totalAmount: p.totalAmount || 0,
       });
-      const type = /^\d+$/.test(result.containerCode) ? 'number' : 'letter';
-      labelUpdates.push({ id: p.id, label: result.containerCode, type });
     } catch (e) {
       console.error('[labels] sync failed', p.id, e);
+    }
+  }
+
+  // La sincronización puede migrar pedidos anteriores del mismo cliente.
+  // Por eso leemos la etiqueta final real después de terminar todas las RPC.
+  const labelUpdates: Array<{ id: string; label: string; type: 'number' | 'letter' }> = [];
+  for (const p of activePedidos) {
+    if (p.id.startsWith('temp-')) continue;
+    try {
+      const label = await getCurrentLabelByFirebaseId(p.id);
+      if (!label) continue;
+      labelUpdates.push({ id: p.id, label, type: /^\d+$/.test(label) ? 'number' : 'letter' });
+    } catch (e) {
+      console.warn('[labels] read-back pedido', p.id, e);
     }
   }
 
@@ -1269,14 +1284,19 @@ export default function App() {
 
       if (groupKey && groups[groupKey]) {
         groups[groupKey].pedidos.push(ped);
+        if (customer) {
+          groups[groupKey].customerId = groups[groupKey].customerId || customer.id;
+          groups[groupKey].id = groups[groupKey].id || customer.id;
+        }
       } else if (groupKey) {
         groups[groupKey] = {
+          id: groupKey,
           nombre: ped.customerName || 'Sin nombre',
           total: 0,
           count: 0,
           lastDate: ped.date,
           phone: '',
-          customerId: null,
+          customerId: customer ? customer.id : null,
           payments: [],
           pedidos: [ped],
           orders: []
@@ -1294,14 +1314,19 @@ export default function App() {
       if (groupKey && groups[groupKey]) {
         if (!groups[groupKey].orders) groups[groupKey].orders = [];
         groups[groupKey].orders.push(ord);
+        if (customer) {
+          groups[groupKey].customerId = groups[groupKey].customerId || customer.id;
+          groups[groupKey].id = groups[groupKey].id || customer.id;
+        }
       } else if (groupKey) {
         groups[groupKey] = {
+          id: groupKey,
           nombre: ord.customerName || 'Sin nombre',
           total: 0,
           count: 0,
           lastDate: ord.date || ord.fecha,
           phone: '',
-          customerId: null,
+          customerId: customer ? customer.id : null,
           payments: [],
           pedidos: [],
           orders: [ord]
@@ -1919,6 +1944,7 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
 function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedidos: any[]; customers: any[]; onSelectPerson: (id: string) => void; onRefresh: () => void }) {
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
+  const [isCleaningTests, setIsCleaningTests] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'casilleros' | 'pedidos'>('casilleros');
 
   const activos = pedidos.filter(p => {
@@ -1926,9 +1952,9 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
     return s === 'listo' || s === 'preparado' || s === 'ready';
   });
 
-  const NUMERIC = ['1', '2', '3', '4'];
-  const ALPHA   = ['A', 'B', 'C', 'D'];
-  const MAX_SIMPLE = 4;
+  const NUMERIC = Array.from({ length: 100 }, (_, i) => String(i + 1));
+  const ALPHA   = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+  const MAX_SIMPLE = 5;
 
   const byLabel = (code: string) => activos.filter(p => p.label === code);
   const alphaOccupant = (code: string) => activos.find(p => p.label === code) ?? null;
@@ -1961,6 +1987,30 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
     }
   };
 
+  const handleTestCleanup = async () => {
+    if (isCleaningTests) return;
+    const command = window.prompt('Pruebas: escribe RESET para limpiar casilleros, etiquetas y conversaciones WhatsApp.');
+    const normalized = command?.trim().toUpperCase();
+    if (!normalized) return;
+    if (normalized !== 'RESET') {
+      alert('Comando inválido. Usa RESET.');
+      return;
+    }
+    if (!window.confirm('Esto limpiará casilleros, etiquetas y conversaciones WhatsApp. No borra pagos. ¿Continuar?')) return;
+
+    setIsCleaningTests(true);
+    try {
+      const result = await adminApi.resetLabels();
+      onRefresh();
+      alert(`Listo. ${JSON.stringify(result.deleted ?? result.changed ?? {})}`);
+    } catch (error: any) {
+      console.error('Error limpiando pruebas:', error);
+      alert(error?.message ?? 'Error al limpiar pruebas');
+    } finally {
+      setIsCleaningTests(false);
+    }
+  };
+
   return (
     <motion.div
       key="entrega"
@@ -1979,6 +2029,14 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           </p>
         </div>
         <div className="flex gap-1.5">
+          <button
+            onClick={handleTestCleanup}
+            disabled={isCleaningTests}
+            className="flex items-center gap-1 rounded-full px-2.5 py-1 transition-all bg-amber-50 text-amber-700 disabled:opacity-60"
+          >
+            <Wrench className="w-3 h-3" />
+            <span className="text-[10px] font-bold">{isCleaningTests ? 'Limpiando' : 'Reset'}</span>
+          </button>
           <button
             onClick={() => setActiveSubTab('casilleros')}
             className="flex items-center gap-1 rounded-full px-2.5 py-1 transition-all"
@@ -2037,28 +2095,35 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       )}
 
       {/* ── ALFABÉTICOS activos ── */}
-      {ALPHA.some(code => alphaOccupant(code)) && (
+      {ALPHA.some(code => byLabel(code).length > 0) && (
         <section className="space-y-2">
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
             Alfabéticos — 2+ bolsas
           </p>
           <div className="space-y-2">
-            {ALPHA.filter(code => alphaOccupant(code)).map(code => {
-              const occupant = alphaOccupant(code)!;
+            {ALPHA.filter(code => byLabel(code).length > 0).map(code => {
+              const occupants = byLabel(code);
               return (
-                <button
-                  key={code}
-                  onClick={() => setSelectedPedido(occupant)}
-                  className="w-full rounded-2xl px-4 py-3 border-2 flex items-center gap-3 transition-all text-left bg-[#FFF0F5] border-brand/20 active:scale-[0.98]"
-                >
-                  <div className="flex-1 min-w-0">
+                <div key={code} className="w-full rounded-2xl px-4 py-3 border-2 flex flex-col gap-2 transition-all text-left bg-[#FFF0F5] border-brand/20">
+                  <div>
                     <p className="text-[9px] font-black text-brand/40 uppercase tracking-widest mb-0.5">Casillero {code}</p>
-                    <p className="font-black text-[14px] text-gray-900 leading-tight">{occupant.customerName}</p>
+                    <p className="font-black text-[14px] text-gray-900 leading-tight">{occupants[0]?.customerName}</p>
                     <p className="text-[11px] font-bold text-brand mt-0.5">
-                      {occupant.bagCount} bolsa{occupant.bagCount !== 1 ? 's' : ''} · {occupant.itemCount ?? 0} prendas
+                      {occupants.length} pedido{occupants.length !== 1 ? 's' : ''} · {occupants.reduce((s: number, p: any) => s + (p.bagCount || 0), 0)} bolsas total
                     </p>
                   </div>
-                </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    {occupants.map((p: any, i: number) => (
+                      <button
+                        key={p.id ?? i}
+                        onClick={() => setSelectedPedido(p)}
+                        className="rounded-xl px-2.5 py-1.5 bg-brand/10 text-brand text-[11px] font-bold active:scale-95 transition-all"
+                      >
+                        {p.itemCount ?? 0} prendas · {p.bagCount} bolsa{p.bagCount !== 1 ? 's' : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -2457,6 +2522,7 @@ function PaymentsView({
   };
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [isDeletingTodayPayments, setIsDeletingTodayPayments] = useState(false);
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
   const [verifyingLivePaymentId, setVerifyingLivePaymentId] = useState<string | null>(null);
   const [procesandoLive, setProcesandoLive] = useState(false);
@@ -2521,6 +2587,24 @@ function PaymentsView({
       console.error("Error deleting payment:", error);
     } finally {
       setConfirmDelete(null);
+    }
+  };
+
+  const handleDeleteTodayPayments = async () => {
+    if (isDeletingTodayPayments) return;
+    const command = window.prompt('Escribe BORRAR PAGOS HOY para eliminar todos los pagos del día.');
+    if (command?.trim().toUpperCase() !== 'BORRAR PAGOS HOY') return;
+    if (!window.confirm('Se eliminarán todos los pagos de hoy y sus pedidos creados hoy. ¿Continuar?')) return;
+    setIsDeletingTodayPayments(true);
+    try {
+      const result = await adminApi.deleteTodayPayments();
+      onRefresh?.();
+      alert(`Pagos borrados: ${result.pagoIds?.length ?? 0}`);
+    } catch (error: any) {
+      console.error('Error borrando pagos de hoy:', error);
+      alert(error?.message ?? 'Error al borrar pagos de hoy');
+    } finally {
+      setIsDeletingTodayPayments(false);
     }
   };
 
@@ -2697,6 +2781,14 @@ function PaymentsView({
           <h2 className="text-2xl font-extrabold text-base-text tracking-tight uppercase">Pagos</h2>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={handleDeleteTodayPayments}
+            disabled={isDeletingTodayPayments}
+            className="w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-60"
+            title="Borrar pagos de hoy"
+          >
+            <RefreshCw size={18} className={isDeletingTodayPayments ? 'animate-spin' : ''} />
+          </button>
           <button
             onClick={() => setShowOnlyWithPhone(!showOnlyWithPhone)}
             className={cn(
@@ -4731,7 +4823,7 @@ const OrderItemCard: React.FC<OrderItemCardProps> = ({
   const getStatusText = () => {
     if (isPago) return 'PAGO';
     if (isProcesar) return 'PROCESAR';
-    if (isListo) return 'PREPARADO';
+    if (isListo) return 'LISTO';
     return 'ENTREGADO';
   };
 
@@ -5095,7 +5187,10 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       );
 
       await batch.commit();
-      await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+      const batchCustomerId = person.customerId || allPedidos.find((p: any) => p.id === pedidoId)?.customerId;
+      if (batchCustomerId) {
+        await syncLabelsForCustomer(batchCustomerId, updatedPedidos, customers);
+      }
     } catch (error) {
       console.error('Error updating status:', error);
     }
@@ -5113,6 +5208,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     if (bolsaCount === 0) { alert('Debes registrar al menos 1 bolsa antes de marcar el pedido como listo.'); setIsSaving(false); return; }
 
     setIsSaving(true);
+    const effectiveCustomerId = person.customerId || selectedPedido.customerId;
     if (isProcesar) {
       // PROCESAR → LISTO: regresar al perfil inmediatamente (actualización optimista)
       setView('detail');
@@ -5122,8 +5218,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         const updatedPedidos = allPedidos.map((p: any) =>
           p.id === selectedPedido.id ? { ...p, status: 'listo', bagCount: bolsaCount, itemCount: selectedPrenda } : p
         );
-        if (person.customerId) {
-          await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+        if (effectiveCustomerId) {
+          await syncLabelsForCustomer(effectiveCustomerId, updatedPedidos, customers);
         }
         loadData();
       } catch (error) {
@@ -5131,9 +5227,15 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         loadData();
       }
     } else if (isListo) {
-      // LISTO → guardar cambios de prendas/bolsas (edición)
+      // LISTO → guardar cambios y reasignar casillero si cambió la cantidad de bolsas
       try {
         await pedidosApi.update(selectedPedido.id, { bag_count: bolsaCount, item_count: selectedPrenda });
+        const updatedPedidos = allPedidos.map((p: any) =>
+          p.id === selectedPedido.id ? { ...p, bagCount: bolsaCount, itemCount: selectedPrenda } : p
+        );
+        if (effectiveCustomerId) {
+          await syncLabelsForCustomer(effectiveCustomerId, updatedPedidos, customers);
+        }
         setView('detail');
         setSelectedPedido(null);
         loadData();
@@ -5162,7 +5264,10 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       try { await releasePedidoLabel(confirmDeletePedido, 'DELETED'); } catch (e) { /* sin etiqueta asignada */ }
       await pedidosApi.delete(confirmDeletePedido);
       const updatedPedidos = allPedidos.filter(p => p.id !== confirmDeletePedido);
-      await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+      const deleteCustomerId = person.customerId || selectedPedido?.customerId;
+      if (deleteCustomerId) {
+        await syncLabelsForCustomer(deleteCustomerId, updatedPedidos, customers);
+      }
       await loadData();
       if (forceDetailView) { onClose(); } else { setView('detail'); setSelectedPedido(null); }
     } catch (error) {
@@ -5223,8 +5328,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       const updatedPedidos = allPedidos.map(p =>
         ids.includes(p.id) ? { ...p, status: 'entregado' } : p
       );
-      if (person.customerId) {
-        await syncLabelsForCustomer(person.customerId, updatedPedidos, customers);
+      const deliveryCustomerId = person.customerId || allPedidos.find((p: any) => ids.includes(p.id))?.customerId;
+      if (deliveryCustomerId) {
+        await syncLabelsForCustomer(deliveryCustomerId, updatedPedidos, customers);
       }
       await loadData();
       confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#2E7D32', '#E8F5E9', '#10B981'] });
