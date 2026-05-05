@@ -1,6 +1,6 @@
 # Prompts de IA
 
-Todos los prompts que se envían a Gemini viven acá. Si querés cambiar cómo
+Todos los prompts que se envían a OpenRouter viven acá. Si querés cambiar cómo
 se extrae un nombre, un monto o una categoría, es en este directorio — no en
 `server.ts`.
 

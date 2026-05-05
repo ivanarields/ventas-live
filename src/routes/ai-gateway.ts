@@ -14,6 +14,7 @@ import {
   buildReceiptQrPrompt,
 } from '../ai/prompts/index.js';
 import { findOrCreateProfile, depositEvidence } from '../services/identityService.js';
+import { isContextualNameMatch, isStrongNameMatch } from '../services/nameMatching.js';
 import {
   boliviaDateKey,
   ensurePanelLiveOrder,
@@ -30,33 +31,62 @@ import {
 export function createAiRouter(supabase: SupabaseClient, supabasePanel?: SupabaseClient) {
   const router = Router();
 
+  type AiCallResult = { text: string; model: string; latencyMs: number };
+  type OpenRouterKeySource = 'env' | 'db';
+  const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-4o-mini';
+
+  function extractProviderError(raw: string): string {
+    const text = raw?.trim();
+    if (!text) return '';
+    try {
+      const parsed = JSON.parse(text);
+      const message = parsed?.error?.message ?? parsed?.message ?? parsed?.error;
+      if (message) return String(message).replace(/\s+/g, ' ').slice(0, 350);
+    } catch { /* respuesta no JSON */ }
+    return text.replace(/\s+/g, ' ').slice(0, 350);
+  }
+
+  function formatCaughtAiError(err: any, provider: string, timeoutMs: number): string {
+    const name = String(err?.name ?? '');
+    const message = String(err?.message ?? err ?? 'Error desconocido');
+    const lower = `${name} ${message}`.toLowerCase();
+    if (lower.includes('timeout') || lower.includes('abort')) {
+      return `${provider} timeout (${Math.round(timeoutMs / 1000)}s)`;
+    }
+    return `${provider}: ${message}`;
+  }
+
+  function maskKey(k: string | null | undefined) {
+    return k ? `••••${k.slice(-4)}` : '';
+  }
+
+  function isOpenRouterKey(k: string | null | undefined): k is string {
+    const value = k?.trim() ?? '';
+    return value.length > 20 && !value.startsWith('AIza');
+  }
+
+  function normalizeOpenRouterModel(raw: unknown): string {
+    const value = String(raw ?? '').trim();
+    if (!value || !value.includes('/')) return DEFAULT_OPENROUTER_MODEL;
+    return value;
+  }
+
   // ── Helpers internos ────────────────────────────────────────────────────────
 
-  async function getAiKeys(userId?: string): Promise<string[]> {
-    const envKey = process.env.GEMINI_API_KEY ?? '';
-    if (!userId) return [envKey].filter(Boolean);
+  async function getOpenRouterKey(userId?: string): Promise<{ key: string; source: OpenRouterKeySource } | null> {
+    const envKey = process.env.OPENROUTER_API_KEY?.trim() ?? '';
     try {
-      const { data } = await supabase
-        .from('ai_config')
-        .select('primary_key_encrypted, fallback_key_encrypted, fallback2_key_encrypted, key3_encrypted, key4_encrypted, key5_encrypted')
-        .eq('user_id', userId)
-        .single();
-      if (data) {
-        // La key del .env siempre se incluye al final como red de seguridad.
-        // Si las keys de la DB están caídas o inválidas, el sistema cae en la del .env.
-        const all = [
-          data.primary_key_encrypted,
-          data.fallback_key_encrypted,
-          data.fallback2_key_encrypted,
-          data.key3_encrypted,
-          data.key4_encrypted,
-          data.key5_encrypted,
-          envKey,
-        ].filter(Boolean) as string[];
-        return [...new Set(all)]; // deduplicar si .env coincide con alguna DB key
+      if (userId) {
+        const { data } = await supabase
+          .from('ai_config')
+          .select('primary_key_encrypted')
+          .eq('user_id', userId)
+          .single();
+        const dbKey = data?.primary_key_encrypted?.trim();
+        if (isOpenRouterKey(dbKey)) return { key: dbKey, source: 'db' };
       }
     } catch { /* tabla no existe → usar .env */ }
-    return [envKey].filter(Boolean);
+    return isOpenRouterKey(envKey) ? { key: envKey, source: 'env' } : null;
   }
 
   // Prompt SIMPLE — directo, deja razonar al modelo con pocos ejemplos.
@@ -212,9 +242,35 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         .select('features')
         .eq('user_id', userId)
         .single();
-      if (data?.features?.[feature]) return data.features[feature];
+      if (data?.features?.[feature]) {
+        return {
+          enabled: data.features[feature].enabled !== false,
+          model: normalizeOpenRouterModel(data.features[feature].model),
+        };
+      }
     } catch { /* defaults */ }
-    return { enabled: true, model: 'gemini-2.5-flash-lite' };
+    return { enabled: true, model: DEFAULT_OPENROUTER_MODEL };
+  }
+
+  function defaultAiFeatures() {
+    return {
+      product_vision: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
+      chat_summary: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
+      notif_parser: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
+    };
+  }
+
+  function normalizeAiFeatures(raw: any) {
+    const defaults: Record<string, { enabled: boolean; model: string }> = defaultAiFeatures();
+    for (const key of Object.keys(defaults)) {
+      if (raw?.[key]) {
+        defaults[key] = {
+          enabled: raw[key].enabled !== false,
+          model: normalizeOpenRouterModel(raw[key].model),
+        };
+      }
+    }
+    return defaults;
   }
 
   async function logAiUsage(entry: {
@@ -237,136 +293,29 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
     } catch (e: any) { console.error('[ai-gateway] Error guardando log:', e?.message); }
   }
 
-  // ── Sistema de rotación Round-Robin inteligente de API Keys ─────────────────
-  //
-  // En vez de usar Key1 hasta que falla → Key2 → Key3 (sistema secuencial),
-  // distribuimos cada llamada a la key MENOS usada recientemente.
-  //
-  // Con 5 keys × 15 RPM = 75 llamadas/minuto sin que ninguna key colapse.
-  // Cuando una key da 429 → cooldown 61s → el sistema la salta automáticamente.
-  // Estado en memoria (vive mientras corra el servidor):
-
-  interface KeyState { lastUsedAt: number; cooldownUntil: number; }
-  const keyRotation = new Map<string, KeyState>();
-
-  function getKeyState(key: string): KeyState {
-    if (!keyRotation.has(key)) keyRotation.set(key, { lastUsedAt: 0, cooldownUntil: 0 });
-    return keyRotation.get(key)!;
-  }
-
-  // Selecciona la key disponible menos usada recientemente (round-robin real).
-  function selectKey(keys: string[]): string | null {
-    const now = Date.now();
-    const available = keys.filter(k => now >= getKeyState(k).cooldownUntil);
-    if (available.length === 0) return null;
-    available.sort((a, b) => getKeyState(a).lastUsedAt - getKeyState(b).lastUsedAt);
-    return available[0];
-  }
-
-  // Tiempo en ms hasta que la primera key salga de cooldown.
-  function msUntilNextKey(keys: string[]): number {
-    const now = Date.now();
-    return Math.min(...keys.map(k => Math.max(0, getKeyState(k).cooldownUntil - now)));
-  }
-
-  async function callGemini(params: {
+  async function callAi(params: {
     userId: string; feature: string; prompt: string;
     imageParts?: { inlineData: { mimeType: string; data: string } }[];
     maxTokens?: number; temperature?: number; jsonMode?: boolean;
-  }): Promise<{ text: string; model: string; latencyMs: number } | null> {
+  }): Promise<AiCallResult | null> {
     const config = await getAiFeatureConfig(params.userId, params.feature);
     if (!config.enabled) return null;
-
-    const keys = await getAiKeys(params.userId);
-    const model = config.model || 'gemini-2.5-flash-lite';
-    const MAX_ATTEMPTS = Math.max(1, keys.length);
-
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const apiKey = selectKey(keys);
-
-      if (!apiKey) {
-        // Todas en cooldown — esperar al más próximo reset (máx 65s)
-        console.warn(`[ai-gateway] Todas las keys en cooldown para ${params.feature}; no se espera dentro del request.`);
-        break;
-      }
-
-      // Marcar ANTES de llamar → otras llamadas concurrentes eligen otra key
-      getKeyState(apiKey).lastUsedAt = Date.now();
-
-      const start = Date.now();
-      try {
-        const parts: any[] = [{ text: params.prompt }];
-        if (params.imageParts) parts.push(...params.imageParts);
-
-        const body: any = {
-          contents: [{ parts }],
-          generationConfig: {
-            temperature: params.temperature ?? 0.2,
-            maxOutputTokens: params.maxTokens ?? 400,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        };
-        if (params.jsonMode) body.generationConfig.responseMimeType = 'application/json';
-
-        const resp = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) }
-        );
-        const latencyMs = Date.now() - start;
-
-        if (resp.status === 429) {
-          getKeyState(apiKey).cooldownUntil = Date.now() + 61000;
-          const disponibles = keys.filter(k => Date.now() >= getKeyState(k).cooldownUntil).length;
-          console.warn(`[ai-gateway] 429 key ...${apiKey.slice(-4)} → cooldown 61s. Keys disponibles ahora: ${disponibles}/${keys.length}`);
-          await logAiUsage({ userId: params.userId, feature: params.feature, model, latencyMs, success: false, errorMessage: 'Rate limit 429' });
-          continue;
-        }
-
-        if (!resp.ok) {
-          const errText = await resp.text();
-          console.error(`[ai-gateway] HTTP ${resp.status}:`, errText.slice(0, 200));
-          await logAiUsage({ userId: params.userId, feature: params.feature, model, latencyMs, success: false, errorMessage: `HTTP ${resp.status}` });
-          break;
-        }
-
-        const data = await resp.json();
-        // Gemini 2.5 puede devolver thinking tokens (thought:true) antes de la respuesta real.
-        // Ignoramos los tokens de pensamiento y tomamos el primer texto real.
-        const allParts: any[] = data.candidates?.[0]?.content?.parts ?? [];
-        const textResp = allParts.find((p: any) => !p.thought)?.text ?? allParts[0]?.text ?? '';
-        await logAiUsage({
-          userId: params.userId, feature: params.feature, model, latencyMs, success: true,
-          inputTokens: data.usageMetadata?.promptTokenCount,
-          outputTokens: data.usageMetadata?.candidatesTokenCount,
-        });
-        return { text: textResp, model, latencyMs };
-
-      } catch (err: any) {
-        const latencyMs = Date.now() - start;
-        await logAiUsage({ userId: params.userId, feature: params.feature, model, latencyMs, success: false, errorMessage: err?.message });
-        continue;
-      }
+    const keyConfig = await getOpenRouterKey(params.userId);
+    const model = normalizeOpenRouterModel(config.model);
+    if (!keyConfig) {
+      const msg = 'OpenRouter no configurado: falta OPENROUTER_API_KEY o una key valida en Configuracion > IA';
+      await logAiUsage({ userId: params.userId, feature: params.feature, model: `openrouter:${model}`, latencyMs: 0, success: false, errorMessage: msg });
+      throw new Error(msg);
     }
 
-    console.error(`[ai-gateway] Sin keys disponibles para ${params.feature}.`);
-    return callOpenRouter(params, model);
-  }
-
-  async function callOpenRouter(params: {
-    userId: string; feature: string; prompt: string;
-    imageParts?: { inlineData: { mimeType: string; data: string } }[];
-    maxTokens?: number; temperature?: number; jsonMode?: boolean;
-  }, geminiModel: string): Promise<{ text: string; model: string; latencyMs: number } | null> {
-    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-    if (!apiKey) return null;
-
-    const model = (process.env.OPENROUTER_MODEL?.trim())
-      || (geminiModel.startsWith('gemini-') ? `google/${geminiModel}` : geminiModel);
     const start = Date.now();
 
     try {
       const content: any[] = [{ type: 'text', text: params.prompt }];
       for (const part of params.imageParts ?? []) {
+        if (!part.inlineData.mimeType.startsWith('image/')) {
+          throw new Error(`OpenRouter no soporta ${part.inlineData.mimeType} en este endpoint`);
+        }
         content.push({
           type: 'image_url',
           image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` },
@@ -384,7 +333,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${keyConfig.key}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': process.env.APP_URL || 'https://ventas-live.vercel.app',
           'X-Title': 'Ventas Live',
@@ -396,16 +345,18 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 
       if (!resp.ok) {
         const errText = await resp.text();
-        console.error(`[openrouter] HTTP ${resp.status}:`, errText.slice(0, 200));
+        const details = extractProviderError(errText);
+        const msg = `OpenRouter HTTP ${resp.status}${details ? `: ${details}` : ''}`;
+        console.error(`[openrouter] ${msg}`);
         await logAiUsage({
           userId: params.userId,
           feature: params.feature,
           model: `openrouter:${model}`,
           latencyMs,
           success: false,
-          errorMessage: `HTTP ${resp.status}`,
+          errorMessage: msg,
         });
-        return null;
+        throw new Error(msg);
       }
 
       const data = await resp.json();
@@ -425,18 +376,20 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         errorMessage: textResp ? null : 'Respuesta vacia',
       });
 
-      return textResp ? { text: textResp, model: `openrouter:${model}`, latencyMs } : null;
+      if (!textResp) throw new Error('OpenRouter sin texto en la respuesta');
+      return { text: textResp, model: `openrouter:${model}`, latencyMs };
     } catch (err: any) {
       const latencyMs = Date.now() - start;
+      const msg = formatCaughtAiError(err, 'OpenRouter', 15000);
       await logAiUsage({
         userId: params.userId,
         feature: params.feature,
         model: `openrouter:${model}`,
         latencyMs,
         success: false,
-        errorMessage: err?.message,
+        errorMessage: msg,
       });
-      return null;
+      throw new Error(msg);
     }
   }
 
@@ -488,7 +441,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       }
       if (imageParts.length === 0) return res.status(422).json({ ok: false, error: 'No se pudieron cargar las imágenes' });
 
-      const result = await callGemini({ userId, feature: 'product_vision', prompt: buildProductCatalogPrompt(), imageParts, maxTokens: 400, temperature: 0.2, jsonMode: true });
+      const result = await callAi({ userId, feature: 'product_vision', prompt: buildProductCatalogPrompt(), imageParts, maxTokens: 400, temperature: 0.2, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta de la IA' });
 
       const m = result.text.match(/\{[\s\S]*\}/);
@@ -519,7 +472,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 
       if (imageParts.length === 0) return res.status(422).json({ ok: false, error: 'No se pudieron cargar las imágenes' });
 
-      const result = await callGemini({ userId, feature: 'product_vision', prompt: buildImageClassifierPrompt(), imageParts, maxTokens: 300, temperature: 0, jsonMode: true });
+      const result = await callAi({ userId, feature: 'product_vision', prompt: buildImageClassifierPrompt(), imageParts, maxTokens: 300, temperature: 0, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta' });
       const m = result.text.match(/\{[\s\S]*\}/);
       if (!m) return res.status(422).json({ ok: false, error: 'JSON inválido' });
@@ -546,7 +499,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       } catch { return res.status(422).json({ ok: false, error: 'Error descargando imagen' }); }
 
       const ownerName = await getOwnerName(userId);
-      const result = await callGemini({ userId, feature: 'product_vision', prompt: buildReceiptQrPrompt(ownerName), imageParts: [imagePart], maxTokens: 300, temperature: 0, jsonMode: true });
+      const result = await callAi({ userId, feature: 'product_vision', prompt: buildReceiptQrPrompt(ownerName), imageParts: [imagePart], maxTokens: 300, temperature: 0, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta de la IA' });
       const m = result.text.match(/\{[\s\S]*\}/);
       if (!m) return res.status(422).json({ ok: false, error: 'JSON inválido' });
@@ -575,7 +528,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       if (!imagePart) return res.status(400).json({ ok: false, error: 'imageData inválido' });
 
       const ownerName = await getOwnerName(userId);
-      const result = await callGemini({ userId, feature: 'product_vision', prompt: buildReceiptQrPrompt(ownerName), imageParts: [imagePart], maxTokens: 300, temperature: 0, jsonMode: true });
+      const result = await callAi({ userId, feature: 'product_vision', prompt: buildReceiptQrPrompt(ownerName), imageParts: [imagePart], maxTokens: 300, temperature: 0, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta' });
       const m = result.text.match(/\{[\s\S]*\}/);
       if (!m) return res.status(422).json({ ok: false, error: 'JSON inválido' });
@@ -593,7 +546,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       const imagePart = dataUriToImagePart(req.body.imageData ?? '');
       if (!imagePart) return res.status(400).json({ ok: false, error: 'imageData inválido' });
 
-      const result = await callGemini({ userId, feature: 'product_vision', prompt: buildImageClassifierPrompt(), imageParts: [imagePart], maxTokens: 150, temperature: 0, jsonMode: true });
+      const result = await callAi({ userId, feature: 'product_vision', prompt: buildImageClassifierPrompt(), imageParts: [imagePart], maxTokens: 150, temperature: 0, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta' });
       const m = result.text.match(/\{[\s\S]*\}/);
       if (!m) return res.status(422).json({ ok: false, error: 'JSON inválido' });
@@ -664,47 +617,53 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
 
       const { data, error } = await supabase.from('ai_config').select('*').eq('user_id', userId).single();
-      const maskKey = (k: string | null) => k ? '••••' + k.slice(-4) : '';
+      const envKey = process.env.OPENROUTER_API_KEY?.trim() ?? '';
+      const envActive = isOpenRouterKey(envKey);
 
       if (error || !data) {
         return res.json({
-          keys: [
-            { slot: 1, masked: process.env.GEMINI_API_KEY ? maskKey(process.env.GEMINI_API_KEY) : '', active: !!process.env.GEMINI_API_KEY },
-            { slot: 2, masked: '', active: false },
-            { slot: 3, masked: '', active: false },
-            { slot: 4, masked: '', active: false },
-            { slot: 5, masked: '', active: false },
-          ],
-          primary_key: process.env.GEMINI_API_KEY ? maskKey(process.env.GEMINI_API_KEY) : '',
-          has_primary: !!process.env.GEMINI_API_KEY,
+          provider: 'openrouter',
+          openrouter: {
+            masked: envActive ? maskKey(envKey) : '',
+            active: envActive,
+            model: DEFAULT_OPENROUTER_MODEL,
+            source: envActive ? 'env' : 'none',
+          },
+          keys: [{ slot: 1, masked: envActive ? maskKey(envKey) : '', active: envActive }],
+          primary_key: envActive ? maskKey(envKey) : '',
+          has_primary: envActive,
           fallback_key: '', has_fallback: false,
           owner_name: '',
-          features: {
-            product_vision: { enabled: true, model: 'gemini-2.5-flash-lite' },
-            chat_summary: { enabled: true, model: 'gemini-2.5-flash-lite' },
-            notif_parser: { enabled: true, model: 'gemini-2.5-flash-lite' },
-          },
-          daily_limit: 1500,
-          source: 'env',
+          features: defaultAiFeatures(),
+          daily_limit: 0,
+          source: envActive ? 'env' : 'none',
         });
       }
 
+      const dbKey = data.primary_key_encrypted?.trim();
+      const dbActive = isOpenRouterKey(dbKey);
+      const activeKey = dbActive ? dbKey : envActive ? envKey : '';
+      const keySource = dbActive ? 'db' : envActive ? 'env' : 'none';
+      const features = normalizeAiFeatures(data.features);
+      const model = normalizeOpenRouterModel(Object.values(features)[0]?.model);
+
       res.json({
-        keys: [
-          { slot: 1, masked: maskKey(data.primary_key_encrypted), active: !!data.primary_key_encrypted },
-          { slot: 2, masked: maskKey(data.fallback_key_encrypted), active: !!data.fallback_key_encrypted },
-          { slot: 3, masked: maskKey(data.fallback2_key_encrypted), active: !!data.fallback2_key_encrypted },
-          { slot: 4, masked: maskKey(data.key3_encrypted), active: !!data.key3_encrypted },
-          { slot: 5, masked: maskKey(data.key4_encrypted), active: !!data.key4_encrypted },
-        ],
-        primary_key: maskKey(data.primary_key_encrypted),
-        has_primary: !!data.primary_key_encrypted,
-        fallback_key: maskKey(data.fallback_key_encrypted),
-        has_fallback: !!data.fallback_key_encrypted,
+        provider: 'openrouter',
+        openrouter: {
+          masked: activeKey ? maskKey(activeKey) : '',
+          active: !!activeKey,
+          model,
+          source: keySource,
+        },
+        keys: [{ slot: 1, masked: activeKey ? maskKey(activeKey) : '', active: !!activeKey }],
+        primary_key: activeKey ? maskKey(activeKey) : '',
+        has_primary: !!activeKey,
+        fallback_key: '',
+        has_fallback: false,
         owner_name: data.owner_name ?? '',
-        features: data.features,
-        daily_limit: data.daily_limit ?? 1500,
-        source: 'db',
+        features,
+        daily_limit: 0,
+        source: keySource,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message });
@@ -717,21 +676,28 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       const userId = req.headers['x-user-id'] as string;
       if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
 
-      const { keys, primaryKey, fallbackKey, fallback2Key, key3, key4, key5, features, ownerName } = req.body;
+      const { keys, primaryKey, openRouterKey, openRouterModel, features, ownerName } = req.body;
       const upsertData: any = { user_id: userId, updated_at: new Date() };
 
-      if (Array.isArray(keys)) {
-        const cols = ['primary_key_encrypted', 'fallback_key_encrypted', 'fallback2_key_encrypted', 'key3_encrypted', 'key4_encrypted', 'key5_encrypted'];
-        keys.forEach((k: string | undefined, i: number) => { if (k !== undefined && cols[i]) upsertData[cols[i]] = k || null; });
-      } else {
-        if (primaryKey !== undefined) upsertData.primary_key_encrypted = primaryKey;
-        if (fallbackKey !== undefined) upsertData.fallback_key_encrypted = fallbackKey;
-        if (fallback2Key !== undefined) upsertData.fallback2_key_encrypted = fallback2Key;
-        if (key3 !== undefined) upsertData.key3_encrypted = key3;
-        if (key4 !== undefined) upsertData.key4_encrypted = key4;
-        if (key5 !== undefined) upsertData.key5_encrypted = key5;
+      const keyCandidate = openRouterKey ?? primaryKey ?? (Array.isArray(keys) ? keys[0] : undefined);
+      if (keyCandidate !== undefined) {
+        const keyValue = String(keyCandidate ?? '').trim();
+        if (keyValue && !isOpenRouterKey(keyValue)) return res.status(400).json({ error: 'La key no parece ser de OpenRouter' });
+        upsertData.primary_key_encrypted = keyValue || null;
+        upsertData.fallback_key_encrypted = null;
+        upsertData.fallback2_key_encrypted = null;
+        upsertData.key3_encrypted = null;
+        upsertData.key4_encrypted = null;
+        upsertData.key5_encrypted = null;
       }
-      if (features) upsertData.features = features;
+      if (features || openRouterModel) {
+        const normalized = normalizeAiFeatures(features);
+        if (openRouterModel) {
+          const model = normalizeOpenRouterModel(openRouterModel);
+          for (const key of Object.keys(normalized)) normalized[key].model = model;
+        }
+        upsertData.features = normalized;
+      }
       if (ownerName !== undefined) upsertData.owner_name = ownerName || null;
 
       const { data, error } = await supabase.from('ai_config').upsert(upsertData, { onConflict: 'user_id' }).select().single();
@@ -742,32 +708,41 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
     }
   });
 
-  // POST /api/ai/test-key  (testear que una key es válida)
+  // POST /api/ai/test-key  (testear que una key de OpenRouter es valida)
   router.post('/test-key', async (req: Request, res: Response) => {
     try {
-      const { apiKey } = req.body;
+      const { apiKey, model: rawModel } = req.body;
       if (!apiKey) return res.status(400).json({ error: 'apiKey requerida' });
+      if (!isOpenRouterKey(apiKey)) return res.status(400).json({ error: 'La key no parece ser de OpenRouter' });
 
       const start = Date.now();
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: 'Responde solo: OK' }] }], generationConfig: { maxOutputTokens: 5 } }),
-          signal: AbortSignal.timeout(10000),
-        }
-      );
+      const model = normalizeOpenRouterModel(rawModel);
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${String(apiKey).trim()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': process.env.APP_URL || 'https://ventas-live.vercel.app',
+          'X-Title': 'Ventas Live',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'Responde solo: OK' }],
+          max_tokens: 5,
+          temperature: 0,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
       const latency = Date.now() - start;
 
       if (resp.ok) {
-        res.json({ ok: true, latency, message: `✅ Key válida (${latency}ms)` });
+        res.json({ ok: true, latency, message: `Key OpenRouter valida (${latency}ms)` });
       } else {
-        const err = await resp.json();
-        res.json({ ok: false, latency, message: `❌ ${err.error?.message || resp.status}` });
+        const errText = await resp.text().catch(() => '');
+        res.json({ ok: false, latency, message: extractProviderError(errText) || `HTTP ${resp.status}` });
       }
     } catch (err: any) {
-      res.json({ ok: false, message: `❌ ${err?.message}` });
+      res.json({ ok: false, message: err?.message ?? 'Error de conexion' });
     }
   });
 
@@ -782,7 +757,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 
       const { data, error } = await supabase
         .from('ai_usage_log')
-        .select('feature, success, latency_ms, created_at, error_message, input_tokens, output_tokens')
+        .select('feature, model, success, latency_ms, created_at, error_message, input_tokens, output_tokens')
         .eq('user_id', userId)
         .gte('created_at', since)
         .order('created_at', { ascending: false })
@@ -835,6 +810,18 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       const textos: string[]    = [];
       const fotoItems: Array<{ id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null }> = [];
       const audioUrls: string[] = [];
+      const aiErrors = new Set<string>();
+
+      async function safeCallAi(params: Parameters<typeof callAi>[0], label: string) {
+        try {
+          return await callAi(params);
+        } catch (err: any) {
+          const message = String(err?.message ?? err ?? 'Error desconocido');
+          aiErrors.add(`${label}: ${message}`);
+          console.warn(`[summarize] ${label}: ${message}`);
+          return null;
+        }
+      }
 
       for (const m of mensajes) {
         if (m.content?.trim()) textos.push(m.content.trim());
@@ -882,12 +869,12 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         const media = await fetchBase64(url);
         if (!media) continue;
         const mime = url.includes('.mp3') ? 'audio/mpeg' : 'audio/ogg';
-        const result = await callGemini({
+        const result = await safeCallAi({
           userId, feature: 'chat_summary',
           prompt: 'Transcribe exactamente lo que dice este audio en español. Solo el texto, sin explicaciones.',
           imageParts: [{ inlineData: { mimeType: mime, data: media.b64 } }],
           maxTokens: 300, temperature: 0,
-        });
+        }, 'transcripcion de audio');
         if (result?.text) transcripciones.push(result.text.trim());
       }
 
@@ -937,11 +924,11 @@ Responde SOLO con una línea, sin explicaciones.`;
         const mime = media.mime || item.mediaType || (item.url.endsWith('.png') ? 'image/png' : item.url.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
         const imagePart = { inlineData: { mimeType: mime, data: media.b64 } };
 
-        const classResult = await callGemini({
+        const classResult = await safeCallAi({
           userId, feature: 'chat_summary',
           prompt: CLASIFICADOR_PROMPT,
           imageParts: [imagePart], maxTokens: 200, temperature: 0,
-        });
+        }, 'clasificacion de imagen');
         const desc = classResult?.text?.trim() ?? '';
         if (desc && options.addDescription !== false) descripciones.push(desc);
         const upperDesc = desc.toUpperCase();
@@ -956,11 +943,11 @@ Responde SOLO con una línea, sin explicaciones.`;
 
         let extraido: { cliente: string | null; monto: string | null; hora: string | null } | null = null;
         if (esComprobante) {
-          const extractResult = await callGemini({
+          const extractResult = await safeCallAi({
             userId, feature: 'chat_summary',
             prompt: comprobantePrompt,
             imageParts: [imagePart], maxTokens: 250, temperature: 0, jsonMode: true,
-          });
+          }, 'extraccion de comprobante');
           if (extractResult?.text) {
             const match = extractResult.text.match(/\{[\s\S]*\}/);
             if (match) {
@@ -1026,11 +1013,11 @@ Reglas:
 Genera este JSON exacto (sin backticks, sin texto antes o despues):
 {"pedido":"resumen operativo de la conversacion","cantidad":"cantidad de prendas elegidas o no especificado","talla":"no especificada","pago":"cantidad y monto de pagos/comprobantes o no especificado","entrega":"cuando o donde o no especificado","comprobante":${comprobanteDesc ? JSON.stringify(comprobanteDesc) : '"Si hay un comprobante de pago en las fotos, escribe: nombre del pagador - monto Bs - banco. Si no hay comprobante, escribe null"'},"notas":"pendientes de verificacion u observaciones o null"}`;
 
-      const finalResult = await callGemini({
+      const finalResult = await safeCallAi({
         userId, feature: 'chat_summary',
         prompt: promptFinal,
         maxTokens: 400, temperature: 0, jsonMode: true,
-      });
+      }, 'resumen final');
 
       let resumen: Record<string, string | null> = {
         pedido: textos.length > 0 ? textos.slice(-3).join(' ') : 'Conversacion recibida',
@@ -1084,11 +1071,36 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
           const waPhone = panelPhone.replace(/\D/g, '');
           try {
             // fn_link_customer_wa busca por nombre exacto o fuzzy (>0.6) y escribe wa_number
-            const { data: customerId } = await supabase.rpc('fn_link_customer_wa', {
+            const { data: linkedCustomerId } = await supabase.rpc('fn_link_customer_wa', {
               p_canonical_name: nameNorm,
               p_wa_number: waPhone,
               p_user_id: userId,
             });
+            let customerId = linkedCustomerId;
+
+            if (!customerId) {
+              const { data: possibleCustomers } = await supabase
+                .from('customers')
+                .select('id, full_name, canonical_name, normalized_name, phone, wa_number')
+                .eq('user_id', userId)
+                .eq('is_active', true)
+                .limit(300);
+
+              const nameMatch = possibleCustomers?.filter((c: any) =>
+                isStrongNameMatch(c.canonical_name || c.full_name || c.normalized_name, nameNorm)
+              ) ?? [];
+
+              if (nameMatch.length === 1) {
+                customerId = nameMatch[0].id;
+                await supabase.from('customers').update({
+                  wa_number: waPhone,
+                  phone: nameMatch[0].phone || waPhone,
+                  wa_linked_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                }).eq('id', customerId).eq('user_id', userId);
+                console.log(`[summarize] Cliente existente vinculado por nombre flexible: "${nombreCliente}" id=${customerId}`);
+              }
+            }
 
             if (!customerId) {
               // Auto-aprendizaje: cliente nuevo que llega solo por WhatsApp
@@ -1117,7 +1129,7 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
         // 2. Verificar si existe pago de MacroDroid con monto similar en las últimas 24h
         if (montoNum && montoNum > 0) {
           const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-          const { data: pagosMatch } = await supabase
+          const { data: pagosCandidates } = await supabase
             .from('pagos')
             .select('id, nombre, pago, date')
             .eq('user_id', userId)
@@ -1125,6 +1137,10 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
             .gte('date', since24h)
             .gte('pago', montoNum * 0.97)
             .lte('pago', montoNum * 1.03);
+
+          const pagosMatch = (pagosCandidates ?? []).filter((p: any) =>
+            isContextualNameMatch(p.nombre, nombreCliente)
+          );
 
           estadoPago = pagosMatch?.length ? 'pagado_verificado' : 'solo_comprobante';
         } else {
@@ -1167,7 +1183,7 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
             const duplicate = duplicates?.find(p => {
               const pNorm = (p.display_name ?? '').toUpperCase()
                 .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z\s]/g, '').replace(/\s+/g, ' ').trim();
-              return pNorm === nameNorm && pNorm.length > 0;
+              return pNorm.length > 0 && isStrongNameMatch(pNorm, nameNorm);
             });
 
             if (duplicate) {
@@ -1398,6 +1414,8 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
         pago_alerta: pagoAlerta,
         tarjeta_venta: tarjetaVenta,
         pedidos_venta_live: pedidosVentaLive,
+        ai_warning: aiErrors.size > 0 ? [...aiErrors][0] : null,
+        ai_errors: [...aiErrors],
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message });

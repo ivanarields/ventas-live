@@ -167,6 +167,7 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pagoAlerta, setPagoAlerta] = useState<PagoAlerta | null>(null);
   const [estadoPago, setEstadoPago] = useState<string | null>(cliente.estado ?? null);
+  const [resumenError, setResumenError] = useState<string | null>(null);
   const [pedidosLive, setPedidosLive] = useState<PedidoVentaLive[]>([]);
   const [pedidosLiveCargando, setPedidosLiveCargando] = useState(false);
   const [pagoAccionId, setPagoAccionId] = useState<string | null>(null);
@@ -217,6 +218,7 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
 
   const generarResumen = async () => {
     setGenerando(true);
+    setResumenError(null);
     try {
       const userId = getUserId();
       const r = await fetch(SUMM_URL, {
@@ -228,18 +230,24 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
         },
         body: JSON.stringify({ clienteId: cliente.id }),
       });
-      const j = await r.json();
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
       if (j.resumen) {
         setResumen(j.resumen);
         setResumeRaw(JSON.stringify(j.resumen));
       }
       if (j.estado_pago) setEstadoPago(j.estado_pago);
       if (j.pago_alerta) setPagoAlerta(j.pago_alerta);
+      if (j.ai_warning) setResumenError(j.ai_warning);
       if (Array.isArray(j.pedidos_venta_live) && j.pedidos_venta_live.length > 0) {
         cargarPedidosLive();
       }
-      if (j.error) console.error('[summarize]', j.error);
-    } catch (e) { console.error(e); }
+      if (j.error) setResumenError(j.error);
+    } catch (e: any) {
+      const message = e?.message || 'Error desconocido al analizar la conversacion';
+      setResumenError(message);
+      console.error('[summarize]', e);
+    }
     setGenerando(false);
   };
 
@@ -342,6 +350,16 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
         </div>
       )}
 
+      {resumenError && (
+        <div className="mx-4 mt-4 bg-red-50 border border-red-200 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+            <p className="text-sm font-black text-red-700">La IA no pudo procesar completo</p>
+          </div>
+          <p className="text-xs text-red-600 leading-relaxed">{resumenError}</p>
+        </div>
+      )}
+
       <div className="mx-4 mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -363,6 +381,7 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
             <div className="space-y-3">
               {pedidosLive.map(order => {
                 const pagos = order.pagos ?? [];
+                const pagosVisibles = pagos.filter(p => p.estado !== 'rechazado' && p.estado !== 'posible_duplicado');
                 const verificados = pagos.filter(p => p.estado === 'verificado_macrodroid' || p.estado === 'verificado_manual').length;
                 const pendientes = pagos.filter(p => p.estado === 'pendiente_whatsapp' || p.estado === 'revision_manual').length;
                 return (
@@ -371,7 +390,7 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest text-[#ff2d78]">{fechaLive(order.fecha_pedido)}</p>
                         <p className="text-xs text-slate-500 font-bold mt-0.5">
-                          {pagos.length} comprobante{pagos.length !== 1 ? 's' : ''} - {verificados} verificado{verificados !== 1 ? 's' : ''} - {pendientes} pendiente{pendientes !== 1 ? 's' : ''}
+                          {pagosVisibles.length} comprobante{pagosVisibles.length !== 1 ? 's' : ''} - {verificados} verificado{verificados !== 1 ? 's' : ''} - {pendientes} pendiente{pendientes !== 1 ? 's' : ''}
                         </p>
                         {order.main_pedido_id && (
                           <p className="text-[10px] text-green-700 font-black mt-1">Pedido principal en procesar</p>
@@ -387,7 +406,7 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
                     </div>
 
                     <div className="space-y-2">
-                      {pagos.map(pago => (
+                      {pagosVisibles.map(pago => (
                         <div key={pago.id} className="bg-white rounded-xl border border-slate-100 p-2.5">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">

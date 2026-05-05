@@ -39,6 +39,30 @@ function parseMonto(raw: unknown): number | null {
   return parseLiveMonto(raw);
 }
 
+function whatsappMediaPath(raw: unknown): string | null {
+  if (!raw) return null;
+  const value = String(raw);
+  const marker = '/object/public/whatsapp-media/';
+  const markerIndex = value.indexOf(marker);
+  if (markerIndex >= 0) return value.slice(markerIndex + marker.length).split('?')[0] || null;
+  if (!value.startsWith('http') && value.includes('/')) return value.replace(/^whatsapp-media\//, '');
+  return null;
+}
+
+async function deleteWhatsappMediaFiles(panelDb: SupabaseClient, urls: unknown[]) {
+  const paths = [...new Set(urls.map(whatsappMediaPath).filter(Boolean) as string[])];
+  if (paths.length === 0) return 0;
+
+  let deleted = 0;
+  for (let i = 0; i < paths.length; i += 100) {
+    const chunk = paths.slice(i, i + 100);
+    const { data, error } = await panelDb.storage.from('whatsapp-media').remove(chunk);
+    if (error) throw error;
+    deleted += data?.length ?? chunk.length;
+  }
+  return deleted;
+}
+
 function normalizeEstado(raw: unknown, fallback: EstadoTarjeta): EstadoTarjeta {
   return ESTADOS_TARJETA.includes(raw as EstadoTarjeta) ? raw as EstadoTarjeta : fallback;
 }
@@ -518,14 +542,90 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
       if (clientesError) throw clientesError;
 
       const clienteIds = (clientes ?? []).map((c: any) => c.id).filter(Boolean);
+      const { data: pedidosByPhone, error: pedidosPhoneError } = await supabasePanel
+        .from('pedidos_venta_live')
+        .select('id')
+        .eq('phone', phone);
+      if (pedidosPhoneError && pedidosPhoneError.code !== '42P01') throw pedidosPhoneError;
+
+      let pedidosByCliente: any[] = [];
+      if (clienteIds.length > 0) {
+        const { data, error } = await supabasePanel
+          .from('pedidos_venta_live')
+          .select('id')
+          .in('cliente_id', clienteIds);
+        if (error && error.code !== '42P01') throw error;
+        pedidosByCliente = data ?? [];
+      }
+
+      const pedidoIds = [...new Set([...(pedidosByPhone ?? []), ...pedidosByCliente].map((p: any) => p.id).filter(Boolean))];
+
+      const mediaUrls: unknown[] = [];
+      if (clienteIds.length > 0) {
+        const { data: mensajesMedia, error: mensajesMediaError } = await supabasePanel
+          .from('panel_mensajes')
+          .select('media_url')
+          .in('cliente_id', clienteIds)
+          .not('media_url', 'is', null);
+        if (mensajesMediaError) throw mensajesMediaError;
+        mediaUrls.push(...(mensajesMedia ?? []).map((m: any) => m.media_url));
+      }
+      if (pedidoIds.length > 0) {
+        const [{ data: pagosMedia, error: pagosMediaError }, { data: evidenciasMedia, error: evidenciasMediaError }] = await Promise.all([
+          supabasePanel
+            .from('pagos_venta_live')
+            .select('comprobante_media_url')
+            .in('pedido_live_id', pedidoIds)
+            .not('comprobante_media_url', 'is', null),
+          supabasePanel
+            .from('evidencias_venta_live')
+            .select('media_url')
+            .in('pedido_live_id', pedidoIds)
+            .not('media_url', 'is', null),
+        ]);
+        if (pagosMediaError && pagosMediaError.code !== '42P01') throw pagosMediaError;
+        if (evidenciasMediaError && evidenciasMediaError.code !== '42P01') throw evidenciasMediaError;
+        mediaUrls.push(...(pagosMedia ?? []).map((p: any) => p.comprobante_media_url));
+        mediaUrls.push(...(evidenciasMedia ?? []).map((e: any) => e.media_url));
+      }
+
       const deleted = {
+        mediaFiles: 0,
         tarjetasPorPhone: 0,
         tarjetasPorCliente: 0,
+        pagosLivePorPhone: 0,
+        pagosLivePorPedido: 0,
+        evidenciasLivePorPedido: 0,
         pedidosLivePorPhone: 0,
         pedidosLivePorCliente: 0,
         mensajes: 0,
         clientes: 0,
       };
+
+      deleted.mediaFiles = await deleteWhatsappMediaFiles(supabasePanel, mediaUrls);
+
+      const pagosByPhone = await supabasePanel
+        .from('pagos_venta_live')
+        .delete({ count: 'exact' })
+        .eq('phone', phone);
+      if (pagosByPhone.error && pagosByPhone.error.code !== '42P01') throw pagosByPhone.error;
+      deleted.pagosLivePorPhone = pagosByPhone.count ?? 0;
+
+      if (pedidoIds.length > 0) {
+        const evidenciasByPedido = await supabasePanel
+          .from('evidencias_venta_live')
+          .delete({ count: 'exact' })
+          .in('pedido_live_id', pedidoIds);
+        if (evidenciasByPedido.error && evidenciasByPedido.error.code !== '42P01') throw evidenciasByPedido.error;
+        deleted.evidenciasLivePorPedido = evidenciasByPedido.count ?? 0;
+
+        const pagosByPedido = await supabasePanel
+          .from('pagos_venta_live')
+          .delete({ count: 'exact' })
+          .in('pedido_live_id', pedidoIds);
+        if (pagosByPedido.error && pagosByPedido.error.code !== '42P01') throw pagosByPedido.error;
+        deleted.pagosLivePorPedido = pagosByPedido.count ?? 0;
+      }
 
       const cardsByPhone = await supabasePanel
         .from('tarjetas_venta_live')

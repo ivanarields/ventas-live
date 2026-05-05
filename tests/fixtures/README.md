@@ -74,7 +74,7 @@ se validan (cambian por screenshot).
   "expected": {
     "name": "MARIA",
     "amount": 50,
-    "via": "regex|learned|gemini|manual_review"
+    "via": "regex|learned|openrouter|manual_review"
   },
   "notas": "Yape directo con nombre corto"
 }

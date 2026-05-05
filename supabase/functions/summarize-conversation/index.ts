@@ -2,11 +2,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('PANEL_SUPABASE_URL') || Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_KEY = Deno.env.get('PANEL_SUPABASE_SERVICE_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const ENV_GEMINI_KEY = Deno.env.get('GEMINI_API_KEY') || '';
-const GEMINI_MODEL = 'gemini-2.5-flash-lite';
-
-// La key activa — se puede sobreescribir con la que manda el cliente
-let ACTIVE_GEMINI_KEY = ENV_GEMINI_KEY;
+const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
+const OPENROUTER_MODEL = Deno.env.get('OPENROUTER_MODEL') || 'openai/gpt-4o-mini';
 
 // ── Convertir ArrayBuffer a base64 sin spread (evita stack overflow) ──
 function toBase64(buffer: ArrayBuffer): string {
@@ -37,72 +34,85 @@ ${audios || '(ninguno)'}
 Genera este JSON exacto (sin backticks, sin texto antes o después):
 {"pedido":"qué quiere el cliente","cantidad":"número o no especificado","talla":"talla o no especificada","pago":"forma de pago o no especificado","entrega":"cuándo o dónde o no especificado","comprobante":"Si hay un comprobante de pago en las fotos, escribe: nombre del pagador - monto Bs - banco. Si no hay comprobante, escribe null","notas":"observaciones adicionales o null"}`;
 
-async function callGemini(prompt: string): Promise<Record<string, string>> {
-  if (!ACTIVE_GEMINI_KEY) {
-    console.error('❌ GEMINI_API_KEY no configurada');
-    return { pedido: 'Error: API key no configurada. Agrégala en Configuración IA del panel.' };
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${ACTIVE_GEMINI_KEY}`;
-  const body = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    systemInstruction: { parts: [{ text: PROMPT_SISTEMA }] },
-    generationConfig: {
-      temperature: 0,
-      maxOutputTokens: 400,
-      // Sin responseMimeType para evitar conflicto con thinkingBudget:0
+async function openRouterText(prompt: string, maxTokens = 400): Promise<string> {
+  if (!OPENROUTER_API_KEY) return '';
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': Deno.env.get('APP_URL') || 'https://ventas-live.vercel.app',
+      'X-Title': 'Ventas Live',
     },
-  };
-
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const json = await res.json();
-
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: 'system', content: PROMPT_SISTEMA },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: maxTokens,
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    console.error('❌ Gemini API error:', JSON.stringify(json));
-    return { pedido: `Error Gemini: ${json.error?.message || res.status}` };
+    console.error('OpenRouter API error:', JSON.stringify(json));
+    return '';
+  }
+  const content = json.choices?.[0]?.message?.content;
+  return Array.isArray(content)
+    ? content.map((item: any) => item?.text ?? '').join('').trim()
+    : String(content ?? '').trim();
+}
+
+async function openRouterWithImage(prompt: string, mimeType: string, base64Data: string): Promise<string> {
+  if (!OPENROUTER_API_KEY || !mimeType.startsWith('image/')) return '';
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': Deno.env.get('APP_URL') || 'https://ventas-live.vercel.app',
+      'X-Title': 'Ventas Live',
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } },
+        ],
+      }],
+      temperature: 0,
+      max_tokens: 200,
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error('OpenRouter media error:', JSON.stringify(json));
+    return '';
+  }
+  const content = json.choices?.[0]?.message?.content;
+  return Array.isArray(content)
+    ? content.map((item: any) => item?.text ?? '').join('').trim()
+    : String(content ?? '').trim();
+}
+
+async function callOpenRouter(prompt: string): Promise<Record<string, string>> {
+  if (!OPENROUTER_API_KEY) {
+    console.error('OPENROUTER_API_KEY no configurada');
+    return { pedido: 'Error: OpenRouter no configurado.' };
   }
 
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-  console.log('🤖 Gemini texto raw:', text.slice(0, 200));
+  const text = await openRouterText(prompt, 400);
+  console.log('OpenRouter texto raw:', text.slice(0, 200));
 
   // Extraer JSON del texto (puede venir con markdown ```json ... ```)
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return { pedido: text || 'Sin respuesta de IA' };
   try { return JSON.parse(match[0]); }
   catch { return { pedido: text }; }
-}
-
-async function geminiText(prompt: string): Promise<string> {
-  if (!ACTIVE_GEMINI_KEY) return '';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${ACTIVE_GEMINI_KEY}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 300 },
-    }),
-  });
-  const json = await res.json();
-  return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-}
-
-async function geminiWithMedia(prompt: string, mimeType: string, base64Data: string): Promise<string> {
-  if (!ACTIVE_GEMINI_KEY) return '';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${ACTIVE_GEMINI_KEY}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [
-        { inlineData: { mimeType, data: base64Data } },
-        { text: prompt },
-      ]}],
-      generationConfig: { temperature: 0, maxOutputTokens: 200 },
-    }),
-  });
-  const json = await res.json();
-  return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
 }
 
 async function transcribirAudio(url: string): Promise<string> {
@@ -112,9 +122,8 @@ async function transcribirAudio(url: string): Promise<string> {
     const buf = await r.arrayBuffer();
     const b64 = toBase64(buf);
     const mime = url.includes('.mp3') ? 'audio/mpeg' : 'audio/ogg';
-    const t = await geminiWithMedia('Transcribe exactamente lo que dice este audio en español. Solo el texto, sin explicaciones.', mime, b64);
-    console.log('🎙️ Transcripción:', t.slice(0, 100));
-    return t;
+    console.warn('Transcripcion de audio omitida: OpenRouter chat solo procesa imagenes en esta funcion.', mime, b64.length);
+    return '';
   } catch (e) {
     console.error('Audio error:', e);
     return '';
@@ -128,12 +137,12 @@ async function describirFoto(url: string): Promise<string> {
     const buf = await r.arrayBuffer();
     const b64 = toBase64(buf);
     const mime = url.endsWith('.png') ? 'image/png' : url.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-    const d = await geminiWithMedia(`Analiza esta imagen y responde con UNA SOLA línea:
+    const d = await openRouterWithImage(`Analiza esta imagen y responde con UNA SOLA línea:
 - Si es un COMPROBANTE de pago, transferencia o captura de QR bancario: escribe "COMPROBANTE: [nombre del pagador] - [monto] Bs - [banco o app]". Extrae el nombre REAL que aparece en el comprobante.
 - Si es una PRENDA de ropa: escribe "PRENDA: [color, tipo, características]". Máximo 15 palabras.
 - Si es otra cosa: escribe "OTRO: [descripción breve]".
 Responde SOLO con una línea, sin explicaciones.`, mime, b64);
-    console.log('🖼️ Descripción foto:', d);
+    console.log('Descripcion foto:', d);
     return d;
   } catch (e) {
     console.error('Foto error:', e);
@@ -147,18 +156,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { clienteId, geminiKey } = await req.json();
+    const { clienteId } = await req.json();
     if (!clienteId) return new Response(JSON.stringify({ error: 'clienteId requerido' }), { status: 400 });
 
-    // Si el cliente envía su propia key, usarla (permite rotación desde el panel)
-    if (geminiKey?.startsWith('AIza')) {
-      ACTIVE_GEMINI_KEY = geminiKey;
-      console.log('🔑 Usando API key personalizada del panel');
-    } else {
-      ACTIVE_GEMINI_KEY = ENV_GEMINI_KEY;
-    }
-
-    console.log('🔑 GEMINI_KEY presente:', !!ACTIVE_GEMINI_KEY, '| URL:', SUPABASE_URL.slice(0, 30));
+    console.log('OPENROUTER_KEY presente:', !!OPENROUTER_API_KEY, '| URL:', SUPABASE_URL.slice(0, 30));
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -171,7 +172,7 @@ Deno.serve(async (req) => {
     if (error) { console.error('DB error:', error); return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
     if (!mensajes?.length) return new Response(JSON.stringify({ error: 'Sin mensajes' }), { status: 404 });
 
-    console.log(`📊 ${mensajes.length} mensajes encontrados`);
+    console.log(`${mensajes.length} mensajes encontrados`);
 
     const textos: string[]   = [];
     const fotoUrls: string[] = [];
@@ -188,7 +189,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`📝 Textos:${textos.length} 🖼️ Fotos:${fotoUrls.length} 🎙️ Audios:${audioUrls.length}`);
+    console.log(`Textos:${textos.length} Fotos:${fotoUrls.length} Audios:${audioUrls.length}`);
 
     // Transcribir audios (máx 3)
     const transcripciones: string[] = [];
@@ -210,15 +211,15 @@ Deno.serve(async (req) => {
       transcripciones.map((t, i) => `Audio ${i+1}: "${t}"`).join('\n'),
     );
 
-    console.log('📤 Prompt enviado a Gemini (primeros 300 chars):', prompt.slice(0, 300));
-    const resumen = await callGemini(prompt);
+    console.log('Prompt enviado a OpenRouter (primeros 300 chars):', prompt.slice(0, 300));
+    const resumen = await callOpenRouter(prompt);
 
     await supabase.from('panel_clientes').update({
       resumen: JSON.stringify(resumen),
       resumen_at: new Date().toISOString(),
     }).eq('id', clienteId);
 
-    console.log('✅ Resumen guardado:', JSON.stringify(resumen));
+    console.log('Resumen guardado:', JSON.stringify(resumen));
 
     return new Response(JSON.stringify({ ok: true, resumen }), {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },

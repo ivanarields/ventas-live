@@ -44,7 +44,7 @@ Lista de Pagos → Perfil del Cliente → Mesa de Preparación → Regreso al Pe
 - **Backend:** Express.js (`server.ts`) — sirve Vite en dev, REST API en prod
 - **DB:** Supabase PostgreSQL — proyecto `vhczofpmxzbqzboysoca`
 - **Auth:** Supabase Auth (email/password)
-- **IA:** Google Gemini 2.5 Flash Lite (parser de notificaciones bancarias)
+- **IA:** OpenRouter como proveedor unico (`OPENROUTER_API_KEY`)
 - **Supabase CLI local:** `C:/Users/IVAN/bin/supabase.exe`
 
 **Firebase está completamente eliminado.** La app corre 100% en Supabase. Existe un shim `firebase-compat.ts` que mapea llamadas legacy al nuevo API REST (temporal, migrar call-sites).
@@ -83,7 +83,8 @@ C:/Users/IVAN/bin/supabase.exe functions deploy NAME \
 | `VITE_SUPABASE_URL` / `SUPABASE_URL` | URL proyecto Supabase |
 | `VITE_SUPABASE_ANON_KEY` | Clave pública (browser) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Clave privada (solo server) |
-| `GEMINI_API_KEY` | Parser IA de notificaciones |
+| `OPENROUTER_API_KEY` | Clave unica para IA server-side |
+| `OPENROUTER_MODEL` | Modelo OpenRouter (default `openai/gpt-4o-mini`) |
 
 ---
 
@@ -179,7 +180,7 @@ Pipeline: MacroDroid Android → Edge Function `ingest-notification` → `pagos`
 Parseo en cascada (nunca inventa nombres):
 1. Regex hardcodeados (Yape directo, Yape QR, bancos clásicos)
 2. Patrones aprendidos (`learned_text_patterns`) — auto-aprendizaje por `app_package`
-3. **Gemini 2.5 Flash Lite** con `thinkingConfig.thinkingBudget: 0` — casos nuevos
+3. **OpenRouter** — casos nuevos
 4. Sin nombre válido → `manual_review_queue` (NUNCA placeholder tipo "PAGO Yape")
 
 **Detalle técnico completo:** `docs/notifications-system.md`.
@@ -191,21 +192,18 @@ Parseo en cascada (nunca inventa nombres):
 1. **Nunca inventar nombres de pagadores.** Si una notificación no tiene nombre real, dejarla en `manual_review_queue`. El usuario rechazó explícitamente placeholders tipo "PAGO Yape", "Depósito recibido". Mejor pago perdido que nombre falso.
 2. **Idempotencia:** cada notificación se hashea (SHA-256) antes de insertarse → no hay duplicados.
 3. **Auto-aprendizaje:** cada pago exitoso guarda su patrón textual (`before_marker`/`after_marker`) para mejorar extracciones futuras.
-4. **Gemini es último recurso:** regex y aprendizaje deben fallar antes de llamar la API (para no gastar cuota).
+4. **OpenRouter es el único proveedor IA:** regex y aprendizaje deben fallar antes de llamar OpenRouter.
 5. **Deploy Edge Function requiere `--no-verify-jwt`** — sin eso MacroDroid recibe 401.
 
 ---
 
-## Modelo de Gemini en uso
+## Proveedor IA en uso
 
-**Modelo:** `gemini-2.5-flash-lite`
-**Config:** `temperature: 0`, `maxOutputTokens: 150`, `responseMimeType: 'application/json'`, `thinkingConfig: { thinkingBudget: 0 }`
-**Cuota free tier:** 15 RPM, 1500 requests/día
+**Proveedor:** OpenRouter
+**Modelo default:** `openai/gpt-4o-mini`
+**Config:** `temperature: 0`, JSON cuando el endpoint lo requiere, imágenes por `image_url`.
 
-**Modelos descartados y por qué:**
-- `gemini-1.5-flash-latest` → deprecado (404)
-- `gemini-2.0-flash` → requiere tier pagado
-- `gemini-flash-latest` → gasta todos los tokens en "thinking" y devuelve vacío
+No usar APIs directas de proveedores externos desde la app. Todas las llamadas de IA deben pasar por OpenRouter.
 
 ---
 
@@ -214,7 +212,6 @@ Parseo en cascada (nunca inventa nombres):
 | Script | Qué hace |
 |---|---|
 | `rescue-with-regex.mjs` | Procesa `manual_review_queue` con el regex actual |
-| `rescue-with-gemini.mjs` | Igual pero con Gemini (más potente, más lento, usa cuota) |
 | `reset-and-seed.mjs` | Borra todo y crea 5 clientes de prueba (**DESTRUCTIVO**) |
 | `seed-labels.ts` | Seed del sistema de etiquetas |
 

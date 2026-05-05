@@ -50,6 +50,13 @@ export const clientesApi = {
     apiFetch(`/api/clientes/${id}`, { method: "DELETE" }),
 };
 
+// ─── LIMPIEZA REAL ───────────────────────────────────────────────────────────
+export const adminApi = {
+  rootDelete: (body: { customerId?: string | number | null; name?: string | null; phone?: string | null }) =>
+    apiFetch("/api/admin/root-delete", { method: "POST", body: JSON.stringify(body) }),
+  storeProfiles: () => apiFetch("/api/admin/store-profiles"),
+};
+
 // ─── PAGOS ────────────────────────────────────────────────────────────────────
 export const pagosApi = {
   list: () => apiFetch("/api/pagos-lista"),
@@ -59,6 +66,8 @@ export const pagosApi = {
     apiFetch(`/api/pagos/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   delete: (id: string | number) =>
     apiFetch(`/api/pagos/${id}`, { method: "DELETE" }),
+  verifyLivePayment: (id: string | number) =>
+    apiFetch(`/api/live-sales/payments/${id}/verify-manual`, { method: "POST" }),
 };
 
 // ─── PEDIDOS ──────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { normalizePersonName, scorePersonName } from './nameMatching.js';
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
 
@@ -66,13 +67,7 @@ export interface MatchResult {
 // ── Normalización ──────────────────────────────────────────────────────────────
 
 export function normalizeName(name: string): string {
-  return name
-    .toUpperCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^A-Z\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizePersonName(name);
 }
 
 export function normalizePhone(phone: string): string {
@@ -92,6 +87,14 @@ function wordOverlap(a: string, b: string): number {
   if (wordsA.length === 0) return 0;
   const matches = wordsA.filter(w => wordsB.has(w)).length;
   return matches / wordsA.length;
+}
+
+function profileNameScore(inputName: string, profileName: string) {
+  const score = scorePersonName(inputName, profileName);
+  if (score.score >= 0.96) return { confidence: score.score, matchType: 'name_exact' as const };
+  if (score.kind === 'contained_words' && score.sharedWords >= 2) return { confidence: 0.86, matchType: 'name_partial' as const };
+  if (score.kind === 'initials' && score.sharedWords >= 1) return { confidence: 0.72, matchType: 'name_partial' as const };
+  return null;
 }
 
 export async function findOrCreateProfile(
@@ -134,9 +137,20 @@ export async function findOrCreateProfile(
       .eq('user_id', userId);
 
     if (profiles?.length) {
-      // Nombre exacto
-      const exactMatch = profiles.find(p => normalizeName(p.display_name) === nameNorm);
-      if (exactMatch) return { profile: exactMatch, confidence: 0.85, match_type: 'name_exact' };
+      let bestMatch: IdentityProfile | null = null;
+      let bestConfidence = 0;
+      let bestType: MatchResult['match_type'] = 'name_partial';
+
+      for (const p of profiles) {
+        const result = profileNameScore(nameNorm, p.display_name);
+        if (result && result.confidence > bestConfidence) {
+          bestMatch = p;
+          bestConfidence = result.confidence;
+          bestType = result.matchType;
+        }
+      }
+
+      if (bestMatch) return { profile: bestMatch, confidence: bestConfidence, match_type: bestType };
 
       // Nombre parcial (≥75% de palabras coinciden, mínimo 2 palabras)
       const words = nameNorm.split(' ').filter(Boolean);

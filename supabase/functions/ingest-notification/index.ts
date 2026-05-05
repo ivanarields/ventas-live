@@ -6,7 +6,7 @@
 //   1. Regex hardcodeados (patrones conocidos)
 //   2. Patrones aprendidos de la tabla `learned_text_patterns`
 //   3. Extracción agresiva (quitar keywords, tomar lo que queda)
-//   4. Placeholder "PAGO [banco]" como último recurso
+//   4. OpenRouter como último recurso
 //
 // Aprendizaje: cada pago procesado guarda su patrón textual (contexto
 // antes/después del nombre) para mejorar extracciones futuras del mismo banco.
@@ -18,7 +18,8 @@ const SUPABASE_URL         = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY     = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const INGEST_DEVICE_SECRET = Deno.env.get('INGEST_DEVICE_SECRET')!;
 const INGEST_USER_ID       = Deno.env.get('INGEST_USER_ID')!;
-const GEMINI_API_KEY       = Deno.env.get('GEMINI_API_KEY') ?? '';
+const OPENROUTER_API_KEY  = Deno.env.get('OPENROUTER_API_KEY') ?? '';
+const OPENROUTER_MODEL    = Deno.env.get('OPENROUTER_MODEL') ?? 'openai/gpt-4o-mini';
 
 // ── Tienda Online — reenvío al motor de cuadrangulación ──────────────────────
 // URL del cliente de la tienda (Supabase de TiendaOnline)
@@ -65,7 +66,8 @@ async function sha256(input: string): Promise<string> {
 
 function parseAmount(text: string): number | null {
   const match =
-    text.match(/Bs\.?\s*([\d][\d.,]*)/i) ||
+    text.match(/([\d][\d.,]*)\s*Bs\.?(?!\w)/i) ||   // Yastaa: "150 Bs" o "1 Bs"
+    text.match(/Bs\.?\s*([\d][\d.,]*)/i) ||           // Yape: "Bs. 150"
     text.match(/\bBOB\s*([\d][\d.,]*)/i) ||
     text.match(/\$us\.?\s*([\d][\d.,]*)/i);
   if (!match) return null;
@@ -82,20 +84,27 @@ function parsePayerName(text: string): string | null {
   const t = text.replace(/[^\w\sÁÉÍÓÚÑáéíóúñ.,|:;$-]/g, ' ').replace(/\s+/g, ' ');
 
   const patterns = [
+    // === YASTAA / BANCO UNIÓN — nombre va primero ===
+    // "JUAN PEREZ RODRIGUEZ te ha enviado 150 Bs"
+    /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{4,120}?)\s+te\s+ha\s+enviado\b/im,
+    // "JUAN PEREZ te envió/transfirió/realizó..."  (genérico nombre-primero)
+    /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{4,120}?)\s+te\s+(?:envi\S*|transf\S*|realiz\S*|pag\S*)\b/im,
+
+    // === YAPE y otros bancos ===
     // Yape QR: "QR DE NOMBRE  te envió Bs. X"
-    /QR\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)\s{1,4}te\s+(?:envi\S*|yape\S*|pag\S*)/i,
+    /QR\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)\s{1,4}te\s+(?:envi\S*|yape\S*|pag\S*)/i,
     // Yape directo: "NOMBRE, te envió Bs. X"
-    /(?:^|\|\s*)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,80}?)\s*,\s*te\s+(?:envi\S*|yape\S*|pag\S*|transf\S*)/im,
+    /(?:^|\|\s*)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)\s*,\s*te\s+(?:envi\S*|yape\S*|pag\S*|transf\S*)/im,
     // Bancos clásicos: "RECIBISTE Bs. X DE NOMBRE"
-    /RECIBISTE\s+(?:Bs\.?\s*[\d.,]+\s+)?DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+(?:por|con|Bs|en|el|a\s+las)|$)/i,
+    /RECIBISTE\s+(?:Bs\.?\s*[\d.,]+\s+)?DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)(?:\s+(?:por|con|Bs|en|el|a\s+las)|$)/i,
     // "Transferencia/pago/envío recibido de NOMBRE"
-    /(?:transferencia|pago|envi\S+|dep\S+sito)\s+(?:recibid[oa]\s+)?de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+por|\s+Bs|\s*$)/i,
+    /(?:transferencia|pago|envi\S+|dep\S+sito)\s+(?:recibid[oa]\s+)?de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)(?:\s+por|\s+Bs|\s*$)/i,
     // "de NOMBRE por/Bs"
-    /\bde\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+por|\s+con|\s+Bs|\s*$)/,
+    /\bde\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)(?:\s+por|\s+con|\s+Bs|\s*$)/,
     // "enviado por NOMBRE"
-    /enviado\s+por\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60})/i,
+    /enviado\s+por\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120})/i,
     // "nombre: NOMBRE"
-    /nombre\s*:?\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60})/i,
+    /nombre\s*:?\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120})/i,
   ];
 
   for (const rx of patterns) {
@@ -110,10 +119,10 @@ function parsePayerName(text: string): string | null {
   return null;
 }
 
-// ─── IA (Gemini): parseo inteligente de notificaciones bancarias ────────────
+// ─── IA (OpenRouter): parseo inteligente de notificaciones bancarias ─────────
 
-async function parseWithGemini(text: string): Promise<{ name: string | null; amount: number | null } | null> {
-  if (!GEMINI_API_KEY) return null;
+async function parseWithOpenRouter(text: string): Promise<{ name: string | null; amount: number | null } | null> {
+  if (!OPENROUTER_API_KEY) return null;
   if (!text || text.length < 5) return null;
 
   const prompt = `Extrae el nombre del pagador y el monto de esta notificación bancaria boliviana.
@@ -127,36 +136,41 @@ Reglas estrictas:
 - El nombre debe estar en MAYUSCULAS exactamente como aparece en el texto
 - El monto es solo el numero (sin "Bs." ni simbolos)
 - Si el texto dice "QR DE JUAN PEREZ te envio Bs. 50" → {"name": "JUAN PEREZ", "amount": 50}
+- Si el texto dice "JUAN PEREZ RODRIGUEZ te ha enviado 150 Bs" → {"name": "JUAN PEREZ RODRIGUEZ", "amount": 150}
 - Si el texto dice "Recibiste un yapeo de Bs. 100" (sin nombre) → {"name": null, "amount": 100}
+- Si el texto dice "Motivo: Transferencia" (sin nombre claro) → {"name": null, "amount": null}
 
 Notificacion: """${text}"""`;
 
   try {
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 150,
-            responseMimeType: 'application/json',
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        }),
-        signal: AbortSignal.timeout(8000),
-      }
-    );
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': Deno.env.get('APP_URL') || 'https://ventas-live.vercel.app',
+        'X-Title': 'Ventas Live',
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 150,
+        response_format: { type: 'json_object' },
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
 
     if (!resp.ok) {
-      console.error('[gemini] HTTP error', resp.status, await resp.text());
+      console.error('[openrouter] HTTP error', resp.status, await resp.text());
       return null;
     }
 
     const data = await resp.json();
-    const textResp = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const contentResp = data.choices?.[0]?.message?.content;
+    const textResp = Array.isArray(contentResp)
+      ? contentResp.map((item: any) => item?.text ?? '').join('').trim()
+      : String(contentResp ?? '').trim();
     const jsonMatch = textResp.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) return null;
 
@@ -170,7 +184,7 @@ Notificacion: """${text}"""`;
 
     return { name, amount };
   } catch (err) {
-    console.error('[gemini] exception:', err);
+    console.error('[openrouter] exception:', err);
     return null;
   }
 }
@@ -248,7 +262,7 @@ function looksLikeRealName(candidate: string): boolean {
   if (!candidate) return false;
   const words = candidate.trim().split(/\s+/);
   if (words.length < 2) return false;            // mínimo nombre + apellido
-  if (candidate.length < 6 || candidate.length > 70) return false;
+  if (candidate.length < 6 || candidate.length > 150) return false;
 
   for (const w of words) {
     const upper = w.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -274,7 +288,7 @@ function extractFallbackName(text: string): string | null {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const candidate = cleaned.split(' ').slice(0, 5).join(' ');
+  const candidate = cleaned.split(' ').slice(0, 8).join(' ');
   return looksLikeRealName(candidate) ? candidate : null;
 }
 
@@ -314,9 +328,74 @@ function namesMatch(a: unknown, b: unknown): boolean {
   const cb = canonicalizeName(String(b ?? ''));
   if (!ca || !cb) return false;
   if (ca === cb) return true;
+  if (isContextualNameMatch(ca, cb)) return true;
   const short = ca.length <= cb.length ? ca : cb;
   const long = ca.length > cb.length ? ca : cb;
   return short.length >= 10 && long.includes(short);
+}
+
+const NAME_STOP_WORDS = new Set(['DE', 'DEL', 'LA', 'LAS', 'LOS', 'EL', 'Y']);
+
+function namePieces(raw: unknown) {
+  const parts = canonicalizeName(String(raw ?? '')).split(' ').filter(Boolean);
+  return {
+    normalized: parts.join(' '),
+    words: parts.filter(part => part.length >= 3 && !NAME_STOP_WORDS.has(part)),
+    initials: parts.filter(part => part.length === 1),
+  };
+}
+
+function sameWordSet(a: string[], b: string[]) {
+  if (a.length !== b.length || a.length < 2) return false;
+  const setB = new Set(b);
+  return a.every(word => setB.has(word));
+}
+
+function containsAll(shortWords: string[], longWords: string[]) {
+  const setLong = new Set(longWords);
+  return shortWords.every(word => setLong.has(word));
+}
+
+function initialsMatch(initials: string[], words: string[]) {
+  if (initials.length === 0) return true;
+  const available = [...words];
+  return initials.every(initial => {
+    const index = available.findIndex(word => word.startsWith(initial));
+    if (index < 0) return false;
+    available.splice(index, 1);
+    return true;
+  });
+}
+
+function scorePersonName(a: unknown, b: unknown) {
+  const left = namePieces(a);
+  const right = namePieces(b);
+  if (!left.normalized || !right.normalized) return { score: 0, kind: 'empty', sharedWords: 0 };
+  if (left.normalized === right.normalized) return { score: 1, kind: 'exact', sharedWords: left.words.length };
+  const shared = left.words.filter(word => right.words.includes(word)).length;
+  const minWords = Math.min(left.words.length, right.words.length);
+  if (sameWordSet(left.words, right.words)) return { score: 0.98, kind: 'same_words', sharedWords: shared };
+  if (minWords >= 2) {
+    const shorter = left.words.length <= right.words.length ? left.words : right.words;
+    const longer = left.words.length > right.words.length ? left.words : right.words;
+    if (containsAll(shorter, longer)) return { score: 0.88, kind: 'contained_words', sharedWords: shared };
+  }
+  if ((left.initials.length > 0 || right.initials.length > 0) && shared >= 1) {
+    const ok = initialsMatch(left.initials, right.words) && initialsMatch(right.initials, left.words);
+    if (ok && shared + left.initials.length + right.initials.length >= 3) return { score: 0.78, kind: 'initials', sharedWords: shared };
+  }
+  if (minWords > 0 && shared > 0) return { score: shared / Math.max(left.words.length, right.words.length), kind: 'weak', sharedWords: shared };
+  return { score: 0, kind: 'weak', sharedWords: 0 };
+}
+
+function isStrongNameMatch(a: unknown, b: unknown) {
+  const result = scorePersonName(a, b);
+  return result.score >= 0.96 || (result.kind === 'contained_words' && result.sharedWords >= 2);
+}
+
+function isContextualNameMatch(a: unknown, b: unknown) {
+  const result = scorePersonName(a, b);
+  return result.score >= 0.78 && result.sharedWords >= 1;
 }
 
 async function findExistingManualWhatsappPayment(input: {
@@ -516,6 +595,9 @@ Deno.serve(async (req) => {
   const deviceSecret = req.headers.get('x-device-secret') ?? '';
 
   if (!deviceId || !deviceSecret)              return jsonResponse({ error: 'Missing x-device-id or x-device-secret' }, 401);
+  if (deviceId === 'keepalive-cron' && deviceSecret === 'keepalive') {
+    return jsonResponse({ ok: true, keepalive: true, ts: new Date().toISOString() });
+  }
   if (deviceSecret !== INGEST_DEVICE_SECRET)   return jsonResponse({ error: 'Invalid device secret' }, 403);
   if (!AUTHORIZED_DEVICES.includes(deviceId)) return jsonResponse({ error: 'Device not in allowlist' }, 403);
 
@@ -577,6 +659,9 @@ Deno.serve(async (req) => {
   if (rawErr?.code === '23505') return jsonResponse({ ok: true, duplicate: true, raw_hash: rawHash });
   if (rawErr) { console.error('[raw insert]', rawErr); return jsonResponse({ error: rawErr.message }, 500); }
 
+  const processing = (async () => {
+    try {
+
   // ── PARSEO ──
   const candidateText = [payload.big_text, payload.text_lines, payload.text, payload.title]
     .filter(s => s && s.length > 0).join(' | ');
@@ -594,16 +679,16 @@ Deno.serve(async (req) => {
     if (payerNameRaw) nameSource = 'learned';
   }
 
-  // IA Gemini: si regex y patrones aprendidos fallaron, pedimos a Gemini
+  // OpenRouter: si regex y patrones aprendidos fallaron, pedimos a la IA
   if (!payerNameRaw) {
-    const geminiResult = await parseWithGemini(candidateText);
-    if (geminiResult?.name) {
-      payerNameRaw = geminiResult.name;
-      nameSource = 'gemini';
+    const openRouterResult = await parseWithOpenRouter(candidateText);
+    if (openRouterResult?.name) {
+      payerNameRaw = openRouterResult.name;
+      nameSource = 'openrouter';
     }
-    // Si Gemini encontró monto y nosotros no, también lo usamos
-    if (amount === null && geminiResult?.amount !== null && geminiResult?.amount !== undefined) {
-      amount = geminiResult.amount;
+    // Si OpenRouter encontró monto y nosotros no, también lo usamos
+    if (amount === null && openRouterResult?.amount !== null && openRouterResult?.amount !== undefined) {
+      amount = openRouterResult.amount;
     }
   }
 
@@ -618,7 +703,7 @@ Deno.serve(async (req) => {
   let confidence = 0;
   if (amount !== null) confidence += 0.55;
   if (payerNameRaw && nameSource === 'regex')    confidence += 0.30;
-  if (payerNameRaw && nameSource === 'gemini')   confidence += 0.28;
+  if (payerNameRaw && nameSource === 'openrouter') confidence += 0.28;
   if (payerNameRaw && nameSource === 'learned')  confidence += 0.25;
   if (payerNameRaw && nameSource === 'fallback') confidence += 0.15;
   if (operationRef) confidence += 0.15;
@@ -631,7 +716,7 @@ Deno.serve(async (req) => {
   const { data: candidate, error: candErr } = await supabase
     .from('parsed_payment_candidates')
     .insert({
-      raw_event_id: rawRow.id, parser_version: 'v3.0-gemini',
+      raw_event_id: rawRow.id, parser_version: 'v4.0-openrouter',
       bank_code: payload.app_package, candidate_text: candidateText,
       currency: 'BOB', amount,
       payer_name_raw: payerNameRaw, payer_name_canonical: payerNameCanonical,
@@ -660,41 +745,56 @@ Deno.serve(async (req) => {
         .from('parsed_payment_candidates').select('id')
         .eq('operation_ref', operationRef).neq('id', candidate.id).limit(1);
       isDuplicate = (byRef?.length ?? 0) > 0;
-    } else {
-      const oneMinAgo = new Date(Date.now() - 60 * 1000).toISOString();
-      const { data: maybeDup } = await supabase
-        .from('pagos').select('id')
-        .eq('user_id', INGEST_USER_ID)
-        .eq('nombre', payerNameRaw)
-        .eq('pago', amount).gte('date', oneMinAgo).limit(1);
-      isDuplicate = (maybeDup?.length ?? 0) > 0;
     }
 
     // Removed payments_ui insertion as the view handles it or it's deprecated
 
-    if (!isDuplicate) {
-      // Buscar o crear cliente
-      const normForSearch = payerNameCanonical.toLowerCase();
-      let customerId: number | null = null;
+      if (!isDuplicate) {
+        // Buscar o crear cliente
+        const normForSearch = payerNameCanonical.toLowerCase();
+        let customerId: number | null = null;
+        let matchedCustomer: any = null;
 
-      let { data: existingCustomers } = await supabase
-        .from('customers').select('id').eq('user_id', INGEST_USER_ID)
-        .ilike('normalized_name', normForSearch).limit(1);
-      if (!existingCustomers?.length) {
-        const { data: byCan } = await supabase
-          .from('customers').select('id').eq('user_id', INGEST_USER_ID)
-          .eq('canonical_name', payerNameCanonical).limit(1);
-        if (byCan?.length) existingCustomers = byCan;
-      }
+        let { data: existingCustomers } = await supabase
+          .from('customers').select('id,full_name,canonical_name,normalized_name,is_active').eq('user_id', INGEST_USER_ID)
+          .eq('is_active', true)
+          .ilike('normalized_name', normForSearch).limit(1);
+        if (!existingCustomers?.length) {
+          const { data: byCan } = await supabase
+            .from('customers').select('id,full_name,canonical_name,normalized_name,is_active').eq('user_id', INGEST_USER_ID)
+            .eq('is_active', true)
+            .eq('canonical_name', payerNameCanonical).limit(1);
+          if (byCan?.length) existingCustomers = byCan;
+        }
 
-      if (existingCustomers && existingCustomers.length > 0) {
-        customerId = existingCustomers[0].id;
-      } else {
-        const { data: newCust } = await supabase.from('customers').insert({
-          full_name: payerNameRaw, normalized_name: normForSearch,
-          canonical_name: payerNameCanonical, phone: null,
-          active_label: null, active_label_type: null, user_id: INGEST_USER_ID,
-        }).select('id').single();
+        if (existingCustomers && existingCustomers.length > 0) {
+          matchedCustomer = existingCustomers[0];
+          customerId = matchedCustomer.id;
+        } else {
+          const { data: allCustomers } = await supabase
+            .from('customers')
+            .select('id,full_name,canonical_name,normalized_name,is_active')
+            .eq('user_id', INGEST_USER_ID)
+            .eq('is_active', true)
+            .limit(500);
+
+          const flexibleMatches = (allCustomers ?? []).filter((c: any) =>
+            isStrongNameMatch(c.canonical_name || c.full_name || c.normalized_name, payerNameCanonical)
+          );
+
+          if (flexibleMatches.length === 1) {
+            matchedCustomer = flexibleMatches[0];
+            customerId = matchedCustomer.id;
+            console.log(`[customer match] nombre flexible: "${payerNameRaw}" → customer #${customerId} (${matchedCustomer.full_name})`);
+          }
+        }
+
+        if (!customerId) {
+          const { data: newCust } = await supabase.from('customers').insert({
+            full_name: payerNameRaw, normalized_name: normForSearch,
+            canonical_name: payerNameCanonical, phone: null,
+            active_label: null, active_label_type: null, user_id: INGEST_USER_ID,
+          }).select('id').single();
         if (newCust) customerId = newCust.id;
       }
 
@@ -760,11 +860,8 @@ Deno.serve(async (req) => {
               .select('id, display_name')
               .eq('user_id', INGEST_USER_ID);
 
-            const match = allProfiles?.find(p =>
-              p.display_name.toUpperCase().normalize('NFD')
-                .replace(/[̀-ͯ]/g, '').replace(/[^A-Z\s]/g, '')
-                .replace(/\s+/g, ' ').trim() === nameNorm
-            );
+            const strongMatches = (allProfiles ?? []).filter(p => isStrongNameMatch(p.display_name, nameNorm));
+            const match = strongMatches.length === 1 ? strongMatches[0] : null;
 
             let profileId: string | null = null;
             if (match) {
@@ -810,8 +907,8 @@ Deno.serve(async (req) => {
           eventAt,
         });
 
-        // Aprender patrón de extracciones confiables (regex o Gemini)
-        if (nameSource === 'regex' || nameSource === 'gemini') {
+        // Aprender patrón de extracciones confiables (regex u OpenRouter)
+        if (nameSource === 'regex' || nameSource === 'openrouter') {
           const sourceForLearning = payload.big_text || payload.text || '';
           await learnPattern(payload.app_package, sourceForLearning, payerNameRaw);
         }
@@ -922,12 +1019,22 @@ Deno.serve(async (req) => {
     capture_quality_score:  confidence * 100,
   });
 
-  return jsonResponse({
-    ok: true, raw_hash: rawHash,
-    parsed: { amount, payer: payerNameRaw, name_source: nameSource, confidence: Number(confidence.toFixed(2)) },
-    needs_review: needsReview,
-    auto_processed: !needsReview && !!amount,
-  });
+    } catch (processErr) {
+      console.error('[background processing]', processErr);
+      await supabase.from('raw_notification_events')
+        .update({ ingest_status: 'processing_error' })
+        .eq('id', rawRow.id);
+    }
+  })();
+
+  const edgeRuntime = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(processing);
+  } else {
+    processing.catch((err) => console.error('[background processing detached]', err));
+  }
+
+  return jsonResponse({ ok: true, accepted: true, raw_hash: rawHash });
   } catch (err) {
     console.error('[handler crash]', err);
     return jsonResponse({ error: String(err) }, 500);

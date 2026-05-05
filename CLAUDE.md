@@ -6,7 +6,7 @@ Este archivo proporciona orientación a Claude Code (claude.ai/code) para trabaj
 
 ## Qué es esta app
 
-**Ventas Live** es una PWA para gestionar un servicio de ropa en consignación. Los clientes dejan bolsas de ropa, el operador las procesa (cuenta prendas y bolsas físicas), las almacena con etiquetas en casilleros físicos y gestiona los cobros. También tiene módulos de finanzas, agenda de TikTok Lives y OCR bancario con Gemini.
+**Ventas Live** es una PWA para gestionar un servicio de ropa en consignación. Los clientes dejan bolsas de ropa, el operador las procesa (cuenta prendas y bolsas físicas), las almacena con etiquetas en casilleros físicos y gestiona los cobros. También tiene módulos de finanzas, agenda de TikTok Lives y OCR bancario con OpenRouter.
 
 ---
 
@@ -196,7 +196,7 @@ Puerto actual de desarrollo: **3004** (se incrementa si el puerto anterior sigue
 - **Backend:** Express.js (`server.ts`) — sirve Vite en dev, REST API en prod
 - **Base de datos:** Supabase (PostgreSQL) — proyecto `vhczofpmxzbqzboysoca` (ChehiAppAbril)
 - **Auth:** Supabase Auth (email/password)
-- **IA:** Google Gemini (`@google/genai`) — OCR de capturas bancarias
+- **IA:** OpenRouter como proveedor unico server-side
 - **Animaciones:** Motion (fork de Framer Motion)
 - **Gráficos/PDF:** Recharts, jsPDF + html2canvas
 - **Supabase CLI:** `C:/Users/IVAN/bin/supabase.exe` (v2.90.0)
@@ -212,7 +212,8 @@ Puerto actual de desarrollo: **3004** (se incrementa si el puerto anterior sigue
 | `SUPABASE_URL` | URL proyecto Supabase (server) |
 | `VITE_SUPABASE_ANON_KEY` | Clave pública Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Clave privada Supabase (solo servidor) |
-| `GEMINI_API_KEY` | OCR bancario con Gemini |
+| `OPENROUTER_API_KEY` | Clave unica para IA server-side |
+| `OPENROUTER_MODEL` | Modelo OpenRouter (default `openai/gpt-4o-mini`) |
 
 ---
 
@@ -255,7 +256,7 @@ Variables `@theme` en `src/index.css`:
 **Parseo en cascada** (nunca inventa nombres falsos tipo "PAGO Yape"):
 1. Regex hardcodeados — Yape directo (`NOMBRE, te envió...`), Yape QR (`QR DE NOMBRE te envió...`), bancos clásicos
 2. Patrones aprendidos (`learned_text_patterns`) — auto-aprendizaje del contexto antes/después del nombre por `app_package`
-3. **Gemini 2.5 Flash Lite** con `thinkingConfig.thinkingBudget: 0` — casos nuevos nunca vistos
+3. **OpenRouter** — casos nuevos nunca vistos
 4. Sin nombre válido → `manual_review_queue` (nunca placeholder)
 
 **Deploy del Edge Function (Docker NO requerido):**
@@ -263,13 +264,12 @@ Variables `@theme` en `src/index.css`:
 C:/Users/IVAN/bin/supabase.exe functions deploy ingest-notification --no-verify-jwt --project-ref vhczofpmxzbqzboysoca
 ```
 
-**Secrets en Supabase:** `GEMINI_API_KEY`, `INGEST_DEVICE_SECRET`, `INGEST_USER_ID`.
+**Secrets en Supabase:** `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `INGEST_DEVICE_SECRET`, `INGEST_USER_ID`.
 
 **Idempotencia:** hash SHA-256 de cada notificación (`raw_hash`) evita duplicados.
 
 **Scripts útiles:**
 - `scripts/rescue-with-regex.mjs` — rescata items atascados en `manual_review_queue` con el regex actual
-- `scripts/rescue-with-gemini.mjs` — rescate usando Gemini
 - `scripts/reset-and-seed.mjs` — limpia datos y crea 5 clientes de prueba
 
 **Detalle técnico completo:** ver `docs/notifications-system.md`.

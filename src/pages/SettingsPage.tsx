@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { AiSettingsPanel } from '../components/AiSettingsPanel';
-import { IdentityPanel } from '../components/IdentityPanel';
 import { WhatsappConnectionPanel } from '../components/WhatsappConnectionPanel';
+import { adminApi, pagosApi } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Package, BarChart3, Trash2, Search, Check, CheckCircle2,
@@ -9,7 +9,6 @@ import {
   Calendar, Zap, Database, Minus, Plus, Users,
 } from 'lucide-react';
 import { Payment } from '../types';
-import { db, doc, updateDoc, deleteDoc, writeBatch } from '../lib/firebase-compat';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const cleanName = (name: string) => {
@@ -47,11 +46,20 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
-type TabId = 'sistema' | 'ia' | 'datos' | 'identidad';
+type TabId = 'sistema' | 'ia' | 'datos' | 'base';
+
+type CustomerLite = {
+  id: string;
+  name: string;
+  phone?: string;
+  waNumber?: string;
+};
 
 // ─── Main Component ──────────────────────────────────────────────────────────
-function SettingsView({ payments, onLogout, userId = '' }: {
+function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = '' }: {
   payments: Payment[];
+  customers?: CustomerLite[];
+  onRefresh?: () => void;
   onLogout: () => void;
   userId?: string;
   key?: string;
@@ -62,7 +70,7 @@ function SettingsView({ payments, onLogout, userId = '' }: {
     { id: 'sistema', label: 'Sistema', icon: <Package size={13} /> },
     { id: 'ia',      label: 'IA',      icon: <Zap size={13} /> },
     { id: 'datos',   label: 'Datos',   icon: <Database size={13} /> },
-    { id: 'identidad', label: 'ID',    icon: <Users size={13} /> },
+    { id: 'base',    label: 'Base',    icon: <Users size={13} /> },
   ];
 
   return (
@@ -116,13 +124,9 @@ function SettingsView({ payments, onLogout, userId = '' }: {
               : <p className="text-center text-sm text-gray-400 py-8">Inicia sesión para ver la configuración de IA</p>
           )}
 
-          {activeTab === 'datos' && <TabDatos payments={payments} />}
+          {activeTab === 'datos' && <TabDatos payments={payments} onRefresh={onRefresh} />}
 
-          {activeTab === 'identidad' && (
-            userId
-              ? <IdentityPanel userId={userId} />
-              : <p className="text-center text-sm text-gray-400 py-8">Inicia sesión para ver los perfiles de identidad</p>
-          )}
+          {activeTab === 'base' && <TabBaseDatos payments={payments} customers={customers} onRefresh={onRefresh} />}
         </motion.div>
       </AnimatePresence>
     </motion.div>
@@ -130,9 +134,250 @@ function SettingsView({ payments, onLogout, userId = '' }: {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// TAB: BASE — Limpieza simple de perfiles y pagos
+// ═══════════════════════════════════════════════════════════════════
+function TabBaseDatos({ payments, customers, onRefresh }: {
+  payments: Payment[];
+  customers: CustomerLite[];
+  onRefresh?: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [storeProfiles, setStoreProfiles] = useState<any[]>([]);
+  const [confirm, setConfirm] = useState<{ type: 'profile' | 'payment'; profile?: any; payment?: Payment } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    adminApi.storeProfiles()
+      .then(data => { if (mounted) setStoreProfiles(Array.isArray(data) ? data : []); })
+      .catch(() => { if (mounted) setStoreProfiles([]); });
+    return () => { mounted = false; };
+  }, []);
+
+  const profiles = useMemo(() => {
+    const groups: Record<string, any> = {};
+
+    customers.forEach(c => {
+        groups[c.id] = {
+          key: c.id,
+          customerId: c.id,
+          name: c.name,
+          phone: c.waNumber || c.phone || '',
+          payments: [],
+          storeOrders: [],
+          total: 0,
+          hasMain: true,
+          hasStore: false,
+        };
+      });
+
+    payments.forEach(p => {
+      const customer = customers.find(c => p.customerId && c.id === p.customerId) ||
+        customers.find(c => cleanName(c.name) === cleanName(p.nombre));
+      const key = customer?.id || cleanName(p.nombre);
+      if (!groups[key]) {
+        groups[key] = {
+          key,
+          customerId: customer?.id ?? null,
+          name: customer?.name || p.nombre,
+          phone: customer?.waNumber || customer?.phone || '',
+          payments: [],
+          storeOrders: [],
+          total: 0,
+          hasMain: !!customer,
+          hasStore: false,
+        };
+      }
+      groups[key].payments.push(p);
+      groups[key].total += cleanAmount(p.pago);
+    });
+
+    storeProfiles.forEach(profile => {
+      const phone = String(profile.phone ?? '');
+      const customer = phone
+        ? customers.find(c => [c.phone, c.waNumber].some(v => String(v ?? '').replace(/\D/g, '').endsWith(phone.replace(/^591/, ''))))
+        : customers.find(c => cleanName(c.name) === cleanName(profile.name));
+      const key = customer?.id || (phone ? `store-${phone}` : `store-${cleanName(profile.name)}`);
+      if (!groups[key]) {
+        groups[key] = {
+          key,
+          customerId: customer?.id ?? null,
+          name: customer?.name || profile.name || 'Cliente tienda',
+          phone: profile.phone || customer?.waNumber || customer?.phone || '',
+          payments: [],
+          storeOrders: [],
+          total: 0,
+          hasMain: !!customer,
+          hasStore: true,
+        };
+      }
+      groups[key].hasStore = true;
+      if (!groups[key].phone && profile.phone) groups[key].phone = profile.phone;
+      groups[key].storeOrders = profile.orders ?? [];
+      groups[key].storeTotal = Number(profile.total ?? 0);
+    });
+
+    return Object.values(groups)
+      .filter((profile: any) => profile.payments.length > 0 || profile.customerId || profile.hasStore)
+      .filter((profile: any) => {
+        const q = search.trim().toLowerCase();
+        if (!q) return true;
+        return profile.name.toLowerCase().includes(q) || String(profile.phone ?? '').includes(q);
+      })
+      .sort((a: any, b: any) => (b.total + (b.storeTotal ?? 0)) - (a.total + (a.storeTotal ?? 0)))
+      .slice(0, 80);
+  }, [customers, payments, storeProfiles, search]);
+
+  const executeConfirm = async () => {
+    if (!confirm) return;
+    setLoading(true);
+    try {
+      if (confirm.type === 'profile' && confirm.profile) {
+        await adminApi.rootDelete({
+          customerId: confirm.profile.customerId,
+          name: confirm.profile.name,
+          phone: confirm.profile.phone,
+        });
+      }
+      if (confirm.type === 'payment' && confirm.payment) {
+        await pagosApi.delete(confirm.payment.id);
+      }
+      setConfirm(null);
+      onRefresh?.();
+      adminApi.storeProfiles()
+        .then(data => setStoreProfiles(Array.isArray(data) ? data : []))
+        .catch(() => setStoreProfiles([]));
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo borrar.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="rounded-[20px] bg-white border border-gray-100 p-4 space-y-3">
+        <div>
+          <p className="text-[12px] font-black text-gray-800">Limpieza de pruebas</p>
+          <p className="text-[10px] text-gray-400 mt-0.5">Borra un perfil completo o un pago suelto.</p>
+        </div>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar nombre o número..."
+            className="w-full border border-gray-200 rounded-2xl pl-9 pr-3 py-3 text-[13px] font-bold outline-none focus:border-[#ff2d78]"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {profiles.length === 0 ? (
+          <p className="text-center text-[11px] text-gray-400 py-8">No hay resultados</p>
+        ) : profiles.map((profile: any) => {
+          const isOpen = openKey === profile.key;
+          return (
+          <div key={profile.key} className="rounded-[20px] bg-white border border-gray-100 p-3 space-y-3">
+            <button
+              onClick={() => setOpenKey(isOpen ? null : profile.key)}
+              className="w-full flex items-center gap-3 text-left"
+            >
+              <div className="w-9 h-9 rounded-2xl bg-pink-50 text-[#ff2d78] flex items-center justify-center font-black text-xs">
+                {String(profile.name || '?').charAt(0)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-black text-gray-800 uppercase truncate">{profile.name}</p>
+                <p className="text-[10px] text-gray-400 font-bold">
+                  {profile.phone ? String(profile.phone).replace(/^591/, '') : 'Sin número'} · {profile.payments.length} pago{profile.payments.length === 1 ? '' : 's'} · {profile.storeOrders?.length ?? 0} tienda
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                {profile.hasStore && <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-600 text-[9px] font-black">Tienda</span>}
+                {profile.hasMain && <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-[9px] font-black">App</span>}
+                <span className="text-gray-300 text-xs font-black">{isOpen ? '▲' : '▼'}</span>
+              </div>
+            </button>
+
+            {isOpen && (
+              <div className="space-y-3 border-t border-gray-100 pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-wider">
+                    Bs {profile.total} pagos · Bs {profile.storeTotal ?? 0} tienda
+                  </div>
+                  <button
+                disabled={loading}
+                onClick={() => setConfirm({ type: 'profile', profile })}
+                className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black disabled:opacity-50"
+              >
+                Borrar todo
+              </button>
+                </div>
+
+                {profile.payments.length > 0 && (
+              <div className="space-y-1 max-h-44 overflow-y-auto">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider px-1">Pagos</p>
+                {profile.payments.slice(0, 20).map((payment: Payment) => (
+                  <div key={payment.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-gray-50">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-gray-700">Bs {cleanAmount(payment.pago)}</p>
+                      <p className="text-[9px] text-gray-400">
+                        {parseAppDate(payment.date)?.toLocaleString('es-BO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) ?? 'Sin fecha'}
+                      </p>
+                    </div>
+                    <button
+                      disabled={loading}
+                      onClick={() => setConfirm({ type: 'payment', payment })}
+                      className="p-2 rounded-lg text-rose-500 hover:bg-rose-50 disabled:opacity-50"
+                      title="Borrar este pago"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+                {(profile.storeOrders?.length ?? 0) > 0 && (
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider px-1">Tienda</p>
+                    {profile.storeOrders.slice(0, 10).map((order: any) => (
+                      <div key={order.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-blue-50/60">
+                        <div>
+                          <p className="text-[10px] font-black text-blue-700">Pedido #{order.id}</p>
+                          <p className="text-[9px] text-blue-400">{order.status ?? 'sin estado'}</p>
+                        </div>
+                        <span className="text-[10px] font-black text-blue-700">Bs {cleanAmount(order.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          );
+        })}
+      </div>
+
+      <ConfirmModal
+        isOpen={!!confirm}
+        onClose={() => setConfirm(null)}
+        onConfirm={executeConfirm}
+        title={confirm?.type === 'profile' ? 'Borrar perfil completo' : 'Borrar pago'}
+        message={confirm?.type === 'profile'
+          ? `Se borrará todo rastro de ${confirm.profile?.name}: perfil, pagos, tienda y WhatsApp.`
+          : 'Se borrará solo este pago.'}
+      />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // TAB: DATOS — Exportar + Gestión de Pagos
 // ═══════════════════════════════════════════════════════════════════
-function TabDatos({ payments }: { payments: Payment[] }) {
+function TabDatos({ payments, onRefresh }: { payments: Payment[]; onRefresh?: () => void }) {
   const [exportDate, setExportDate] = useState(new Date().toISOString().split('T')[0]);
   const [showReport, setShowReport] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -191,21 +436,20 @@ function TabDatos({ payments }: { payments: Payment[] }) {
     if (!confirmDelete) return;
     try {
       if (confirmDelete.bulk) {
-        const batch = writeBatch(db);
-        selectedIds.forEach(id => batch.delete(doc(db, 'pagos', id)));
-        await batch.commit();
+        await Promise.all([...selectedIds].map(id => pagosApi.delete(id)));
         setSelectedIds(new Set());
       } else if (confirmDelete.id) {
-        await deleteDoc(doc(db, 'pagos', confirmDelete.id));
+        await pagosApi.delete(confirmDelete.id);
       }
-    } catch (e) { console.error(e); }
+      onRefresh?.();
+    } catch (e) { console.error(e); alert('No se pudo eliminar.'); }
     finally { setConfirmDelete(null); }
   };
 
   const handleSaveName = async (id: string) => {
     if (!editingName.trim()) return;
-    try { await updateDoc(doc(db, 'pagos', id), { nombre: editingName.trim() }); }
-    catch (e) { console.error(e); }
+    try { await pagosApi.update(id, { nombre: editingName.trim() }); onRefresh?.(); }
+    catch (e) { console.error(e); alert('No se pudo guardar.'); }
     setEditingPaymentId(null);
   };
 

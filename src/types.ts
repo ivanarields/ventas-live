@@ -69,6 +69,11 @@ export interface Payment {
   method?: string;
   verified?: boolean;
   customerId?: string;
+  phone?: string | null;
+  verificationOrigin?: 'automatic' | 'manual' | 'whatsapp_pending' | 'macrodroid_only' | 'other';
+  livePaymentId?: string | null;
+  livePaymentStatus?: string | null;
+  isLivePending?: boolean;
 }
 
 export interface Customer {

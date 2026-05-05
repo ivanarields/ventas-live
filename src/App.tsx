@@ -480,7 +480,8 @@ const formatTransactionDate = (dateValue: any): string => {
 
 import { DetailedAnalysis, type CategoryData } from './components/DetailedAnalysis';
 const AdminTiendaView = React.lazy(() => import('./components/AdminTiendaView').then(m => ({ default: m.AdminTiendaView })));
-import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, setAuthContext, clearAuthContext } from './lib/api';
+import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, adminApi, setAuthContext, clearAuthContext } from './lib/api';
+import { isStrongNameMatch } from './services/nameMatching';
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs,
   query, where, orderBy, limit, serverTimestamp, writeBatch, increment,
@@ -553,6 +554,8 @@ const FINANCE_CATEGORIES = [
   'Impuestos', 'Personal', 'Otros'
 ];
 
+type VerificationOrigin = 'automatic' | 'manual' | 'whatsapp_pending' | 'macrodroid_only' | 'other';
+
 interface Payment {
   id: string;
   nombre: string;
@@ -562,6 +565,11 @@ interface Payment {
   method?: string;
   verified?: boolean;
   customerId?: string;
+  phone?: string | null;
+  verificationOrigin?: VerificationOrigin;
+  livePaymentId?: string | null;
+  livePaymentStatus?: string | null;
+  isLivePending?: boolean;
 }
 
 interface Customer {
@@ -1060,6 +1068,7 @@ export default function App() {
         totalItems: c.total_items ?? 0,
         pendingItems: c.pending_items ?? 0,
         deliveredItems: c.delivered_items ?? 0,
+        createdAt: c.created_at,
       })));
 
       // Normalizar pagos
@@ -1072,6 +1081,11 @@ export default function App() {
         method: p.method,
         verified: p.verified,
         customerId: p.customer_id ? String(p.customer_id) : undefined,
+        phone: p.phone ?? null,
+        verificationOrigin: p.verification_origin ?? 'other',
+        livePaymentId: p.live_payment_id ?? null,
+        livePaymentStatus: p.live_payment_status ?? null,
+        isLivePending: !!p.is_live_pending,
       })).sort((a: any, b: any) => {
         const tA = parseAppDate(a.date)?.getTime() || 0;
         const tB = parseAppDate(b.date)?.getTime() || 0;
@@ -1328,71 +1342,6 @@ export default function App() {
     return people.find(p => p.customerId === selectedPersonId || cleanName(p.nombre) === selectedPersonId);
   }, [people, selectedPersonId]);
 
-  // Auto-cleanup orphaned customers
-  useEffect(() => {
-    if (loading || !user || customers.length === 0) return;
-
-    const cleanupOrphanedCustomers = async () => {
-      for (const customer of customers) {
-        // Find if this customer has any data in our 'people' aggregation
-        const cleanedName = cleanName(customer.name);
-        const groupKey = cleanedName.split(' ').sort().join(' ').trim();
-        const personData = people.find(p => {
-          const pKey = cleanName(p.nombre).split(' ').sort().join(' ').trim();
-          return pKey === groupKey;
-        });
-
-        const hasPayments = personData && personData.payments.length > 0;
-
-        if (!hasPayments) {
-          // Check if it's not a brand new customer (to avoid deleting while adding)
-          let created = 0;
-          if (customer.createdAt) {
-            if (typeof customer.createdAt === 'string') {
-              created = new Date(customer.createdAt).getTime();
-            } else if (customer.createdAt.toDate) {
-              created = customer.createdAt.toDate().getTime();
-            } else if (customer.createdAt.seconds) {
-              created = customer.createdAt.seconds * 1000;
-            }
-          }
-          
-          const now = Date.now();
-          
-          // If created more than 10 seconds ago and has no payments, delete
-          // Reduced grace period for faster cleanup as requested
-          if (now - created > 10000) {
-            try {
-              // Delete the customer document
-              await deleteDoc(doc(db, 'customers', customer.id));
-              
-              // Also delete any orphaned pedidos/orders for this customer to be "completely" gone
-              if (personData) {
-                const batch = writeBatch(db);
-                personData.pedidos.forEach((ped: any) => {
-                  batch.delete(doc(db, 'pedidos', ped.id));
-                });
-                if (personData.orders) {
-                  personData.orders.forEach((ord: any) => {
-                    batch.delete(doc(db, 'orders', ord.id));
-                  });
-                }
-                await batch.commit();
-              }
-              
-              console.log(`Auto-deleted orphaned customer and data: ${customer.name}`);
-            } catch (err) {
-              console.error("Error in auto-cleanup:", err);
-            }
-          }
-        }
-      }
-    };
-
-    const timer = setTimeout(cleanupOrphanedCustomers, 1000);
-    return () => clearTimeout(timer);
-  }, [payments, pedidos, orders, customers, people, loading, user]);
-
   const [loginError, setLoginError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -1581,6 +1530,7 @@ export default function App() {
                 setSelectedPaymentTime("");
               }}
               onOpenPeople={() => setShowPeopleModal(true)}
+              onRefresh={loadData}
             />
           )}
           {currentTab === 'finance' && (
@@ -1601,7 +1551,7 @@ export default function App() {
               </React.Suspense>
             </motion.div>
           )}
-          {currentTab === 'settings' && <SettingsView payments={payments} onLogout={handleLogout} userId={user?.id ?? ''} key="settings" />}
+          {currentTab === 'settings' && <SettingsView payments={payments} customers={customers} onRefresh={loadData} onLogout={handleLogout} userId={user?.id ?? ''} key="settings" />}
         </AnimatePresence>
       </main>
 
@@ -2477,6 +2427,7 @@ function PaymentsView({
   onOpenCalendar, 
   onResetDate, 
   onOpenPeople,
+  onRefresh,
   onToggleHideCompleted,
   pedidos,
   hideCompletedWork,
@@ -2495,6 +2446,7 @@ function PaymentsView({
   onOpenCalendar: () => void,
   onResetDate: () => void,
   onOpenPeople: () => void,
+  onRefresh?: () => void,
   onToggleHideCompleted: () => void,
   hideCompletedWork: boolean,
   key?: string 
@@ -2506,6 +2458,13 @@ function PaymentsView({
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
+  const [verifyingLivePaymentId, setVerifyingLivePaymentId] = useState<string | null>(null);
+
+  const verificationPalette = (origin: VerificationOrigin) => {
+    if (origin === 'automatic') return { bg: '#ecfdf5', fg: '#10b981' };
+    if (origin === 'manual' || origin === 'whatsapp_pending') return { bg: '#faf5ff', fg: '#a855f7' };
+    return { bg: '#f8fafc', fg: '#94a3b8' };
+  };
 
   const onSelectPerson = (id: string) => {
     onSelectPersonProp(id);
@@ -2518,43 +2477,28 @@ function PaymentsView({
 
   const executeDelete = async () => {
     if (!confirmDelete) return;
-    const paymentToDelete = payments.find(p => p.id === confirmDelete);
-    
     try {
-      await deleteDoc(doc(db, 'pagos', confirmDelete));
-      
-      // If we have the payment data, check if it was the last one
-      if (paymentToDelete) {
-        const cleanedName = cleanName(paymentToDelete.nombre);
-        const remainingPayments = payments.filter(p => 
-          p.id !== confirmDelete && 
-          (p.customerId === paymentToDelete.customerId || cleanName(p.nombre) === cleanedName)
-        );
-
-        if (remainingPayments.length === 0) {
-          // It was the last payment! Clean up everything immediately
-          const batch = writeBatch(db);
-          
-          // 1. Delete customer doc
-          if (paymentToDelete.customerId) {
-            batch.delete(doc(db, 'customers', paymentToDelete.customerId));
-          } else {
-            const q = query(collection(db, 'customers'), where('name', '==', cleanedName));
-            const snap = await getDocs(q);
-            snap.docs.forEach(d => batch.delete(d.ref));
-          }
-
-          // 2. Delete pedidos and orders (we'll let the background cleanup handle this if we can't find them here,
-          // but let's try to find them by customerId/name if possible)
-          // Actually, the background cleanup I added is already watching 'payments' and 'people'
-          // and it will trigger because 'payments' just changed.
-          // But let's make it faster by reducing the grace period in the effect.
-        }
-      }
+      await pagosApi.delete(confirmDelete);
+      onRefresh?.();
     } catch (error) {
       console.error("Error deleting payment:", error);
     } finally {
       setConfirmDelete(null);
+    }
+  };
+
+  const verifyLivePaymentFromPayments = async (livePaymentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setVerifyingLivePaymentId(livePaymentId);
+    try {
+      await pagosApi.verifyLivePayment(livePaymentId);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error verificando pago WhatsApp:', error);
+      const message = error instanceof Error ? error.message : 'Error desconocido';
+      alert(`No se pudo verificar el pago: ${message}`);
+    } finally {
+      setVerifyingLivePaymentId(null);
     }
   };
 
@@ -2618,13 +2562,43 @@ function PaymentsView({
           totalAmount: 0,
           lastAmount: amount,
           lastTimestamp: ts,
-          phone: customer?.phone || '',
+          phone: customer?.phone || p.phone || '',
           customerId: customer?.id || null,
           history: []
         };
       }
+      if (!groups[groupKey].phone && p.phone) groups[groupKey].phone = p.phone;
       groups[groupKey].totalAmount += amount;
       groups[groupKey].history.push({ ...p, pago: amount });
+    });
+
+    Object.values(groups).forEach((group: any) => {
+      const origins = group.history.map((p: any) => p.verificationOrigin) as VerificationOrigin[];
+      const hasAutomatic = origins.includes('automatic');
+      const hasUnmatched = origins.some((o: string) => o === 'macrodroid_only' || o === 'other');
+      const hasWhatsappPending = group.history.some((p: any) =>
+        p.isLivePending ||
+        p.verificationOrigin === 'whatsapp_pending' ||
+        p.livePaymentStatus === 'pendiente_whatsapp' ||
+        p.livePaymentStatus === 'revision_manual'
+      );
+      group.pendingLivePaymentId = group.history.find((p: any) =>
+        p.livePaymentId && (
+          p.isLivePending ||
+          p.verificationOrigin === 'whatsapp_pending' ||
+          p.livePaymentStatus === 'pendiente_whatsapp' ||
+          p.livePaymentStatus === 'revision_manual'
+        )
+      )?.livePaymentId ?? null;
+      group.verificationOrigin = hasWhatsappPending
+        ? 'whatsapp_pending'
+        : origins.includes('manual')
+          ? 'manual'
+          : hasAutomatic && hasUnmatched
+            ? 'whatsapp_pending'
+            : origins.length > 0 && origins.every((o: string) => o === 'automatic')
+              ? 'automatic'
+              : 'other';
     });
 
     let result = Object.values(groups);
@@ -2668,7 +2642,7 @@ function PaymentsView({
     }
 
     return result.sort((a: any, b: any) => b.lastTimestamp - a.lastTimestamp);
-  }, [filteredPayments, customers, pedidos, hideCompletedWork]);
+  }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders]);
 
   return (
     <motion.div 
@@ -2752,7 +2726,9 @@ function PaymentsView({
             </p>
           </div>
         ) : (
-          groupedPayments.map((group: any, groupIdx: number) => (
+          groupedPayments.map((group: any, groupIdx: number) => {
+            const palette = verificationPalette(group.verificationOrigin ?? 'other');
+            return (
             <div key={`${group.nombre}-${groupIdx}`} className="card-modern p-0 overflow-hidden">
               {/* Header Card */}
               <div 
@@ -2766,7 +2742,13 @@ function PaymentsView({
                 className="w-full pl-2 pr-4 py-4 flex items-center justify-between active:bg-gray-50 transition-colors gap-2 cursor-pointer"
               >
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  <div className="flex-shrink-0 w-7 h-7 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-500">
+                  <div
+                    className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center"
+                    style={{
+                      backgroundColor: palette.bg,
+                      color: palette.fg,
+                    }}
+                  >
                     <CheckCircle2 className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col items-start min-w-0">
@@ -2776,11 +2758,21 @@ function PaymentsView({
                   </div>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
+                  {group.pendingLivePaymentId && (
+                    <button
+                      onClick={(e) => verifyLivePaymentFromPayments(group.pendingLivePaymentId, e)}
+                      disabled={verifyingLivePaymentId === group.pendingLivePaymentId}
+                      className="px-3 py-2 rounded-xl bg-violet-50 text-violet-600 border border-violet-100 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 active:scale-95"
+                    >
+                      {verifyingLivePaymentId === group.pendingLivePaymentId ? '...' : 'Verificar'}
+                    </button>
+                  )}
                   <span className="font-extrabold text-brand text-base">Bs {group.totalAmount}</span>
                 </div>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -2871,7 +2863,10 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
 
     // Buscar en el estado local primero (ya cargado desde Supabase)
     const existing = customers.find((c: any) =>
-      cleanName(c.name) === cleanedName || cleanName(c.canonicalName ?? '') === cleanedName
+      cleanName(c.name) === cleanedName ||
+      cleanName(c.canonicalName ?? '') === cleanedName ||
+      isStrongNameMatch(c.name, cleanedName) ||
+      isStrongNameMatch(c.canonicalName ?? '', cleanedName)
     );
 
     if (existing) {
@@ -4984,7 +4979,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       .map((p: any) => ({
         id: p.id,
         time: p.date,
-        amount: p.pago
+        amount: p.pago,
+        method: p.method || '',
+        verificationOrigin: p.verificationOrigin ?? 'other'
       }));
   }, [person.payments, selectedPedido]);
 
@@ -5098,31 +5095,12 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
 
   const handleDeleteProfile = async () => {
     try {
-      const batch = writeBatch(db);
-      
-      // Delete all payments
-      person.payments.forEach((p: any) => {
-        batch.delete(doc(db, 'pagos', p.id));
+      await adminApi.rootDelete({
+        customerId: person.customerId,
+        name: person.nombre,
+        phone: person.waNumber || person.phone,
       });
-      
-      // Delete all pedidos
-      person.pedidos.forEach((p: any) => {
-        batch.delete(doc(db, 'pedidos', p.id));
-      });
-      
-      // Delete all orders
-      if (person.orders) {
-        person.orders.forEach((o: any) => {
-          batch.delete(doc(db, 'orders', o.id));
-        });
-      }
-      
-      // Delete customer profile
-      if (person.customerId) {
-        batch.delete(doc(db, 'customers', person.customerId));
-      }
-      
-      await batch.commit();
+      await loadData();
       onClose();
     } catch (error) {
       console.error('Error deleting profile:', error);

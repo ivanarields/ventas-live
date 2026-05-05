@@ -12,6 +12,8 @@ interface Payment {
   amount: number;
   name?: string;
   type?: 'A' | 'B';
+  method?: string;
+  verificationOrigin?: 'automatic' | 'manual' | 'whatsapp_pending' | 'macrodroid_only' | 'other';
 }
 
 interface PaymentHistoryTapeProps {
@@ -59,7 +61,7 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
           align-items: center;
           gap: 8px;
           overflow-x: auto;
-          height: 45px;
+          height: 54px;
           width: 100%;
         }
 
@@ -125,6 +127,24 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
           }
           
           const isActive = isLargeList ? activePaymentIndex === index : true;
+          const origin = payment.verificationOrigin ?? 'other';
+          const accentColor = origin === 'automatic'
+            ? '#10b981'
+            : origin === 'manual' || origin === 'whatsapp_pending'
+              ? '#a855f7'
+              : '#94a3b8';
+          const mutedColor = origin === 'automatic'
+            ? '#34d399'
+            : origin === 'manual' || origin === 'whatsapp_pending'
+              ? '#d8b4fe'
+              : '#cbd5e1';
+          const label = origin === 'whatsapp_pending'
+            ? 'Verificar'
+            : origin === 'manual'
+            ? 'Manual'
+            : origin === 'automatic'
+              ? 'Automatico'
+              : 'Pendiente';
 
           return (
             <div 
@@ -146,12 +166,24 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
                   opacity: isActive ? 1 : 0.4
                 }}
               >
-                <span style={{ fontSize: '16px', fontWeight: 900, color: isActive ? '#10b981' : '#94a3b8', lineHeight: 1 }}>
+                <span style={{ fontSize: '16px', fontWeight: 900, color: isActive ? accentColor : '#94a3b8', lineHeight: 1 }}>
                   {payment.amount}
                 </span>
-                <span style={{ fontSize: '9px', color: isActive ? '#34d399' : '#cbd5e1', marginTop: '4px', fontWeight: 700, textTransform: 'uppercase' }}>
+                <span style={{ fontSize: '9px', color: isActive ? mutedColor : '#cbd5e1', marginTop: '4px', fontWeight: 700, textTransform: 'uppercase' }}>
                   {formattedTime}
                 </span>
+                <span
+                  aria-label={`Pago ${label}`}
+                  title={label}
+                  style={{
+                    width: '5px',
+                    height: '5px',
+                    borderRadius: '50%',
+                    backgroundColor: isActive ? accentColor : '#e2e8f0',
+                    marginTop: '5px',
+                    display: 'block'
+                  }}
+                />
               </button>
 
               {index < payments.length - 1 && !isLargeList && <div className="divider-tape" />}
@@ -169,7 +201,7 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
               key={idx}
               animate={{ 
                 scale: activePaymentIndex === idx ? 1.3 : 1,
-                backgroundColor: activePaymentIndex === idx ? '#10b981' : '#f1f5f9'
+                backgroundColor: activePaymentIndex === idx ? '#94a3b8' : '#f1f5f9'
               }}
               style={{
                 width: '5px',
