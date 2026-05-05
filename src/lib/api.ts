@@ -15,7 +15,7 @@ export function clearAuthContext() {
   _token = null;
 }
 
-async function apiFetch(path: string, init: RequestInit = {}) {
+export async function apiFetch(path: string, init: RequestInit = {}) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(init.headers as Record<string, string> ?? {}),

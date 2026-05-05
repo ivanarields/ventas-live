@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { AiSettingsPanel } from '../components/AiSettingsPanel';
 import { WhatsappConnectionPanel } from '../components/WhatsappConnectionPanel';
-import { adminApi, pagosApi } from '../lib/api';
+import { adminApi, pagosApi, apiFetch } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Package, BarChart3, Trash2, Search, Check, CheckCircle2,
   LogOut, Printer, FileSpreadsheet, Eye, Pencil, X, Wallet,
-  Calendar, Zap, Database, Minus, Plus, Users,
+  Calendar, Zap, Database, Minus, Plus, Users, MessageSquare, Loader2,
 } from 'lucide-react';
 import { Payment } from '../types';
 
@@ -124,7 +124,7 @@ function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = 
               : <p className="text-center text-sm text-gray-400 py-8">Inicia sesión para ver la configuración de IA</p>
           )}
 
-          {activeTab === 'datos' && <TabDatos payments={payments} onRefresh={onRefresh} />}
+          {activeTab === 'datos' && <TabDatos payments={payments} onRefresh={onRefresh} userId={userId} />}
 
           {activeTab === 'base' && <TabBaseDatos payments={payments} customers={customers} onRefresh={onRefresh} />}
         </motion.div>
@@ -377,7 +377,7 @@ function TabBaseDatos({ payments, customers, onRefresh }: {
 // ═══════════════════════════════════════════════════════════════════
 // TAB: DATOS — Exportar + Gestión de Pagos
 // ═══════════════════════════════════════════════════════════════════
-function TabDatos({ payments, onRefresh }: { payments: Payment[]; onRefresh?: () => void }) {
+function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefresh?: () => void; userId?: string }) {
   const [exportDate, setExportDate] = useState(new Date().toISOString().split('T')[0]);
   const [showReport, setShowReport] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -388,6 +388,44 @@ function TabDatos({ payments, onRefresh }: { payments: Payment[]; onRefresh?: ()
   const [confirmDelete, setConfirmDelete] = useState<{ id?: string; bulk?: boolean } | null>(null);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+
+  // Conversaciones WhatsApp
+  type Conversacion = { id: string; nombre: string | null; phone: string | null; mensajes: number; resumen_at: string | null };
+  const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
+  const [loadingConv, setLoadingConv] = useState(false);
+  const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
+  const [confirmDeleteConv, setConfirmDeleteConv] = useState<'selected' | 'all' | null>(null);
+  const [deletingConv, setDeletingConv] = useState(false);
+
+  const cargarConversaciones = async () => {
+    setLoadingConv(true);
+    try {
+      const data = await apiFetch('/api/live-sales/conversations');
+      setConversaciones(data.conversaciones ?? []);
+    } catch (e) { console.error(e); }
+    finally { setLoadingConv(false); }
+  };
+
+  const toggleConv = (id: string) => {
+    const next = new Set(selectedConvIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedConvIds(next);
+  };
+
+  const ejecutarBorradoConv = async () => {
+    setDeletingConv(true);
+    try {
+      const ids = confirmDeleteConv === 'all' ? [] : [...selectedConvIds];
+      await apiFetch('/api/live-sales/conversations', {
+        method: 'DELETE',
+        body: JSON.stringify({ ids }),
+      });
+      setSelectedConvIds(new Set());
+      setConversaciones([]);
+      await cargarConversaciones();
+    } catch (e) { console.error(e); alert('Error al eliminar.'); }
+    finally { setDeletingConv(false); setConfirmDeleteConv(null); }
+  };
 
   const filteredPayments = useMemo(() => {
     return payments.filter(p => {
@@ -584,6 +622,87 @@ function TabDatos({ payments, onRefresh }: { payments: Payment[]; onRefresh?: ()
           <p className="text-center text-[11px] text-gray-400 py-4">Sin resultados</p>
         )}
       </div>
+
+      {/* Conversaciones WhatsApp */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider flex items-center gap-1">
+            <MessageSquare size={11} /> Conversaciones WhatsApp
+          </p>
+          <button
+            onClick={cargarConversaciones}
+            disabled={loadingConv}
+            className="text-[10px] font-bold text-brand flex items-center gap-1"
+          >
+            {loadingConv ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />}
+            {conversaciones.length > 0 ? 'Recargar' : 'Ver'}
+          </button>
+        </div>
+
+        {conversaciones.length > 0 && (
+          <>
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => setSelectedConvIds(new Set(conversaciones.map(c => c.id)))}
+                className="text-[10px] font-bold text-gray-500 px-2 py-1 bg-gray-100 rounded-lg"
+              >Seleccionar todo</button>
+              <button
+                onClick={() => setSelectedConvIds(new Set())}
+                className="text-[10px] font-bold text-gray-500 px-2 py-1 bg-gray-100 rounded-lg"
+              >Quitar selección</button>
+              {selectedConvIds.size > 0 && (
+                <button
+                  onClick={() => setConfirmDeleteConv('selected')}
+                  className="text-[10px] font-bold text-rose-600 px-2 py-1 bg-rose-50 rounded-lg ml-auto"
+                >Eliminar ({selectedConvIds.size})</button>
+              )}
+              <button
+                onClick={() => setConfirmDeleteConv('all')}
+                className="text-[10px] font-bold text-rose-600 px-2 py-1 bg-rose-50 rounded-lg"
+              >Borrar todo</button>
+            </div>
+
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {conversaciones.map(c => (
+                <div
+                  key={c.id}
+                  onClick={() => toggleConv(c.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-all ${
+                    selectedConvIds.has(c.id) ? 'bg-rose-50 border border-rose-200' : 'bg-gray-50 border border-transparent'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center flex-shrink-0 ${
+                    selectedConvIds.has(c.id) ? 'bg-rose-500 border-rose-500' : 'border-gray-300'
+                  }`}>
+                    {selectedConvIds.has(c.id) && <Check size={9} className="text-white" strokeWidth={3} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-bold text-gray-700 truncate">{c.nombre ?? 'Sin nombre'}</p>
+                    <p className="text-[10px] text-gray-400">{c.phone ?? '—'} · {c.mensajes} mensajes</p>
+                  </div>
+                  {c.resumen_at && <span className="text-[9px] text-emerald-500 font-bold">✓</span>}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {conversaciones.length === 0 && !loadingConv && (
+          <p className="text-center text-[11px] text-gray-400 py-3">Toca "Ver" para cargar conversaciones</p>
+        )}
+      </div>
+
+      <ConfirmModal
+        isOpen={!!confirmDeleteConv}
+        onClose={() => setConfirmDeleteConv(null)}
+        onConfirm={ejecutarBorradoConv}
+        title="Eliminar conversaciones"
+        message={
+          confirmDeleteConv === 'all'
+            ? '¿Eliminar TODAS las conversaciones WhatsApp? Esto borra mensajes, comprobantes y pagos del panel.'
+            : `¿Eliminar ${selectedConvIds.size} conversación(es) seleccionada(s)?`
+        }
+      />
 
       {/* Print Modal */}
       <AnimatePresence>

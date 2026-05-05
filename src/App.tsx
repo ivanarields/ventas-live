@@ -480,7 +480,7 @@ const formatTransactionDate = (dateValue: any): string => {
 
 import { DetailedAnalysis, type CategoryData } from './components/DetailedAnalysis';
 const AdminTiendaView = React.lazy(() => import('./components/AdminTiendaView').then(m => ({ default: m.AdminTiendaView })));
-import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, adminApi, setAuthContext, clearAuthContext } from './lib/api';
+import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, adminApi, setAuthContext, clearAuthContext, apiFetch } from './lib/api';
 import { isStrongNameMatch } from './services/nameMatching';
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs,
@@ -2459,6 +2459,43 @@ function PaymentsView({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
   const [verifyingLivePaymentId, setVerifyingLivePaymentId] = useState<string | null>(null);
+  const [procesandoLive, setProcesandoLive] = useState(false);
+  const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
+
+  const procesarLive = async () => {
+    if (procesandoLive) return;
+    setProcesandoLive(true);
+    setProcesandoProgreso(null);
+    try {
+      const { clientes } = await apiFetch('/api/live-sales/pending-conversations');
+      if (!clientes || clientes.length === 0) {
+        alert('No hay conversaciones pendientes de procesar.');
+        return;
+      }
+      setProcesandoProgreso({ actual: 0, total: clientes.length });
+      for (let i = 0; i < clientes.length; i++) {
+        const cliente = clientes[i];
+        try {
+          await apiFetch('/api/ai/summarize-conversation', {
+            method: 'POST',
+            body: JSON.stringify({ clienteId: cliente.id }),
+          });
+        } catch (e) {
+          console.warn(`[procesarLive] error en ${cliente.nombre}:`, e);
+        }
+        setProcesandoProgreso({ actual: i + 1, total: clientes.length });
+        if (i < clientes.length - 1) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+      onRefresh?.();
+    } catch (e: any) {
+      alert('Error al obtener conversaciones: ' + (e?.message ?? 'Error desconocido'));
+    } finally {
+      setProcesandoLive(false);
+      setProcesandoProgreso(null);
+    }
+  };
 
   const verificationPalette = (origin: VerificationOrigin) => {
     if (origin === 'automatic') return { bg: '#ecfdf5', fg: '#10b981' };
@@ -2672,12 +2709,37 @@ function PaymentsView({
           >
             <Hash size={18} />
           </button>
-          <button 
-            onClick={onToggleHideCompleted} 
+          <button
+            onClick={procesarLive}
+            disabled={procesandoLive}
+            className={cn(
+              "h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 px-2.5 gap-1.5 text-xs font-semibold",
+              procesandoLive
+                ? "bg-purple-100 text-purple-600 cursor-not-allowed"
+                : "bg-gray-100 text-gray-500 hover:bg-purple-50 hover:text-purple-600"
+            )}
+            title="Procesar todas las conversaciones del Live"
+          >
+            {procesandoLive && procesandoProgreso ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                <span>{procesandoProgreso.actual}/{procesandoProgreso.total}</span>
+              </>
+            ) : procesandoLive ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <>
+                <Zap size={14} />
+                <span>Live</span>
+              </>
+            )}
+          </button>
+          <button
+            onClick={onToggleHideCompleted}
             className={cn(
               "w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90",
-              hideCompletedWork 
-                ? "bg-brand text-white shadow-lg shadow-brand/20" 
+              hideCompletedWork
+                ? "bg-brand text-white shadow-lg shadow-brand/20"
                 : "bg-gray-100 text-gray-400 hover:bg-gray-200"
             )}
             title={hideCompletedWork ? "Mostrando solo pendientes" : "Filtrar completados"}
@@ -4785,6 +4847,22 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const [noteText, setNoteText] = useState(person.notes || '');
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isNotifying, setIsNotifying] = useState(false);
+  const [verifyPaymentPopup, setVerifyPaymentPopup] = useState<{ id: string; livePaymentId: string; amount: number } | null>(null);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+
+  const handleVerifyPaymentFromTape = async () => {
+    if (!verifyPaymentPopup) return;
+    setIsVerifyingPayment(true);
+    try {
+      await pagosApi.verifyLivePayment(verifyPaymentPopup.livePaymentId);
+      onRefresh?.();
+    } catch (e: any) {
+      alert('No se pudo verificar: ' + (e?.message ?? 'Error desconocido'));
+    } finally {
+      setIsVerifyingPayment(false);
+      setVerifyPaymentPopup(null);
+    }
+  };
 
   const handleNotifyLive = async () => {
     if (!person.phone) {
@@ -4981,7 +5059,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         time: p.date,
         amount: p.pago,
         method: p.method || '',
-        verificationOrigin: p.verificationOrigin ?? 'other'
+        verificationOrigin: p.verificationOrigin ?? 'other',
+        livePaymentId: p.livePaymentId ?? null,
       }));
   }, [person.payments, selectedPedido]);
 
@@ -5265,8 +5344,31 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           <div>
             <PaymentHistoryTape
               payments={dayPayments}
-              onPaymentClick={(p) => console.log(`Pago de Bs ${p.amount}`)}
+              onPaymentClick={(p: any) => {
+                if (p.livePaymentId && (p.verificationOrigin === 'whatsapp_pending' || p.verificationOrigin === 'macrodroid_only' || p.verificationOrigin === 'other')) {
+                  setVerifyPaymentPopup({ id: p.id, livePaymentId: p.livePaymentId, amount: p.amount });
+                }
+              }}
             />
+
+            {/* Popup de verificación manual desde el carrusel */}
+            {verifyPaymentPopup && (
+              <div className="fixed inset-0 z-[400] flex items-end justify-center p-4" onClick={() => setVerifyPaymentPopup(null)}>
+                <div className="absolute inset-0 bg-black/20" />
+                <div className="bg-white rounded-[24px] p-5 w-full max-w-sm relative z-10 shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+                  <p className="text-sm font-bold text-gray-700 text-center">¿Verificar pago de <span className="text-brand">Bs {verifyPaymentPopup.amount}</span>?</p>
+                  <p className="text-[11px] text-gray-400 text-center">Se marcará como verificado manualmente.</p>
+                  <div className="flex gap-3">
+                    <button onClick={() => setVerifyPaymentPopup(null)} className="flex-1 py-3 bg-gray-100 rounded-xl text-xs font-bold text-gray-600">
+                      Cancelar
+                    </button>
+                    <button onClick={handleVerifyPaymentFromTape} disabled={isVerifyingPayment} className="flex-1 py-3 bg-violet-500 text-white rounded-xl text-xs font-bold disabled:opacity-50">
+                      {isVerifyingPayment ? '...' : 'Verificar'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <WhatsappPhotos
@@ -5559,7 +5661,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
               <p className="text-xs font-bold uppercase tracking-widest">Sin historial</p>
             </div>
           ) : (
-            dailyOrders.map((order: any, idx: number) => {
+            dailyOrders.filter((order: any) => !order.isOnlyPayment).map((order: any, idx: number) => {
               const isExpanded = expandedPayments.includes(order.dateKey);
               const hasPayments = (order.paymentsList?.length ?? 0) > 0;
               return (
@@ -5595,45 +5697,6 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                     setView('verify');
                   }}
                 />
-                {hasPayments && (
-                  <div className="mt-[-4px] mb-3 px-1">
-                    <button
-                      onClick={() => togglePaymentGroup(order.dateKey)}
-                      className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-100 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 text-slate-600">
-                        <Wallet size={14} />
-                        <span className="text-[10px] font-black uppercase tracking-widest">
-                          {order.paymentCount} {order.paymentCount === 1 ? 'pago' : 'pagos'} · Bs {order.paymentAmount}
-                        </span>
-                      </div>
-                      <ChevronDown
-                        size={14}
-                        className="text-slate-400 transition-transform"
-                        style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                      />
-                    </button>
-                    {isExpanded && (
-                      <div className="mt-2 space-y-1 pl-2">
-                        {order.paymentsList.map((p: any, i: number) => {
-                          const hh = p.date ? String(p.date.getHours()).padStart(2, '0') : '--';
-                          const mm = p.date ? String(p.date.getMinutes()).padStart(2, '0') : '--';
-                          return (
-                            <div key={`${p.id}-${i}`} className="flex items-center justify-between px-3 py-2 rounded-xl bg-white border border-slate-100">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-slate-500 tabular-nums">{hh}:{mm}</span>
-                                {p.method && (
-                                  <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">{p.method}</span>
-                                )}
-                              </div>
-                              <span className="text-[11px] font-black text-[#BE185D]">Bs {p.amount}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
               );
             })

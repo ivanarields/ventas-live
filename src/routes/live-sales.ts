@@ -678,5 +678,120 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
     }
   });
 
+  // Lista todas las conversaciones WhatsApp (panel_clientes) con conteo de mensajes.
+  router.get('/conversations', async (req: Request, res: Response) => {
+    if (!uid(req)) return res.status(401).json({ error: 'x-user-id requerido' });
+    try {
+      const { data: clientes, error } = await supabasePanel
+        .from('panel_clientes')
+        .select('id, nombre, phone, resumen_at, created_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      const ids = (clientes ?? []).map((c: any) => c.id);
+      let msgCounts: Record<string, number> = {};
+      if (ids.length > 0) {
+        const { data: msgs } = await supabasePanel
+          .from('panel_mensajes')
+          .select('cliente_id')
+          .in('cliente_id', ids);
+        for (const m of msgs ?? []) {
+          msgCounts[m.cliente_id] = (msgCounts[m.cliente_id] ?? 0) + 1;
+        }
+      }
+
+      const result = (clientes ?? []).map((c: any) => ({
+        id: c.id,
+        nombre: c.nombre ?? null,
+        phone: c.phone ?? null,
+        resumen_at: c.resumen_at ?? null,
+        created_at: c.created_at,
+        mensajes: msgCounts[c.id] ?? 0,
+      }));
+
+      res.json({ conversaciones: result });
+    } catch (err: any) {
+      console.error('[live-sales/conversations GET]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // Elimina conversaciones (clientes + mensajes + pedidos + evidencias + pagos venta live).
+  router.delete('/conversations', async (req: Request, res: Response) => {
+    if (!uid(req)) return res.status(401).json({ error: 'x-user-id requerido' });
+    const { ids } = req.body as { ids?: string[] };
+    try {
+      let clienteIds: string[];
+      if (!ids || ids.length === 0) {
+        // Borrar todos
+        const { data } = await supabasePanel.from('panel_clientes').select('id');
+        clienteIds = (data ?? []).map((c: any) => c.id);
+      } else {
+        clienteIds = ids;
+      }
+      if (clienteIds.length === 0) return res.json({ ok: true, borrados: 0 });
+
+      await supabasePanel.from('evidencias_venta_live').delete().in('pedido_live_id',
+        (await supabasePanel.from('pedidos_venta_live').select('id').in('cliente_id', clienteIds)).data?.map((p: any) => p.id) ?? []
+      );
+      await supabasePanel.from('pagos_venta_live').delete().in('cliente_id', clienteIds);
+      await supabasePanel.from('pedidos_venta_live').delete().in('cliente_id', clienteIds);
+      await supabasePanel.from('panel_mensajes').delete().in('cliente_id', clienteIds);
+      await supabasePanel.from('panel_clientes').delete().in('id', clienteIds);
+
+      res.json({ ok: true, borrados: clienteIds.length });
+    } catch (err: any) {
+      console.error('[live-sales/conversations DELETE]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // Devuelve lista de clientes del panel que tienen mensajes y necesitan procesamiento.
+  // El frontend llama a este endpoint para obtener la lista y luego procesa uno por uno.
+  router.get('/pending-conversations', async (req: Request, res: Response) => {
+    const userId = uid(req);
+    if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+
+    try {
+      // Traer todos los clientes del panel con al menos 1 mensaje
+      const { data: clientes, error } = await supabasePanel
+        .from('panel_clientes')
+        .select('id, nombre, phone, resumen_at')
+        .order('nombre', { ascending: true });
+
+      if (error) throw error;
+
+      // Filtrar: solo los que tienen mensajes más nuevos que su último resumen (o nunca se resumieron)
+      const clienteIds = (clientes ?? []).map((c: any) => c.id);
+      if (clienteIds.length === 0) return res.json({ clientes: [] });
+
+      const { data: ultimosMensajes } = await supabasePanel
+        .from('panel_mensajes')
+        .select('cliente_id, created_at')
+        .in('cliente_id', clienteIds)
+        .order('created_at', { ascending: false });
+
+      // Agrupar: último mensaje por cliente
+      const ultimoPorCliente: Record<string, string> = {};
+      for (const m of ultimosMensajes ?? []) {
+        if (!ultimoPorCliente[m.cliente_id]) {
+          ultimoPorCliente[m.cliente_id] = m.created_at;
+        }
+      }
+
+      const pendientes = (clientes ?? []).filter((c: any) => {
+        const ultimoMsg = ultimoPorCliente[c.id];
+        if (!ultimoMsg) return false; // sin mensajes, no procesar
+        if (!c.resumen_at) return true; // nunca procesado
+        return new Date(ultimoMsg) > new Date(c.resumen_at); // mensaje más nuevo que resumen
+      }).map((c: any) => ({ id: c.id, nombre: c.nombre ?? 'Sin nombre', phone: c.phone }));
+
+      res.json({ clientes: pendientes });
+    } catch (err: any) {
+      console.error('[live-sales/pending-conversations]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
   return router;
 }

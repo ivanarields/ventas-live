@@ -440,9 +440,10 @@ export async function syncMainPedidoForLiveOrder(
   userId: string,
   pedidoLive: any,
 ) {
-  const total = parseLiveMonto(pedidoLive.total_verificado) ?? 0;
   const name = pedidoLive.nombre_detectado;
-  if (!name || total <= 0) return pedidoLive;
+  if (!name) return pedidoLive;
+  // Usar total_verificado si ya tiene valor; si es 0 usar total_comprobantes (monto detectado en el comprobante)
+  const total = parseLiveMonto(pedidoLive.total_verificado) || parseLiveMonto(pedidoLive.total_comprobantes) || 0;
 
   const customer = await ensureMainCustomerForLive(mainDb, userId, name, pedidoLive.phone);
   const pedido = await ensureMainDailyPedido(mainDb, {

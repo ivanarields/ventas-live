@@ -14,6 +14,7 @@ interface Payment {
   type?: 'A' | 'B';
   method?: string;
   verificationOrigin?: 'automatic' | 'manual' | 'whatsapp_pending' | 'macrodroid_only' | 'other';
+  livePaymentId?: string | null;
 }
 
 interface PaymentHistoryTapeProps {
