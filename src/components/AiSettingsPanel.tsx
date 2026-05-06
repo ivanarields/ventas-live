@@ -6,8 +6,6 @@ import {
   ChevronDown,
   ChevronUp,
   CreditCard,
-  Eye,
-  EyeOff,
   FileText,
   Key,
   Loader2,
@@ -18,7 +16,7 @@ import {
 } from 'lucide-react';
 
 const BRAND = '#ff2d78';
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = 'google/gemini-2.5-flash-lite';
 
 type FeatureConfig = Record<string, { enabled: boolean; model: string }>;
 
@@ -28,6 +26,7 @@ interface AiConfig {
     masked: string;
     active: boolean;
     model: string;
+    active_model?: string;
     source: 'env' | 'db' | 'none';
   };
   owner_name: string;
@@ -79,14 +78,10 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState('');
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [ownerName, setOwnerName] = useState('');
   const [modelInput, setModelInput] = useState(DEFAULT_MODEL);
+  const [ownerName, setOwnerName] = useState('');
+  const [savingOwner, setSavingOwner] = useState(false);
+  const [ownerMsg, setOwnerMsg] = useState('');
   const [showLog, setShowLog] = useState(false);
   const [promptMsg, setPromptMsg] = useState('');
   const [comprobanteMode, setComprobanteMode] = useState<'simple' | 'completo'>('simple');
@@ -104,8 +99,8 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
       if (cRes.ok) {
         const cfg = await cRes.json();
         setConfig(cfg);
+        setModelInput(cfg.openrouter?.active_model || cfg.openrouter?.model || DEFAULT_MODEL);
         setOwnerName(cfg.owner_name ?? '');
-        setModelInput(cfg.openrouter?.model || DEFAULT_MODEL);
       }
       if (uRes.ok) setUsage(await uRes.json());
       if (pRes.ok) {
@@ -133,55 +128,22 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
     return next;
   };
 
-  const saveConfig = async () => {
-    setSaving(true);
-    setSaveMsg('');
+  const saveOwnerName = async () => {
+    setSavingOwner(true);
+    setOwnerMsg('');
     try {
-      const body: Record<string, unknown> = {
-        openRouterModel: modelInput.trim() || DEFAULT_MODEL,
-        features: normalizedFeatures(),
-        ownerName: ownerName.trim() || null,
-      };
-      if (apiKeyInput.trim()) body.openRouterKey = apiKeyInput.trim();
-
       const res = await fetch('/api/ai/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ownerName: ownerName.trim() || null, features: normalizedFeatures() }),
       });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Error al guardar');
-      }
-
-      setSaveMsg('Guardado');
-      setApiKeyInput('');
-      await loadConfig();
-    } catch (e: any) {
-      setSaveMsg(e?.message || 'Error de conexion');
-    } finally {
-      setSaving(false);
-      setTimeout(() => setSaveMsg(''), 4000);
-    }
-  };
-
-  const testKey = async () => {
-    if (!apiKeyInput.trim()) return;
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await fetch('/api/ai/test-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKeyInput.trim(), model: modelInput.trim() || DEFAULT_MODEL }),
-      });
-      const data = await res.json();
-      setTestResult({ ok: !!data.ok, msg: data.message || data.error || 'Sin detalle' });
+      if (!res.ok) throw new Error('Error al guardar');
+      setOwnerMsg('Guardado');
     } catch {
-      setTestResult({ ok: false, msg: 'Error de conexion' });
+      setOwnerMsg('Error al guardar');
     } finally {
-      setTesting(false);
+      setSavingOwner(false);
+      setTimeout(() => setOwnerMsg(''), 3000);
     }
   };
 
@@ -236,42 +198,17 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h4 className="text-sm font-black text-gray-800 flex items-center gap-2">
-            <Key size={13} style={{ color: BRAND }} /> OpenRouter
-          </h4>
+          <div className="flex items-center gap-2">
+            <Key size={13} style={{ color: BRAND }} />
+            <span className="text-sm font-black text-gray-800">Modelo activo</span>
+          </div>
           <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${active ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
-            {active ? `activa ${sourceLabel}` : 'sin configurar'}
+            {active ? 'conectado' : 'sin configurar'}
           </span>
         </div>
-
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-black text-gray-600 uppercase tracking-wide">API key</label>
-          <div className="relative">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={apiKeyInput}
-              onChange={e => setApiKeyInput(e.target.value)}
-              placeholder={active ? `${config?.openrouter?.masked} (nueva key opcional)` : 'sk-or-v1-...'}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 pr-9 text-[11px] font-mono outline-none focus:border-purple-400 h-9"
-            />
-            <button onClick={() => setShowKey(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
-              {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
-            </button>
-          </div>
-          <p className="text-[9px] text-gray-400 leading-tight">
-            La key se usa solo en el servidor. Si existe `OPENROUTER_API_KEY` en el entorno, no hace falta guardarla aqui.
-          </p>
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-black text-gray-600 uppercase tracking-wide">Modelo OpenRouter</label>
-          <input
-            value={modelInput}
-            onChange={e => setModelInput(e.target.value)}
-            placeholder={DEFAULT_MODEL}
-            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-[11px] font-mono outline-none focus:border-purple-400 h-9"
-          />
-        </div>
+        <p className="text-[11px] font-mono text-purple-700 bg-purple-50 rounded-lg px-3 py-2">
+          {modelInput}
+        </p>
 
         <div className="space-y-1.5">
           <label className="text-[10px] font-black text-gray-600 uppercase tracking-wide">Nombre completo de la dueña</label>
@@ -283,22 +220,12 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
             className="w-full rounded-xl border border-gray-200 px-3 py-2 text-[11px] font-mono outline-none focus:border-purple-400 h-9 uppercase"
           />
         </div>
-
-        {apiKeyInput.trim() && (
-          <button onClick={testKey} disabled={testing}
-            className="w-full h-9 rounded-xl font-black text-[11px] text-white disabled:opacity-40"
-            style={{ background: testResult?.ok ? '#10b981' : testResult?.ok === false ? '#ef4444' : 'linear-gradient(135deg,#10b981,#059669)' }}>
-            {testing ? 'Probando...' : testResult?.ok ? 'Key valida' : testResult?.ok === false ? 'Falla' : 'Probar key'}
-          </button>
-        )}
-        {testResult && <p className={`text-[10px] font-bold ${testResult.ok ? 'text-emerald-600' : 'text-red-500'}`}>{testResult.msg}</p>}
-
-        <button onClick={saveConfig} disabled={saving}
+        <button onClick={saveOwnerName} disabled={savingOwner}
           className="w-full h-9 rounded-xl font-black text-[11px] text-white disabled:opacity-40 transition-all active:scale-95"
           style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}>
-          {saving ? 'Guardando...' : 'Guardar OpenRouter'}
+          {savingOwner ? 'Guardando...' : 'Guardar nombre'}
         </button>
-        {saveMsg && <span className="text-[11px] font-bold text-gray-600">{saveMsg}</span>}
+        {ownerMsg && <span className="text-[11px] font-bold text-gray-600">{ownerMsg}</span>}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">

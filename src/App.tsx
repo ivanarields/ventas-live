@@ -2948,7 +2948,12 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
   const [phone, setPhone] = useState(editingPayment?.phone || '');
   const [date, setDate] = useState(() => {
     const d = editingPayment?.date ? parseAppDate(editingPayment.date) : (defaultDate || new Date());
-    return d ? d.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+    if (d) {
+      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   });
   const [filteredCustomers, setFilteredCustomers] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
