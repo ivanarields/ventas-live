@@ -346,35 +346,73 @@ export function createIdentityRouter(
     if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
     if (!supabasePanel) return res.status(503).json({ error: 'supabasePanel no configurado' });
 
-    const { phone, date, days = '4' } = req.query as Record<string, string>;
+    const { phone, date, days = '4', mainPedidoId } = req.query as Record<string, string>;
     if (!phone) return res.status(400).json({ error: 'phone requerido' });
 
     try {
       const phoneNorm = normalizePhone(phone);
+      const mainPedidoNumber = Number(mainPedidoId);
 
-      // El panel guarda teléfonos sin '+' (ej: 59170000000)
-      // Buscamos con y sin el prefijo '+' para tolerancia de formato
-      const phoneVariants = [phoneNorm, phoneNorm.replace(/^\+/, '')];
-      let cliente: { id: string } | null = null;
-      for (const variant of phoneVariants) {
+      let liveOrder: any = null;
+      if (Number.isFinite(mainPedidoNumber)) {
+        const { data } = await supabasePanel
+          .from('pedidos_venta_live')
+          .select('id, main_pedido_id, fecha_pedido, cliente_id')
+          .eq('main_pedido_id', mainPedidoNumber)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        liveOrder = data ?? null;
+      }
+
+      let cliente: { id: string; resumen?: string | null } | null = null;
+      if (liveOrder?.cliente_id) {
         const { data } = await supabasePanel
           .from('panel_clientes')
-          .select('id')
-          .eq('phone', variant)
-          .limit(1)
-          .single();
-        if (data) { cliente = data; break; }
+          .select('id,resumen')
+          .eq('id', liveOrder.cliente_id)
+          .maybeSingle();
+        cliente = data ?? null;
+      }
+
+      if (!cliente) {
+        // El panel guarda teléfonos sin '+' (ej: 59170000000)
+        // Buscamos con y sin el prefijo '+' para tolerancia de formato.
+        const phoneVariants = [phoneNorm, phoneNorm.replace(/^\+/, '')];
+        for (const variant of phoneVariants) {
+          const { data } = await supabasePanel
+            .from('panel_clientes')
+            .select('id,resumen')
+            .eq('phone', variant)
+            .limit(1)
+            .maybeSingle();
+          if (data) { cliente = data; break; }
+        }
       }
 
       if (!cliente) return res.json({ photos: [], cliente_found: false });
 
       // Rango de fechas
-      const pivot = date ? new Date(date) : new Date();
+      const pivot = date ? new Date(date) : (liveOrder?.fecha_pedido ? new Date(liveOrder.fecha_pedido) : new Date());
       const rangeMs = parseInt(days) * 24 * 60 * 60 * 1000;
       const from = new Date(pivot.getTime() - rangeMs).toISOString();
       const to   = new Date(pivot.getTime() + rangeMs).toISOString();
 
-      const { data: mensajes } = await supabasePanel
+      if (!liveOrder) {
+        const fechaPedido = date ? String(date).slice(0, 10) : null;
+        let q = supabasePanel
+          .from('pedidos_venta_live')
+          .select('id, main_pedido_id, fecha_pedido')
+          .eq('cliente_id', cliente.id)
+          .neq('estado', 'archivado')
+          .order('fecha_pedido', { ascending: false })
+          .limit(1);
+        if (fechaPedido) q = q.eq('fecha_pedido', fechaPedido) as typeof q;
+        const { data } = await q.maybeSingle();
+        liveOrder = data ?? null;
+      }
+
+      const mensajesQuery = supabasePanel
         .from('panel_mensajes')
         .select('id, media_url, media_type, direction, created_at, content')
         .eq('cliente_id', cliente.id)
@@ -384,14 +422,173 @@ export function createIdentityRouter(
         .order('created_at', { ascending: false })
         .limit(30);
 
-      const photos = (mensajes ?? []).filter(m =>
+      const evidenciasQuery = liveOrder?.id
+        ? supabasePanel
+          .from('evidencias_venta_live')
+          .select('panel_mensaje_id,tipo,descripcion,metadata')
+          .eq('pedido_live_id', liveOrder.id)
+          .not('panel_mensaje_id', 'is', null)
+        : Promise.resolve({ data: [] as any[] });
+
+      const [{ data: mensajes }, { data: evidencias }] = await Promise.all([
+        mensajesQuery,
+        evidenciasQuery,
+      ]);
+
+      const photosRaw = (mensajes ?? []).filter(m =>
         m.media_url && (
           (m.media_type && m.media_type.startsWith('image/')) ||
           /\.(jpg|jpeg|png|webp)/i.test(m.media_url)
         )
       );
 
-      res.json({ photos, cliente_found: true, cliente_id: cliente.id });
+      const evidenceByMessageId = new Map<string, any>();
+      for (const ev of evidencias ?? []) {
+        if (ev.panel_mensaje_id) evidenceByMessageId.set(ev.panel_mensaje_id, ev);
+      }
+
+      let resumenObj: any = null;
+      try { resumenObj = cliente.resumen ? JSON.parse(cliente.resumen) : null; } catch { resumenObj = null; }
+      const aiSelected = new Set<string>((Array.isArray(resumenObj?.prendas_seleccionadas) ? resumenObj.prendas_seleccionadas : [])
+        .map((p: any) => p?.id).filter(Boolean));
+
+      const photos = photosRaw.map((photo: any) => {
+        const ev = evidenceByMessageId.get(photo.id);
+        const meta = ev?.metadata && typeof ev.metadata === 'object' ? ev.metadata : {};
+        const selectedByAi = meta.selected_by_ai === true || aiSelected.has(photo.id);
+        const selectedFinal = typeof meta.selected_final === 'boolean' ? meta.selected_final : selectedByAi;
+        return {
+          ...photo,
+          tipo: ev?.tipo ?? null,
+          descripcion: ev?.descripcion ?? null,
+          selected_by_ai: selectedByAi,
+          selected_final: selectedFinal,
+          selection_source: meta.selection_source ?? (selectedByAi ? 'ai' : null),
+        };
+      });
+
+      res.json({
+        photos,
+        cliente_found: true,
+        cliente_id: cliente.id,
+        pedido_live_id: liveOrder?.id ?? null,
+        timeline_steps: Array.isArray(resumenObj?.timeline_steps)
+          ? resumenObj.timeline_steps.map((s: unknown) => String(s ?? '').trim()).filter(Boolean).slice(0, 4)
+          : [],
+        contexto_visual: resumenObj?.contexto_visual ?? null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/identity/whatsapp-photo-selection
+  // Guarda la correccion final de prendas desde el detalle del pedido.
+  router.post('/whatsapp-photo-selection', async (req: Request, res: Response) => {
+    const userId = uid(req);
+    if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+    if (!supabasePanel) return res.status(503).json({ error: 'supabasePanel no configurado' });
+
+    const { phone, mainPedidoId, orderDate, photos = [], contextoVisual } = req.body ?? {};
+    if (!phone) return res.status(400).json({ error: 'phone requerido' });
+
+    try {
+      const phoneNorm = normalizePhone(String(phone));
+      const phoneVariants = [phoneNorm, phoneNorm.replace(/^\+/, '')];
+      let cliente: { id: string } | null = null;
+      for (const variant of phoneVariants) {
+        const { data } = await supabasePanel
+          .from('panel_clientes')
+          .select('id')
+          .eq('phone', variant)
+          .limit(1)
+          .maybeSingle();
+        if (data) { cliente = data; break; }
+      }
+      if (!cliente) return res.status(404).json({ error: 'Cliente WhatsApp no encontrado' });
+
+      const cleanPhone = phoneNorm.replace(/^\+/, '');
+      const fechaPedido = orderDate ? String(orderDate).slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const mainPedidoNumber = Number(mainPedidoId);
+
+      let liveOrder: any = null;
+      if (Number.isFinite(mainPedidoNumber)) {
+        const { data } = await supabasePanel
+          .from('pedidos_venta_live')
+          .select('*')
+          .eq('main_pedido_id', mainPedidoNumber)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        liveOrder = data ?? null;
+      }
+      if (!liveOrder) {
+        const { data } = await supabasePanel
+          .from('pedidos_venta_live')
+          .select('*')
+          .eq('cliente_id', cliente.id)
+          .eq('fecha_pedido', fechaPedido)
+          .neq('estado', 'archivado')
+          .limit(1)
+          .maybeSingle();
+        liveOrder = data ?? null;
+      }
+      if (!liveOrder) {
+        const { data, error } = await supabasePanel
+          .from('pedidos_venta_live')
+          .insert({
+            cliente_id: cliente.id,
+            phone: cleanPhone,
+            fecha_pedido: fechaPedido,
+            estado: 'procesar',
+            main_pedido_id: Number.isFinite(mainPedidoNumber) ? mainPedidoNumber : null,
+            is_test: false,
+          })
+          .select('*')
+          .single();
+        if (error) throw error;
+        liveOrder = data;
+      }
+
+      let saved = 0;
+      for (const photo of Array.isArray(photos) ? photos : []) {
+        if (!photo?.id || !photo?.media_url) continue;
+        const selected = photo.selected === true;
+        const { data: existing } = await supabasePanel
+          .from('evidencias_venta_live')
+          .select('id,tipo,metadata')
+          .eq('panel_mensaje_id', photo.id)
+          .maybeSingle();
+
+        if (!selected && !existing) continue;
+        const metadata = {
+          ...(existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}),
+          selected_final: selected,
+          selection_source: 'operator',
+          contexto_visual: contextoVisual ?? null,
+        };
+
+        const payload = {
+          pedido_live_id: liveOrder.id,
+          cliente_id: cliente.id,
+          panel_mensaje_id: photo.id,
+          tipo: selected ? 'prenda' : (existing?.tipo ?? 'otro'),
+          media_url: photo.media_url,
+          media_type: photo.media_type ?? null,
+          content: photo.content ?? null,
+          descripcion: photo.descripcion ?? null,
+          message_created_at: photo.created_at ?? null,
+          metadata,
+        };
+
+        const { error } = await supabasePanel
+          .from('evidencias_venta_live')
+          .upsert(payload, { onConflict: 'panel_mensaje_id' });
+        if (error) throw error;
+        saved += 1;
+      }
+
+      res.json({ ok: true, pedido_live_id: liveOrder.id, saved });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -7,7 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   buildProductCatalogPrompt,
   buildImageClassifierPrompt,
@@ -30,6 +30,12 @@ import {
 
 export function createAiRouter(supabase: SupabaseClient, supabasePanel?: SupabaseClient) {
   const router = Router();
+  const adminSupabase = (() => {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) return null;
+    return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  })();
 
   type AiCallResult = { text: string; model: string; latencyMs: number };
   type OpenRouterKeySource = 'env' | 'db';
@@ -236,6 +242,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
   }
 
   async function getAiFeatureConfig(userId: string, feature: string): Promise<{ enabled: boolean; model: string }> {
+    const defaults = defaultAiFeatures() as Record<string, { enabled: boolean; model: string }>;
     try {
       const { data } = await supabase
         .from('ai_config')
@@ -249,6 +256,12 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         };
       }
     } catch { /* defaults */ }
+    if (defaults[feature]) {
+      return {
+        enabled: defaults[feature].enabled,
+        model: normalizeOpenRouterModel(defaults[feature].model),
+      };
+    }
     return { enabled: true, model: DEFAULT_OPENROUTER_MODEL };
   }
 
@@ -256,6 +269,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
     return {
       product_vision: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
       chat_summary: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
+      photo_selection: { enabled: false, model: DEFAULT_OPENROUTER_MODEL },
       notif_parser: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
     };
   }
@@ -702,8 +716,12 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       }
       if (ownerName !== undefined) upsertData.owner_name = ownerName || null;
 
-      const { data, error } = await supabase.from('ai_config').upsert(upsertData, { onConflict: 'user_id' }).select().single();
-      if (error) throw error;
+      let result = await supabase.from('ai_config').upsert(upsertData, { onConflict: 'user_id' }).select().single();
+      if (result.error && /row-level security/i.test(result.error.message) && adminSupabase) {
+        result = await adminSupabase.from('ai_config').upsert(upsertData, { onConflict: 'user_id' }).select().single();
+      }
+      if (result.error) throw result.error;
+      const data = result.data;
       res.json({ ok: true, data });
     } catch (err: any) {
       res.status(500).json({ error: err?.message });
@@ -1021,7 +1039,7 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
         maxTokens: 400, temperature: 0, jsonMode: true,
       }, 'resumen final');
 
-      let resumen: Record<string, string | null> = {
+      let resumen: Record<string, any> = {
         pedido: textos.length > 0 ? textos.slice(-3).join(' ') : 'Conversacion recibida',
         cantidad: fotoItems.length > 0 ? String(fotoItems.length) : 'no especificado',
         talla: 'no especificada',
@@ -1053,6 +1071,108 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
 
       // Si hay comprobante extraído, asegurar que el resumen lo incluye
       if (comprobanteDesc) resumen.comprobante = comprobanteDesc;
+
+      const photoSelectionConfig = await getAiFeatureConfig(userId, 'photo_selection');
+      const selectedPrendaMessageIds = new Set<string>();
+      let contextoVisual: string | null = null;
+      let timelineSteps: string[] = [];
+      if (photoSelectionConfig.enabled && prendasDetectadas.length > 0) {
+        const candidates = prendasDetectadas.map((p, i) => ({
+          n: i + 1,
+          id: p.item.id,
+          descripcion: p.descripcion,
+          fecha: p.item.createdAt,
+          texto: p.item.content,
+        }));
+        const selectionPrompt = `Eres asistente de preparacion de pedidos de ropa vendidos por WhatsApp/TikTok Live.
+
+Debes decidir cuales fotos de prendas fueron REALMENTE elegidas o compradas por la clienta, usando toda la conversacion.
+
+MENSAJES:
+${textos.join('\n') || '(sin textos)'}
+
+TRANSCRIPCIONES DE AUDIO:
+${transcripciones.map((t, i) => `Audio ${i + 1}: ${t}`).join('\n') || '(sin audios)'}
+
+FOTOS CANDIDATAS DE PRENDA:
+${candidates.map(c => `${c.n}. ${c.descripcion}${c.texto ? ` | texto foto: ${c.texto}` : ''}`).join('\n')}
+
+Reglas:
+- Selecciona solo prendas que la clienta confirmo, eligio, pidio reservar o pago.
+- Si una prenda fue preguntada pero luego descartada, no la selecciones.
+- Si hay duda razonable, no la selecciones.
+- No inventes datos.
+
+Responde SOLO este JSON:
+{"selected_numbers":[1,2],"timeline_steps":["1. ...","2. ...","3. ...","4. ..."],"contexto_visual":"explicacion corta para la operadora"}
+
+Reglas de timeline_steps:
+- Maximo 4 pasos, minimo 2 si hay informacion.
+- Estilo operativo y breve.
+- Enfocado en el flujo de decision (consulta/cambio/cierre), no en descripcion de prendas.
+- No mencionar "operadora envio comprobante" ni frases obvias repetitivas.
+- Si no hay cambio relevante, igual incluir cierre final de decision.`;
+
+        const selectionResult = await safeCallAi({
+          userId,
+          feature: 'photo_selection',
+          prompt: selectionPrompt,
+          maxTokens: 500,
+          temperature: 0,
+          jsonMode: true,
+        }, 'seleccion de prendas');
+
+        if (selectionResult?.text) {
+          const match = selectionResult.text.match(/\{[\s\S]*\}/);
+          if (match) {
+            try {
+              const parsed = JSON.parse(match[0]);
+              const nums = Array.isArray(parsed.selected_numbers) ? parsed.selected_numbers : [];
+              for (const value of nums) {
+                const idx = Number(value) - 1;
+                const itemId = prendasDetectadas[idx]?.item.id;
+                if (itemId) selectedPrendaMessageIds.add(itemId);
+              }
+              if (Array.isArray(parsed.timeline_steps)) {
+                timelineSteps = parsed.timeline_steps
+                  .map((step: unknown) => String(step ?? '').trim())
+                  .filter(Boolean)
+                  .slice(0, 4);
+              }
+              if (typeof parsed.contexto_visual === 'string' && parsed.contexto_visual.trim()) {
+                contextoVisual = parsed.contexto_visual.trim();
+              }
+            } catch { /* mantener seleccion vacia si falla el JSON */ }
+          }
+        }
+
+        const prendasSeleccionadas = prendasDetectadas
+          .filter(p => p.item.id && selectedPrendaMessageIds.has(p.item.id))
+          .map(p => ({ id: p.item.id, url: p.item.url, descripcion: p.descripcion }));
+        const prendasNoSeleccionadas = prendasDetectadas
+          .filter(p => !p.item.id || !selectedPrendaMessageIds.has(p.item.id))
+          .map(p => ({ id: p.item.id, url: p.item.url, descripcion: p.descripcion }));
+
+        if (timelineSteps.length === 0) {
+          timelineSteps = [
+            'La clienta consultó prendas durante el live.',
+            prendasNoSeleccionadas.length > 0 ? 'Comparó opciones y descartó algunas prendas.' : null,
+            prendasSeleccionadas.length > 0
+              ? `Confirmó ${prendasSeleccionadas.length} prenda(s) como decisión final.`
+              : 'No confirmó prendas finales con suficiente claridad.',
+            'Cierre de conversación registrado para preparación del pedido.',
+          ].filter(Boolean) as string[];
+        }
+        timelineSteps = timelineSteps.slice(0, 4).map((step, idx) => {
+          const clean = step.replace(/^\d+\s*[\).:-]?\s*/, '').trim();
+          return `${idx + 1}. ${clean}`;
+        });
+
+        resumen.prendas_seleccionadas = prendasSeleccionadas;
+        resumen.prendas_no_seleccionadas = prendasNoSeleccionadas;
+        resumen.timeline_steps = timelineSteps;
+        resumen.contexto_visual = contextoVisual ?? 'La IA no tuvo suficiente seguridad para seleccionar prendas automaticamente.';
+      }
 
       // ── Procesar comprobante extraído ────────────────────────────────────────
       let estadoPago: 'pagado_verificado' | 'solo_comprobante' | null = null;
@@ -1269,6 +1389,7 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
 
             for (const prenda of prendasDetectadas) {
               if (boliviaDateKey(prenda.item.createdAt ?? comprobanteAt) !== fechaPedido) continue;
+              const selectedByAi = !!prenda.item.id && selectedPrendaMessageIds.has(prenda.item.id);
               await upsertLiveEvidence(panelDb, {
                 pedidoLiveId: order.id,
                 clienteId,
@@ -1279,7 +1400,13 @@ Genera este JSON exacto (sin backticks, sin texto antes o despues):
                 content: prenda.item.content,
                 descripcion: prenda.descripcion,
                 messageCreatedAt: prenda.item.createdAt,
-                metadata: { source: 'ai_classifier' },
+                metadata: {
+                  source: 'ai_classifier',
+                  selected_by_ai: selectedByAi,
+                  selected_final: selectedByAi,
+                  selection_source: selectedByAi ? 'ai' : 'ai_unselected',
+                  contexto_visual: contextoVisual,
+                },
               });
             }
 

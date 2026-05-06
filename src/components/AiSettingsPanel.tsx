@@ -10,6 +10,7 @@ import {
   Key,
   Loader2,
   MessageSquare,
+  Images,
   RefreshCw,
   XCircle,
   Zap,
@@ -59,6 +60,11 @@ const FEATURE_META: Record<string, { icon: React.ReactNode; label: string; desc:
     label: 'Resumen WhatsApp',
     desc: 'Resume conversaciones, fotos, audios y comprobantes.',
   },
+  photo_selection: {
+    icon: <Images size={14} />,
+    label: 'Selección automática de prendas',
+    desc: 'Marca las fotos del chat que parecen prendas compradas.',
+  },
   notif_parser: {
     icon: <CreditCard size={14} />,
     label: 'Parser notificaciones',
@@ -70,6 +76,7 @@ function defaultFeatures(model: string): FeatureConfig {
   return {
     product_vision: { enabled: true, model },
     chat_summary: { enabled: true, model },
+    photo_selection: { enabled: false, model },
     notif_parser: { enabled: true, model },
   };
 }
@@ -86,6 +93,8 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
   const [promptMsg, setPromptMsg] = useState('');
   const [comprobanteMode, setComprobanteMode] = useState<'simple' | 'completo'>('simple');
   const [savingMode, setSavingMode] = useState(false);
+  const [savingFeature, setSavingFeature] = useState<string | null>(null);
+  const [featureMsg, setFeatureMsg] = useState('');
 
   const loadConfig = async () => {
     setLoading(true);
@@ -147,11 +156,30 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
     }
   };
 
-  const toggleFeature = (feature: string) => {
+  const toggleFeature = async (feature: string) => {
     if (!config) return;
+    if (savingFeature) return;
+    const prev = config.features ?? defaultFeatures(modelInput || DEFAULT_MODEL);
     const next = normalizedFeatures();
     next[feature] = { ...next[feature], enabled: !next[feature].enabled };
     setConfig({ ...config, features: next });
+    setSavingFeature(feature);
+    setFeatureMsg('');
+    try {
+      const res = await fetch('/api/ai/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ features: next }),
+      });
+      if (!res.ok) throw new Error('Error al guardar función IA');
+      setFeatureMsg('Funciones IA guardadas');
+    } catch {
+      setConfig({ ...config, features: prev });
+      setFeatureMsg('Error al guardar funciones IA');
+    } finally {
+      setSavingFeature(null);
+      setTimeout(() => setFeatureMsg(''), 2500);
+    }
   };
 
   const saveComprobanteMode = async (mode: 'simple' | 'completo') => {
@@ -254,7 +282,7 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
                   {count > 0 && <span className="text-[9px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full">{count} llamadas</span>}
                 </div>
               </div>
-              <button onClick={() => toggleFeature(key)} className="flex-shrink-0">
+              <button onClick={() => toggleFeature(key)} className="flex-shrink-0" disabled={savingFeature === key}>
                 <div className="w-10 h-5 rounded-full transition-all flex items-center px-0.5" style={{ background: feat.enabled ? '#10b981' : '#d1d5db' }}>
                   <div className="w-4 h-4 rounded-full bg-white shadow-sm transition-all" style={{ transform: feat.enabled ? 'translateX(20px)' : 'translateX(0)' }} />
                 </div>
@@ -262,6 +290,7 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
             </div>
           );
         })}
+        {featureMsg && <p className="text-[11px] font-bold text-center text-gray-600">{featureMsg}</p>}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">

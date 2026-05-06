@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { syncPedidoLabel, releasePedidoLabel, getCurrentLabelByFirebaseId } from './services/labelingService';
 import { ShieldAlert, FileSearch, AlertTriangle } from 'lucide-react';
 import { PaymentHistoryTape } from './components/PaymentHistoryTape';
-import { WhatsappPhotos } from './components/WhatsappPhotos';
+import { OrderChatPhotoSelector, prefetchOrderChatPhotos, type OrderChatPhoto } from './components/OrderChatPhotoSelector';
 import { PanelPedidos } from './components/PanelPedidos';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -4946,6 +4946,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const [isNotifying, setIsNotifying] = useState(false);
   const [verifyPaymentPopup, setVerifyPaymentPopup] = useState<{ id: string; livePaymentId: string; amount: number } | null>(null);
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [chatPhotosForPedido, setChatPhotosForPedido] = useState<OrderChatPhoto[]>([]);
+  const [chatPhotoContext, setChatPhotoContext] = useState<string | null>(null);
 
   const handleVerifyPaymentFromTape = async () => {
     if (!verifyPaymentPopup) return;
@@ -4959,6 +4961,20 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       setIsVerifyingPayment(false);
       setVerifyPaymentPopup(null);
     }
+  };
+
+  const saveChatPhotoSelection = async () => {
+    if (!selectedPedido || selectedPedido.id?.startsWith?.('temp-') || !person.waNumber || chatPhotosForPedido.length === 0) return;
+    await apiFetch('/api/identity/whatsapp-photo-selection', {
+      method: 'POST',
+      body: JSON.stringify({
+        phone: person.waNumber,
+        mainPedidoId: selectedPedido.id,
+        orderDate: selectedPedido.date,
+        contextoVisual: chatPhotoContext,
+        photos: chatPhotosForPedido,
+      }),
+    });
   };
 
   const handleNotifyLive = async () => {
@@ -5161,6 +5177,16 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       }));
   }, [person.payments, selectedPedido]);
 
+  const showComprobanteSection = useMemo(() => {
+    return dayPayments.some((p: any) =>
+      p.livePaymentId && (
+        p.verificationOrigin === 'whatsapp_pending' ||
+        p.verificationOrigin === 'macrodroid_only' ||
+        p.verificationOrigin === 'other'
+      )
+    );
+  }, [dayPayments]);
+
   const stats = useMemo(() => {
     const payments = person.payments || [];
     const totalPayments = payments.reduce((acc: number, p: any) => acc + cleanAmount(p.pago), 0);
@@ -5219,6 +5245,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       setView('detail');
       setSelectedPedido(null);
       try {
+        try { await saveChatPhotoSelection(); } catch (e) { console.warn('No se pudo guardar selección de fotos:', e); }
         await pedidosApi.update(selectedPedido.id, { status: 'listo', bag_count: bolsaCount, item_count: selectedPrenda });
         const updatedPedidos = allPedidos.map((p: any) =>
           p.id === selectedPedido.id ? { ...p, status: 'listo', bagCount: bolsaCount, itemCount: selectedPrenda } : p
@@ -5234,6 +5261,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     } else if (isListo) {
       // LISTO → guardar cambios y reasignar casillero si cambió la cantidad de bolsas
       try {
+        try { await saveChatPhotoSelection(); } catch (e) { console.warn('No se pudo guardar selección de fotos:', e); }
         await pedidosApi.update(selectedPedido.id, { bag_count: bolsaCount, item_count: selectedPrenda });
         const updatedPedidos = allPedidos.map((p: any) =>
           p.id === selectedPedido.id ? { ...p, bagCount: bolsaCount, itemCount: selectedPrenda } : p
@@ -5298,11 +5326,22 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     }
   };
 
+  const prefetchPedidoPhotos = (pedido?: any) => {
+    if (!pedido || !person.waNumber) return;
+    prefetchOrderChatPhotos({
+      phone: person.waNumber,
+      orderDate: pedido.date,
+      mainPedidoId: pedido.id,
+      days: 1,
+    });
+  };
+
   const handleStatusTransition = async (orderIds: string[], currentStatus: string, pedido?: any) => {
     const status = currentStatus.toUpperCase();
     // PROCESAR → abrir Mesa de Preparación
     if (status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING') {
       if (pedido) {
+        prefetchPedidoPhotos(pedido);
         setSelectedPedido({ ...pedido, orderIds });
         const isEditing = false;
         setBolsaCount(isEditing ? (pedido.bagCount || 0) : 0);
@@ -5482,10 +5521,17 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             )}
           </div>
 
-          <WhatsappPhotos
+          <OrderChatPhotoSelector
             phone={person.waNumber ?? ''}
             orderDate={selectedPedido.date}
-            days={4}
+            mainPedidoId={selectedPedido.id}
+            days={1}
+            editable={!selectedPedido.id.startsWith('temp-')}
+            showComprobantes={showComprobanteSection}
+            onSelectionChange={(photos, contexto) => {
+              setChatPhotosForPedido(photos);
+              setChatPhotoContext(contexto);
+            }}
           />
 
           <div className="clone-kit-container">
@@ -5796,6 +5842,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                     const pedidoData = order.pedido;
                     if (!pedidoData) return;
 
+                    prefetchPedidoPhotos(pedidoData);
                     setSelectedPedido({
                       ...pedidoData,
                       orderAmount: order.orderAmount,
