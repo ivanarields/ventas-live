@@ -38,10 +38,20 @@ interface ExternalPurchase {
   purchase_date: string;
 }
 
+interface CustomerMedia {
+  id: number;
+  media_url: string;
+  tipo: string;
+  status: string;
+  description?: string | null;
+  created_at: string;
+}
+
 export function StoreProfile({ onBack, onLogout }: Props) {
   const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [external, setExternal] = useState<ExternalPurchase[]>([]);
+  const [media, setMedia] = useState<CustomerMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -57,9 +67,10 @@ export function StoreProfile({ onBack, onLogout }: Props) {
   const loadOrders = async (token: string, phone: string) => {
     setLoading(true);
     try {
-      const [meRes, extRes] = await Promise.all([
+      const [meRes, extRes, mediaRes] = await Promise.all([
         fetch('/api/store-auth/me', { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`/api/store/external-purchases/${phone}`),
+        fetch(`/api/store/customer-media/${phone}`),
       ]);
       if (meRes.ok) {
         const data = await meRes.json();
@@ -68,6 +79,10 @@ export function StoreProfile({ onBack, onLogout }: Props) {
       if (extRes.ok) {
         const extData = await extRes.json();
         setExternal(extData ?? []);
+      }
+      if (mediaRes.ok) {
+        const mediaData = await mediaRes.json();
+        setMedia(mediaData ?? []);
       }
     } catch (e: any) {
       setError(e.message);
@@ -143,7 +158,7 @@ export function StoreProfile({ onBack, onLogout }: Props) {
           <div className="text-center py-8">
             <p className="text-sm font-bold text-red-400">{error}</p>
           </div>
-        ) : orders.length === 0 ? (
+        ) : orders.length === 0 && external.length === 0 && media.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="text-5xl mb-3">🛍️</div>
             <p className="text-[15px] font-black text-gray-700">Aún no tienes pedidos</p>
@@ -269,6 +284,29 @@ export function StoreProfile({ onBack, onLogout }: Props) {
           })
         )}
       </div>
+
+      {/* Historial visual */}
+      {media.length > 0 && (
+        <div className="px-4 pb-4 space-y-3">
+          <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider px-1">Prendas guardadas</p>
+          <div className="grid grid-cols-3 gap-2">
+            {media.slice(0, 12).map(item => (
+              <a
+                key={item.id}
+                href={item.media_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-sm"
+              >
+                <img src={item.media_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+                <span className="absolute left-1.5 bottom-1.5 rounded-full bg-white/90 px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ color: BRAND }}>
+                  {item.status || 'foto'}
+                </span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Compras Live */}
       {external.length > 0 && (

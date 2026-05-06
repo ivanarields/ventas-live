@@ -1415,12 +1415,13 @@ const PORT = Number(process.env.PORT || 3001);
         throw error;
       }
 
-      // También guardar en tabla store_customers
-      await supabaseStore.from('store_customers').insert({
+      // Tambien guardar/activar perfil en TiendaOnline. Si ya existia por WhatsApp,
+      // se convierte en cuenta de tienda sin duplicar el perfil.
+      await supabaseStore.from('store_customers').upsert({
         whatsapp: cleanPhone,
         pin_hash: password, // En producción usar bcrypt. Por ahora guardamos referencia.
         display_name: name || ''
-      }).select().single();
+      }, { onConflict: 'whatsapp' }).select().single();
 
       res.json({ success: true, userId: data.user?.id });
     } catch (err: any) {
@@ -1501,19 +1502,14 @@ const PORT = Number(process.env.PORT || 3001);
       const base64String = base64Data.split(',')[1] || base64Data;
       const buffer = Buffer.from(base64String, 'base64');
       
-      // Primero intentar en TiendaOnline, con fallback a ChehiApp
-      let uploadResult = await supabaseStore.storage
+      // Las imagenes de tienda deben vivir solo en TiendaOnline.
+      // Nunca usar ChehiApp como fallback para no contaminar la base principal.
+      const uploadResult = await supabaseStore.storage
         .from('store_images')
         .upload(fileName, buffer, { contentType: contentType || 'image/webp', upsert: true });
 
       if (uploadResult.error) {
-        // Fallback: intentar en la base original
-        uploadResult = await supabaseServer.storage
-          .from('store_images')
-          .upload(fileName, buffer, { contentType: contentType || 'image/webp', upsert: true });
-        if (uploadResult.error) throw uploadResult.error;
-        const { data: urlData } = supabaseServer.storage.from('store_images').getPublicUrl(uploadResult.data.path);
-        return res.json({ publicUrl: urlData.publicUrl });
+        throw uploadResult.error;
       }
 
       const { data: publicUrlData } = supabaseStore.storage

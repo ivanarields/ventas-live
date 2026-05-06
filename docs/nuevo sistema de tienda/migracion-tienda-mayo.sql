@@ -27,6 +27,7 @@ ALTER TABLE store_orders
 -- ============================================================
 CREATE TABLE IF NOT EXISTS store_selection_requests (
   id                BIGSERIAL PRIMARY KEY,
+  customer_id       BIGINT REFERENCES store_customers(id),
   source_type       TEXT NOT NULL DEFAULT 'live_payment',
   source_id         BIGINT,
   customer_wa       TEXT NOT NULL,
@@ -52,6 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_store_selection_requests_wa
   ON store_selection_requests(customer_wa);
 CREATE INDEX IF NOT EXISTS idx_store_selection_requests_expires
   ON store_selection_requests(expires_at);
+
+ALTER TABLE store_selection_requests
+  ADD COLUMN IF NOT EXISTS customer_id BIGINT REFERENCES store_customers(id);
 
 -- ============================================================
 -- 3. Nueva tabla: store_message_templates (plantillas editables)
@@ -104,6 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_store_message_log_selection
 -- ============================================================
 CREATE TABLE IF NOT EXISTS store_external_purchases (
   id              BIGSERIAL PRIMARY KEY,
+  customer_id     BIGINT REFERENCES store_customers(id),
   source          TEXT NOT NULL DEFAULT 'live',
   source_id       TEXT,
   customer_wa     TEXT,
@@ -121,8 +126,49 @@ CREATE INDEX IF NOT EXISTS idx_store_external_wa
 CREATE INDEX IF NOT EXISTS idx_store_external_source
   ON store_external_purchases(source, source_id);
 
+ALTER TABLE store_external_purchases
+  ADD COLUMN IF NOT EXISTS customer_id BIGINT REFERENCES store_customers(id);
+
 -- ============================================================
--- 6. Nueva tabla: store_favorites
+-- 6. Nueva tabla: store_customer_media
+-- Guarda referencias/links a fotos. NO duplica archivos.
+-- Fotos reales de WhatsApp permanecen en PanelPedido / whatsapp-media.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS store_customer_media (
+  id                  BIGSERIAL PRIMARY KEY,
+  customer_id          BIGINT REFERENCES store_customers(id),
+  customer_wa          TEXT NOT NULL,
+  customer_name        TEXT,
+  media_url            TEXT NOT NULL,
+  media_type           TEXT,
+  panel_mensaje_id     TEXT,
+  source_type          TEXT NOT NULL DEFAULT 'whatsapp_panel',
+  source_id            TEXT,
+  order_id             BIGINT,
+  purchase_id          BIGINT,
+  tipo                 TEXT DEFAULT 'prenda',
+  status               TEXT DEFAULT 'candidata',
+  description          TEXT,
+  message_created_at   TIMESTAMPTZ,
+  metadata             JSONB DEFAULT '{}',
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(customer_wa, media_url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_customer_media_wa
+  ON store_customer_media(customer_wa);
+CREATE INDEX IF NOT EXISTS idx_store_customer_media_customer
+  ON store_customer_media(customer_id);
+CREATE INDEX IF NOT EXISTS idx_store_customer_media_status
+  ON store_customer_media(status);
+CREATE INDEX IF NOT EXISTS idx_store_customer_media_panel_msg
+  ON store_customer_media(panel_mensaje_id);
+CREATE INDEX IF NOT EXISTS idx_store_customer_media_created
+  ON store_customer_media(created_at DESC);
+
+-- ============================================================
+-- 7. Nueva tabla: store_favorites
 -- ============================================================
 CREATE TABLE IF NOT EXISTS store_favorites (
   id            BIGSERIAL PRIMARY KEY,
@@ -136,7 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_store_favorites_wa
   ON store_favorites(customer_wa);
 
 -- ============================================================
--- 7. Nueva tabla: store_settings (configuracion simple)
+-- 8. Nueva tabla: store_settings (configuracion simple)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS store_settings (
   id            BIGSERIAL PRIMARY KEY,
@@ -159,7 +205,7 @@ VALUES
 ON CONFLICT (setting_key) DO NOTHING;
 
 -- ============================================================
--- 8. Nueva tabla: store_delivery_slots (horarios)
+-- 9. Nueva tabla: store_delivery_slots (horarios)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS store_delivery_slots (
   id          BIGSERIAL PRIMARY KEY,
@@ -179,7 +225,7 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
--- 9. Trigger para updated_at automatico en store_selection_requests
+-- 10. Trigger para updated_at automatico
 -- ============================================================
 CREATE OR REPLACE FUNCTION fn_set_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -197,6 +243,11 @@ CREATE TRIGGER trg_store_selection_requests_updated_at
 DROP TRIGGER IF EXISTS trg_store_orders_updated_at ON store_orders;
 CREATE TRIGGER trg_store_orders_updated_at
   BEFORE UPDATE ON store_orders
+  FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_store_customer_media_updated_at ON store_customer_media;
+CREATE TRIGGER trg_store_customer_media_updated_at
+  BEFORE UPDATE ON store_customer_media
   FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 -- ============================================================

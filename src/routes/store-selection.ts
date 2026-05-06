@@ -11,10 +11,70 @@ export function createStoreSelectionRouter(supabaseStore: SupabaseClient) {
   }
 
   // Helper: normalizar telefono
-  function normalizePhone(raw: string): string {
-    const p = raw.replace(/\D/g, '');
+  function normalizePhone(raw: unknown): string {
+    const p = String(raw ?? '').replace(/\D/g, '');
+    if (!p) return '';
     if (p.startsWith('591')) return p;
     return '591' + p;
+  }
+
+  async function ensureStoreCustomer(customerWa: unknown, customerName?: unknown) {
+    const whatsapp = normalizePhone(customerWa);
+    if (!whatsapp) throw new Error('customer_wa requerido');
+    const displayName = String(customerName ?? '').trim();
+
+    const { data: existing, error: findError } = await supabaseStore
+      .from('store_customers')
+      .select('id, whatsapp, display_name')
+      .eq('whatsapp', whatsapp)
+      .maybeSingle();
+    if (findError) throw findError;
+
+    if (existing) return { ...existing, whatsapp, display_name: existing.display_name || displayName };
+
+    const { data, error } = await supabaseStore
+      .from('store_customers')
+      .insert({ whatsapp, display_name: displayName, pin_hash: 'profile-only' })
+      .select('id, whatsapp, display_name')
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  async function saveMediaReferences(input: {
+    customerWa: unknown;
+    customerName?: unknown;
+    media: any[];
+    status: string;
+    sourceType?: string;
+    sourceId?: unknown;
+  }) {
+    const customer = await ensureStoreCustomer(input.customerWa, input.customerName);
+    const rows = (Array.isArray(input.media) ? input.media : [])
+      .map((item) => typeof item === 'string' ? { media_url: item } : item)
+      .filter((item) => item?.media_url || item?.url)
+      .map((item) => ({
+        customer_id: customer.id,
+        customer_wa: customer.whatsapp,
+        customer_name: customer.display_name || String(input.customerName ?? '').trim() || null,
+        media_url: item.media_url ?? item.url,
+        media_type: item.media_type ?? null,
+        panel_mensaje_id: item.panel_mensaje_id ?? item.message_id ?? null,
+        source_type: item.source_type ?? input.sourceType ?? 'whatsapp_panel',
+        source_id: String(item.source_id ?? input.sourceId ?? '') || null,
+        tipo: item.tipo ?? 'prenda',
+        status: item.status ?? input.status,
+        description: item.description ?? item.descripcion ?? null,
+        message_created_at: item.message_created_at ?? item.created_at ?? null,
+        metadata: item.metadata ?? {},
+      }));
+
+    if (rows.length === 0) return { customer, saved: 0 };
+    const { error } = await supabaseStore
+      .from('store_customer_media')
+      .upsert(rows, { onConflict: 'customer_wa,media_url' });
+    if (error) throw error;
+    return { customer, saved: rows.length };
   }
 
   // POST /api/store/selection-request
@@ -29,11 +89,13 @@ export function createStoreSelectionRouter(supabaseStore: SupabaseClient) {
 
       const token = generateToken();
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
+      const customer = await ensureStoreCustomer(customer_wa, customer_name);
 
       const { data, error } = await supabaseStore
         .from('store_selection_requests')
         .insert({
-          customer_wa: normalizePhone(customer_wa),
+          customer_id: customer.id,
+          customer_wa: customer.whatsapp,
           customer_name: customer_name || '',
           suggested_items: suggested_items || [],
           candidate_photos: candidate_photos || [],
@@ -48,6 +110,14 @@ export function createStoreSelectionRouter(supabaseStore: SupabaseClient) {
         .single();
 
       if (error) throw error;
+      await saveMediaReferences({
+        customerWa: customer.whatsapp,
+        customerName: customer_name,
+        media: candidate_photos || [],
+        status: 'candidata',
+        sourceType: source_type || 'selection_request',
+        sourceId: data.id,
+      });
 
       res.status(201).json({
         ok: true,
@@ -122,6 +192,14 @@ export function createStoreSelectionRouter(supabaseStore: SupabaseClient) {
         .single();
 
       if (error) throw error;
+      await saveMediaReferences({
+        customerWa: existing.customer_wa,
+        customerName: existing.customer_name,
+        media: selected_items || [],
+        status: 'seleccionada',
+        sourceType: 'selection_confirmation',
+        sourceId: existing.id,
+      });
 
       res.json({ ok: true, message: 'Prendas confirmadas. Gracias!' });
     } catch (err: any) {
