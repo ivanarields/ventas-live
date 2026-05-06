@@ -4,6 +4,33 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
   const router = Router();
 
+  const DEFAULT_SETTINGS: Record<string, string> = {
+    store_name: 'Leydi American',
+    store_phone: '59160003230',
+    reservation_minutes: '10',
+    delivery_enabled: 'true',
+    pickup_enabled: 'true',
+    next_live_date: '',
+    next_live_time: '',
+    delivery_note: 'Entregas de lunes a sabado.',
+    address: 'Consulta por WhatsApp',
+  };
+
+  const DEFAULT_DELIVERY_SLOTS = [
+    { id: 1, name: 'Manana', start_time: '08:00', end_time: '12:00', active: true, sort_order: 1 },
+    { id: 2, name: 'Tarde', start_time: '12:00', end_time: '17:00', active: true, sort_order: 2 },
+    { id: 3, name: 'Noche', start_time: '17:00', end_time: '21:00', active: true, sort_order: 3 },
+  ];
+
+  function isMissingTable(err: any): boolean {
+    const message = String(err?.message ?? err ?? '').toLowerCase();
+    return err?.code === '42P01'
+      || err?.code === 'PGRST205'
+      || message.includes('could not find the table')
+      || message.includes('does not exist')
+      || message.includes('schema cache');
+  }
+
   function normalizePhone(raw: unknown): string {
     const clean = String(raw ?? '').replace(/\D/g, '');
     if (!clean) return '';
@@ -92,13 +119,17 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
       const { data, error } = await supabaseStore
         .from('store_settings')
         .select('*');
-      if (error) throw error;
-      const settings: Record<string, string> = {};
+      if (error) {
+        if (isMissingTable(error)) return res.json(DEFAULT_SETTINGS);
+        throw error;
+      }
+      const settings: Record<string, string> = { ...DEFAULT_SETTINGS };
       for (const row of data || []) {
         settings[row.setting_key] = row.setting_value || '';
       }
       res.json(settings);
     } catch (err: any) {
+      if (isMissingTable(err)) return res.json(DEFAULT_SETTINGS);
       res.status(500).json({ error: err.message || 'Error interno' });
     }
   });
@@ -117,6 +148,9 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
       }
       res.json({ ok: true });
     } catch (err: any) {
+      if (isMissingTable(err)) {
+        return res.status(503).json({ error: 'La configuracion de tienda requiere aplicar la migracion TiendaOnline.' });
+      }
       res.status(500).json({ error: err.message || 'Error interno' });
     }
   });
@@ -129,9 +163,13 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
         .select('*')
         .eq('active', true)
         .order('sort_order', { ascending: true });
-      if (error) throw error;
+      if (error) {
+        if (isMissingTable(error)) return res.json(DEFAULT_DELIVERY_SLOTS);
+        throw error;
+      }
       res.json(data || []);
     } catch (err: any) {
+      if (isMissingTable(err)) return res.json(DEFAULT_DELIVERY_SLOTS);
       res.status(500).json({ error: err.message || 'Error interno' });
     }
   });
@@ -147,9 +185,13 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
         .eq('customer_wa', clean)
         .order('created_at', { ascending: false })
         .limit(200);
-      if (error) throw error;
+      if (error) {
+        if (isMissingTable(error)) return res.json([]);
+        throw error;
+      }
       res.json(data || []);
     } catch (err: any) {
+      if (isMissingTable(err)) return res.json([]);
       res.status(500).json({ error: err.message || 'Error interno' });
     }
   });
@@ -174,6 +216,9 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
       });
       res.status(201).json({ ok: true, ...result });
     } catch (err: any) {
+      if (isMissingTable(err)) {
+        return res.status(503).json({ error: 'El historial visual requiere aplicar la migracion TiendaOnline.' });
+      }
       res.status(500).json({ error: err.message || 'Error interno' });
     }
   });
@@ -188,9 +233,13 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
         .ilike('customer_wa', `%${clean}%`)
         .order('purchase_date', { ascending: false })
         .limit(100);
-      if (error) throw error;
+      if (error) {
+        if (isMissingTable(error)) return res.json([]);
+        throw error;
+      }
       res.json(data || []);
     } catch (err: any) {
+      if (isMissingTable(err)) return res.json([]);
       res.status(500).json({ error: err.message || 'Error interno' });
     }
   });
@@ -238,6 +287,9 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
       }
       res.status(201).json(data);
     } catch (err: any) {
+      if (isMissingTable(err)) {
+        return res.status(503).json({ error: 'Las compras externas requieren aplicar la migracion TiendaOnline.' });
+      }
       res.status(500).json({ error: err.message || 'Error interno' });
     }
   });
