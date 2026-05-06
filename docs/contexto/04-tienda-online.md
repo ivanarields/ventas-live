@@ -11,19 +11,20 @@ Tiene su propia base de datos separada de la app principal.
 
 ```
 products
-  id, name, description, price, stock, category
-  images (array de URLs)
-  user_id (dueña del negocio)
+  id, name, description, price, stock, category, brand
+  images (array de URLs), sizes, color, material, condition
+  available, featured, ai_confidence, views
+  created_at, updated_at
 
 store_orders
-  id, customer_id, status, total_amount
+  id, customer_id, customer_name, customer_wa
   items (JSON con productos reservados)
-  payment_status (pending, verified, rejected)
-  created_at
+  total, status, payment_method, payment_ref
+  payment_verified_at, wa_proof_received, wa_message_id
+  expires_at, notes, created_at, updated_at
 
-store_customers
-  id, name, phone, email
-  auth via Supabase Auth separado
+  — NO existe tabla store_customers separada —
+  — El cliente se identifica por customer_name + customer_wa en la orden —
 ```
 
 ---
