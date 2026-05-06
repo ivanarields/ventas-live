@@ -113,9 +113,11 @@ const EMPTY_FORM = {
 };
 
 export function AdminTiendaView({ userId, authToken }: { userId: string; authToken: string }) {
-  const [subTab, setSubTab] = useState<'productos' | 'pedidos'>('productos');
+  const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'confirmaciones' | 'config'>('productos');
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
+  const [selectionRequests, setSelectionRequests] = useState<any[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -218,6 +220,47 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       if (oRes.ok) setOrders(await oRes.json());
     } catch (e) { console.error('Error cargando pedidos:', e); }
     finally { if (!silent) setLoading(false); }
+  };
+
+  const loadSelectionRequests = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/store/selection-requests?status=pending_customer', { headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` } });
+      if (res.ok) setSelectionRequests(await res.json());
+    } catch (e) { console.error('Error cargando confirmaciones:', e); }
+    finally { setLoading(false); }
+  };
+
+  const sendSelectionLink = async (id: number) => {
+    try {
+      const res = await fetch(`/api/store/selection/${id}/send-link`, {
+        method: 'POST',
+        headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.message) {
+        const msg = encodeURIComponent(data.message);
+        window.open(`https://wa.me/${data.phone}?text=${msg}`, '_blank');
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const loadSettings = async () => {
+    try {
+      const res = await fetch('/api/store/settings');
+      if (res.ok) setSettings(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const saveSetting = async (key: string, value: string) => {
+    try {
+      await fetch('/api/store/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ [key]: value }),
+      });
+      setSettings(prev => ({ ...prev, [key]: value }));
+    } catch (e) { console.error(e); }
   };
 
   const loadAll = async () => {
@@ -429,6 +472,31 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               {orders.filter(o => o.status === 'pending').length}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => { setSubTab('confirmaciones'); loadSelectionRequests(); }}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-black transition-all"
+          style={subTab === 'confirmaciones'
+            ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' }
+            : { color: '#9ca3af' }}
+        >
+          <AlertCircle size={14} />
+          Confirmar
+          {selectionRequests.length > 0 && (
+            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full text-white" style={{ background: '#f59e0b' }}>
+              {selectionRequests.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => { setSubTab('config'); loadSettings(); }}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-black transition-all"
+          style={subTab === 'config'
+            ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' }
+            : { color: '#9ca3af' }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.67 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.67 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.67a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.33 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Config
         </button>
       </div>
 
@@ -819,6 +887,112 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               );
             });
           })()}
+        </div>
+      )}
+
+      {/* ─── CONFIRMACIONES ─── */}
+      {subTab === 'confirmaciones' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-black text-gray-800">Confirmaciones pendientes</p>
+            <button onClick={loadSelectionRequests} className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center text-gray-500">
+              <RefreshCw size={15} />
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2].map(n => <div key={n} className="h-24 rounded-2xl bg-gray-100 animate-pulse" />)}
+            </div>
+          ) : selectionRequests.length === 0 ? (
+            <div className="text-center py-10 text-gray-400">
+              <AlertCircle size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="font-black text-sm">Sin confirmaciones pendientes</p>
+              <p className="text-xs mt-1">Apareceran cuando la IA tenga dudas</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {selectionRequests.map(req => (
+                <div key={req.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-black text-gray-800">{req.customer_name || 'Cliente'}</p>
+                      <p className="text-[11px] text-gray-400">{req.customer_wa}</p>
+                      <p className="text-[11px] text-amber-600 font-bold mt-0.5">
+                        Confianza IA: {Math.round((req.confidence_score || 0) * 100)}%
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        {req.candidate_photos?.length || 0} fotos candidatas
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => sendSelectionLink(req.id)}
+                      className="flex-shrink-0 h-9 px-3 rounded-xl font-black text-[11px] text-white flex items-center gap-1.5"
+                      style={{ background: '#25D366' }}
+                    >
+                      <Send size={12} />
+                      Enviar link
+                    </button>
+                  </div>
+                  {req.candidate_photos && req.candidate_photos.length > 0 && (
+                    <div className="flex gap-2 mt-2 overflow-x-auto">
+                      {req.candidate_photos.map((url: string, idx: number) => (
+                        <img key={idx} src={url} alt="" className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── CONFIGURACION ─── */}
+      {subTab === 'config' && (
+        <div className="space-y-3">
+          <p className="text-sm font-black text-gray-800">Configuracion de tienda</p>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4">
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Nombre tienda</label>
+              <input type="text" value={settings.store_name || ''}
+                onChange={e => saveSetting('store_name', e.target.value)}
+                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">WhatsApp</label>
+              <input type="text" value={settings.store_phone || ''}
+                onChange={e => saveSetting('store_phone', e.target.value)}
+                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Proximo Live (fecha)</label>
+              <input type="date" value={settings.next_live_date || ''}
+                onChange={e => saveSetting('next_live_date', e.target.value)}
+                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Proximo Live (hora)</label>
+              <input type="time" value={settings.next_live_time || ''}
+                onChange={e => saveSetting('next_live_time', e.target.value)}
+                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Direccion</label>
+              <textarea value={settings.address || ''}
+                onChange={e => saveSetting('address', e.target.value)}
+                rows={2}
+                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400 resize-none" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Nota de entregas</label>
+              <textarea value={settings.delivery_note || ''}
+                onChange={e => saveSetting('delivery_note', e.target.value)}
+                rows={2}
+                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400 resize-none" />
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -6,6 +6,8 @@ import { Checkout } from './components/Checkout';
 import { CartView } from './components/CartView';
 import { StoreProfile } from './components/StoreProfile';
 import { LiveConfirmation } from './components/LiveConfirmation';
+import SelectionConfirmation from './components/SelectionConfirmation';
+import { CustomerCenter } from './components/CustomerCenter';
 
 import { Product, productsApi } from './services/productsApi';
 
@@ -23,7 +25,7 @@ export function cartCount(items: CartItem[]): number {
   return items.reduce((acc, i) => acc + i.quantity, 0);
 }
 
-type View = 'welcome' | 'gallery' | 'detail' | 'checkout' | 'cart' | 'profile' | 'live-confirmation';
+type View = 'welcome' | 'gallery' | 'detail' | 'checkout' | 'cart' | 'profile' | 'live-confirmation' | 'selection' | 'customer-center';
 
 
 export default function StorefrontApp() {
@@ -59,6 +61,11 @@ export default function StorefrontApp() {
   // Sincronización con Hash URL
   useEffect(() => {
     const handleHash = async () => {
+      if (window.location.pathname.startsWith('/tienda/selection')) {
+        setViewInternal('selection');
+        return;
+      }
+
       const hash = window.location.hash.replace('#', '');
       if (!hash) {
         setViewInternal('welcome');
@@ -79,7 +86,7 @@ export default function StorefrontApp() {
         return;
       }
 
-      if (['gallery', 'cart', 'checkout', 'profile', 'live-confirmation'].includes(hash)) {
+      if (['gallery', 'cart', 'checkout', 'profile', 'live-confirmation', 'selection', 'customer-center'].includes(hash)) {
         setViewInternal(hash as View);
         return;
       }
@@ -170,7 +177,8 @@ export default function StorefrontApp() {
         {view === 'welcome' && (
           <WelcomeScreen 
             onEnter={() => setView('gallery')} 
-            onOpenProfile={() => setView('profile')} 
+            onOpenProfile={() => setView('profile')}
+            onOpenCustomerCenter={() => setView('customer-center')}
             isInstallable={isInstallable}
             onInstall={handleInstallClick}
           />
@@ -228,13 +236,17 @@ export default function StorefrontApp() {
             onBack={() => setView('gallery')}
           />
         )}
+        {view === 'selection' && <SelectionConfirmation />}
+        {view === 'customer-center' && (
+          <CustomerCenter onBack={() => setView('welcome')} />
+        )}
 
       </div>
     </div>
   );
 }
 
-function WelcomeScreen({ onEnter, onOpenProfile, isInstallable, onInstall }: { onEnter: () => void, onOpenProfile: () => void, isInstallable: boolean, onInstall: () => void }) {
+function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstallable, onInstall }: { onEnter: () => void, onOpenProfile: () => void, onOpenCustomerCenter: () => void, isInstallable: boolean, onInstall: () => void }) {
   const mainCategories = ['Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos'];
 
   // La carga inicial ahora se hace bajo demanda (paginada) en el componente ProductGallery
@@ -312,6 +324,13 @@ function WelcomeScreen({ onEnter, onOpenProfile, isInstallable, onInstall }: { o
           style={{ background: 'linear-gradient(135deg, #ff2d78, #ff6fa3)' }}
         >
           Ver catálogo
+        </button>
+
+        <button
+          onClick={onOpenCustomerCenter}
+          className="w-full max-w-[280px] h-11 rounded-2xl font-black text-[#ff2d78] text-[14px] border-2 border-[#ff2d78]/20 bg-white mt-3 active:scale-95 transition-all"
+        >
+          Centro de clientas
         </button>
 
         <p className="text-[11px] text-gray-400 mt-4 font-medium">

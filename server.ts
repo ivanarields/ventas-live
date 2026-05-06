@@ -10,6 +10,8 @@ import { createAiRouter } from "./src/routes/ai-gateway.js";
 import { createIdentityRouter } from "./src/routes/identity.js";
 import { createLiveSalesRouter } from "./src/routes/live-sales.js";
 import { createWhatsappRouter, enqueueStoreConfirmation } from "./src/routes/whatsapp.js";
+import { createStoreSelectionRouter } from "./src/routes/store-selection.js";
+import { createStoreSettingsRouter } from "./src/routes/store-settings.js";
 
 
 import { ingestManualPayment } from "./src/services/identityService.js";
@@ -1529,6 +1531,8 @@ const PORT = Number(process.env.PORT || 3001);
   app.use('/api/identity', createIdentityRouter(supabaseServer, supabaseStore, supabasePanel));
   app.use('/api/live-sales', createLiveSalesRouter(supabasePanel, supabaseServer, supabaseStore));
   app.use('/api/whatsapp', createWhatsappRouter(supabaseServer));
+  app.use('/api/store', createStoreSelectionRouter(supabaseStore));
+  app.use('/api/store', createStoreSettingsRouter(supabaseStore));
   // ==========================================================================
 
   app.get("/api/products", async (req, res) => {
@@ -1680,7 +1684,17 @@ const PORT = Number(process.env.PORT || 3001);
 
   app.post("/api/store-orders", async (req, res) => {
     try {
-      const { items, total, customerName, customerPhone } = req.body;
+      const {
+        items,
+        total,
+        customerName,
+        customerPhone,
+        delivery_type,
+        delivery_date,
+        delivery_slot,
+        delivery_address,
+        delivery_notes,
+      } = req.body;
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: "items requerido (array no vacío)" });
       }
@@ -1743,7 +1757,7 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
-      const RESERVATION_MINUTES = 2;
+      const RESERVATION_MINUTES = 10;
       const { data, error } = await supabaseStore
         .from("store_orders")
         .insert({
@@ -1751,6 +1765,12 @@ const PORT = Number(process.env.PORT || 3001);
           total: total ?? 0,
           customer_name: customerName ?? "",
           customer_wa: customerPhone ?? "",
+          delivery_type: delivery_type ?? null,
+          delivery_date: delivery_date ?? null,
+          delivery_slot: delivery_slot ?? null,
+          delivery_address: delivery_address ?? null,
+          delivery_notes: delivery_notes ?? null,
+          delivery_status: "pending",
           status: "pending",
           expires_at: new Date(Date.now() + RESERVATION_MINUTES * 60 * 1000).toISOString(),
         } as any)

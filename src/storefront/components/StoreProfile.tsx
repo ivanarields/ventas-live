@@ -22,14 +22,26 @@ interface Props {
 const STATUS = {
   pending:   { label: 'Esperando pago',  icon: '⏳', bg: '#e0f2fe', text: '#0369a1' },
   paid:      { label: 'Pago verificado', icon: '✅', bg: '#d1fae5', text: '#065f46' },
+  preparing: { label: 'En preparacion',  icon: '🧵', bg: '#fef3c7', text: '#92400e' },
   ready:     { label: 'Listo para entrega', icon: '📦', bg: '#ede9fe', text: '#6d28d9' },
   delivered: { label: 'Entregado',       icon: '🎉', bg: '#f0fdf4', text: '#166534' },
   cancelled: { label: 'Cancelado',       icon: '❌', bg: '#f3f4f6', text: '#6b7280' },
+  manual_review: { label: 'En revision', icon: '🔍', bg: '#fef3c7', text: '#92400e' },
 };
+
+interface ExternalPurchase {
+  id: number;
+  source: string;
+  items: any[];
+  total: number;
+  status: string;
+  purchase_date: string;
+}
 
 export function StoreProfile({ onBack, onLogout }: Props) {
   const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
+  const [external, setExternal] = useState<ExternalPurchase[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -39,18 +51,24 @@ export function StoreProfile({ onBack, onLogout }: Props) {
     if (!session) { onBack(); return; }
 
     setUser({ phone: session.phone, name: session.name ?? '' });
-    loadOrders(session.token);
+    loadOrders(session.token, session.phone);
   }, []);
 
-  const loadOrders = async (token: string) => {
+  const loadOrders = async (token: string, phone: string) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/store-auth/me', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Sesión expirada');
-      const data = await res.json();
-      setOrders(data.orders ?? []);
+      const [meRes, extRes] = await Promise.all([
+        fetch('/api/store-auth/me', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`/api/store/external-purchases/${phone}`),
+      ]);
+      if (meRes.ok) {
+        const data = await meRes.json();
+        setOrders(data.orders ?? []);
+      }
+      if (extRes.ok) {
+        const extData = await extRes.json();
+        setExternal(extData ?? []);
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -252,8 +270,31 @@ export function StoreProfile({ onBack, onLogout }: Props) {
         )}
       </div>
 
+      {/* Compras Live */}
+      {external.length > 0 && (
+        <div className="px-4 py-4 space-y-3">
+          <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider px-1">Compras Live</p>
+          {external.map(purchase => (
+            <div key={purchase.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-[13px] font-black text-gray-800">Compra {purchase.source === 'live' ? 'Live' : 'Tienda'}</p>
+                <p className="text-[13px] font-black" style={{ color: BRAND }}>{Number(purchase.total).toFixed(2)} Bs</p>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-0.5">
+                {new Date(purchase.purchase_date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
+              </p>
+              <div className="mt-2 space-y-1">
+                {(purchase.items || []).map((item: any, idx: number) => (
+                  <p key={idx} className="text-[11px] text-gray-600">{item.productName || item.name || 'Prenda'} {item.size ? `(${item.size})` : ''}</p>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Botón nuevo pedido */}
-      {orders.length > 0 && !loading && (
+      {(orders.length > 0 || external.length > 0) && !loading && (
         <div className="px-5 py-4 border-t border-gray-100 bg-white">
           <button onClick={onBack}
             className="w-full h-13 rounded-2xl font-black text-white text-[14px] py-3.5 shadow-lg"

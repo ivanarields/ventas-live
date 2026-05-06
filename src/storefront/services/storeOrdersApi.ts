@@ -13,6 +13,11 @@ export interface CreateStoreOrderPayload {
   total: number;
   customerName?: string;
   customerPhone?: string;
+  delivery_type?: 'retiro' | 'delivery';
+  delivery_date?: string | null;
+  delivery_slot?: string | null;
+  delivery_address?: string | null;
+  delivery_notes?: string | null;
 }
 
 export interface StoreOrder extends CreateStoreOrderPayload {

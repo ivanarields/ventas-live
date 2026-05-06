@@ -12,7 +12,7 @@ interface Props {
   onOrderComplete: () => void;
 }
 
-type Screen = 'loading' | 'empty_cart' | 'identify' | 'payment' | 'verified';
+type Screen = 'loading' | 'empty_cart' | 'identify' | 'delivery' | 'payment' | 'verified';
 
 export function Checkout({ items, onBack, onOrderComplete }: Props) {
   const total = cartTotal(items);
@@ -27,9 +27,17 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
+  // Delivery
+  const [deliveryType, setDeliveryType] = useState<'retiro' | 'delivery'>('retiro');
+  const [deliveryDate, setDeliveryDate] = useState('');
+  const [deliverySlot, setDeliverySlot] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [deliveryNotes, setDeliveryNotes] = useState('');
+  const [slots, setSlots] = useState<Array<{name: string}>>([]);
+
   // Pedido
   const [orderId, setOrderId] = useState<number | null>(null);
-  const [timeLeft, setTimeLeft] = useState(2 * 60); // 2 minutos
+  const [timeLeft, setTimeLeft] = useState(10 * 60); // 10 minutos
   const [expired, setExpired] = useState(false);
   const [verified, setVerified] = useState(false);
   const [waNudge, setWaNudge] = useState(false); // true después de 60 seg sin verificar
@@ -44,13 +52,22 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
 
     const session = storeAuth.getCurrentUserSync();
     if (session) {
-      // ✅ Ya tiene sesión → crear pedido automáticamente y saltar al pago
-      createOrder(session.phone);
+      // ✅ Ya tiene sesión → ir directo a entrega
+      setPhone(session.phone);
+      setScreen('delivery');
     } else {
       // No tiene sesión → mostrar formulario
       setScreen('identify');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cargar horarios disponibles
+  useEffect(() => {
+    fetch('/api/store/delivery-slots')
+      .then(r => r.json())
+      .then(data => setSlots(Array.isArray(data) ? data : []))
+      .catch(() => setSlots([{name:'Manana'},{name:'Tarde'},{name:'Noche'}]));
   }, []);
 
   const createOrder = async (customerPhone: string) => {
@@ -67,11 +84,15 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
         total,
         customerName: '',
         customerPhone,
+        delivery_type: deliveryType,
+        delivery_date: deliveryDate || null,
+        delivery_slot: deliverySlot || null,
+        delivery_address: deliveryType === 'delivery' ? deliveryAddress : null,
+        delivery_notes: deliveryNotes || null,
       };
       const order = await storeOrdersApi.create(payload);
       setOrderId(order?.id ?? null);
     } catch (err: any) {
-      // Manejar producto reservado
       if (err?.message?.includes('409') || err?.message?.includes('reservado') || err?.message?.includes('disponible')) {
         setAuthError('⏰ Este producto está reservado por otra persona. Intenta de nuevo en unos segundos.');
         setScreen('identify');
@@ -170,8 +191,8 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
         storeAuth.saveSession(token!, { id: loginData2.user.id, phone: cleanPhone, name: '' });
       }
 
-      // 3. Crear pedido
-      await createOrder(cleanPhone);
+      // 3. Ir a pantalla de entrega
+      setScreen('delivery');
     } catch (err: any) {
       setAuthError(err.message || 'Error inesperado. Intenta de nuevo.');
       setAuthLoading(false);
@@ -322,6 +343,93 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
               </button>
             )}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PANTALLA: Entrega ────────────────────────────────────────
+  if (screen === 'delivery') {
+    return (
+      <div className="flex flex-col min-h-screen bg-white">
+        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3">
+          <button onClick={() => setScreen('identify')} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-50">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
+          </button>
+          <div>
+            <h2 className="text-[17px] font-black text-gray-900">Entrega</h2>
+            <p className="text-[11px] text-gray-400">Elige cuando y como recibir</p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+          {/* Tipo */}
+          <div>
+            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2 block">Tipo de entrega</label>
+            <div className="flex gap-2">
+              {(['retiro', 'delivery'] as const).map(t => (
+                <button key={t} onClick={() => setDeliveryType(t)}
+                  className="flex-1 py-3 rounded-xl text-[13px] font-black border-2 transition-all"
+                  style={deliveryType === t
+                    ? { borderColor: BRAND, background: '#fff0f5', color: BRAND }
+                    : { borderColor: '#f3f4f6', background: 'white', color: '#9ca3af' }}>
+                  {t === 'retiro' ? '🏠 Retiro' : '🚚 Delivery'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Fecha */}
+          <div>
+            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Fecha</label>
+            <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)}
+              className="w-full px-4 py-3.5 bg-gray-50 rounded-xl font-bold border border-gray-100 outline-none focus:border-pink-300" />
+          </div>
+
+          {/* Horario */}
+          <div>
+            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Horario</label>
+            <div className="flex flex-wrap gap-2">
+              {slots.map(s => (
+                <button key={s.name} onClick={() => setDeliverySlot(s.name)}
+                  className="px-4 py-2.5 rounded-xl text-[12px] font-black border-2 transition-all"
+                  style={deliverySlot === s.name
+                    ? { borderColor: BRAND, background: '#fff0f5', color: BRAND }
+                    : { borderColor: '#f3f4f6', background: 'white', color: '#9ca3af' }}>
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Direccion si es delivery */}
+          {deliveryType === 'delivery' && (
+            <div>
+              <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Direccion</label>
+              <textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)}
+                placeholder="Zona, calle, numero..."
+                className="w-full px-4 py-3.5 bg-gray-50 rounded-xl font-bold border border-gray-100 outline-none focus:border-pink-300 resize-none"
+                rows={2} />
+            </div>
+          )}
+
+          {/* Nota */}
+          <div>
+            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Nota opcional</label>
+            <textarea value={deliveryNotes} onChange={e => setDeliveryNotes(e.target.value)}
+              placeholder="Ej: tocar timbre, llamar antes..."
+              className="w-full px-4 py-3.5 bg-gray-50 rounded-xl font-bold border border-gray-100 outline-none focus:border-pink-300 resize-none"
+              rows={2} />
+          </div>
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100">
+          <button onClick={() => createOrder(phone)}
+            disabled={authLoading || !deliveryDate || !deliverySlot}
+            className="w-full h-14 rounded-2xl font-black text-white text-[15px] shadow-lg transition-all active:scale-[0.98] disabled:opacity-40"
+            style={{ background: BRAND }}>
+            {authLoading ? 'Procesando...' : `Confirmar y pagar ${total.toFixed(2)} Bs`}
+          </button>
         </div>
       </div>
     );
