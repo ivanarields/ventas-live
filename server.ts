@@ -1139,6 +1139,60 @@ const PORT = Number(process.env.PORT || 3001);
       .select()
       .single();
     if (error) return res.status(500).json({ error: error.message });
+
+    // ── Trigger WhatsApp cuando el pedido pasa a "listo" ─────────────────
+    if (req.body.status === 'listo' && data?.customer_id) {
+      (async () => {
+        try {
+          // 1. Buscar el teléfono del cliente en la tabla principal
+          const { data: customer } = await supabaseServer
+            .from('customers')
+            .select('phone, name')
+            .eq('id', data.customer_id)
+            .maybeSingle();
+
+          if (!customer?.phone) return; // Sin teléfono → no hay WA que enviar
+
+          // 2. Pre-crear/actualizar perfil en TiendaOnline (sin PIN → Option C)
+          await supabaseStore.from('store_customers').upsert(
+            {
+              whatsapp: customer.phone,
+              display_name: customer.name ?? data.customer_name ?? '',
+            },
+            { onConflict: 'whatsapp', ignoreDuplicates: false }
+          );
+
+          // 3. Construir link al perfil de tienda
+          const storeBase = process.env.STORE_PUBLIC_URL ||
+            `${req.protocol}://${req.get('host')}`;
+          const profileLink = `${storeBase}/tienda`;
+
+          // 4. Mensaje personalizado
+          const pedidoLabel = data.label ? ` #${data.label}` : '';
+          const message =
+            `¡Hola ${(customer.name ?? '').split(' ')[0] || ''}! 🎉\n` +
+            `Tu pedido${pedidoLabel} está *listo para retirar*.\n\n` +
+            `Podés ver el estado de tus pedidos en tu perfil:\n` +
+            `${profileLink}\n\n` +
+            `Ingresá con tu número de teléfono y tu PIN.`;
+
+          // 5. Encolar mensaje WhatsApp
+          const ownerUserId = process.env.STORE_OWNER_USER_ID || userId;
+          await enqueueStoreConfirmation(
+            supabaseStore,
+            ownerUserId,
+            customer.phone,
+            data.id,
+            message,
+          );
+        } catch (waErr: any) {
+          // No romper la respuesta al cliente por un error de WA
+          console.error('[PATCH /pedidos] Error enviando WA "listo":', waErr?.message);
+        }
+      })();
+    }
+    // ────────────────────────────────────────────────────────────────────
+
     res.json(data);
   });
 
@@ -1753,7 +1807,7 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
-      const RESERVATION_MINUTES = 10;
+      const RESERVATION_MINUTES = 1;
       const { data, error } = await supabaseStore
         .from("store_orders")
         .insert({
@@ -2051,13 +2105,16 @@ const PORT = Number(process.env.PORT || 3001);
       const waNumber = data.customer_wa;
       let globalCustomerId = null;
 
+      // El user_id del operador dueño de la tienda (para que aparezca en su sistema principal)
+      const ownerUserId = process.env.STORE_OWNER_USER_ID || data.user_id || 'store-auto';
+
       if (waNumber) {
-        // Buscar si el cliente ya existe en el sistema físico (TikTok)
+        // Buscar si el cliente ya existe en el sistema físico (por teléfono, sin filtro de user_id)
         const { data: existingCustomer } = await supabaseServer
           .from('customers')
           .select('id, full_name')
           .eq('phone', waNumber)
-          .single();
+          .maybeSingle();
 
         if (existingCustomer) {
           globalCustomerId = existingCustomer.id;
@@ -2066,14 +2123,14 @@ const PORT = Number(process.env.PORT || 3001);
             await supabaseServer.from('customers').update({ full_name: finalName }).eq('id', globalCustomerId);
           }
         } else {
-          // Crear perfil unificado global
+          // Crear perfil unificado global con el user_id del operador
           const name = finalName || 'Cliente Tienda Web';
           const { data: newCust } = await supabaseServer.from('customers').insert({
             phone: waNumber,
             full_name: name,
             normalized_name: name.toLowerCase().trim(),
             canonical_name: name.toUpperCase().trim(),
-            user_id: data.user_id || 'store-auto',
+            user_id: ownerUserId,
           } as any).select('id').single();
           globalCustomerId = newCust?.id;
         }
@@ -2094,6 +2151,7 @@ const PORT = Number(process.env.PORT || 3001);
           label_type: 'WEB', // Señal clave
           source: 'WEB',     // Campo nuevo (024_add_web_fields)
           web_items_list: itemsList, // Campo nuevo
+          user_id: ownerUserId,
         } as any);
 
         // 3. Registrar el pago en ChehiAppAbril (página de pagos)
@@ -2118,7 +2176,7 @@ const PORT = Number(process.env.PORT || 3001);
               status: 'completed',
               date: now,
               customer_id: globalCustomerId,
-              user_id: data.user_id || 'store-auto',
+              user_id: ownerUserId,
             } as any);
 
             console.log(`[store-pago] 💰 Pago Tienda Online creado en Chehi para pedido #${orderId}`);

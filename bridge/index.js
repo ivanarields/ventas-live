@@ -18,12 +18,15 @@ const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY;
 const BUCKET         = 'whatsapp-media';
 const PORT           = process.env.PORT || 3000;
-const IS_RAILWAY     = !!process.env.RAILWAY_ENVIRONMENT;
+const IS_HEADLESS    = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.DOCKER_ENV;
 
 // ─── Estado global para el QR ───
 let qrDataUrl  = null;   // imagen base64 del QR
 let connected  = false;
 let client     = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_BASE_DELAY   = 5000;
 
 // ─── Servidor HTTP para mostrar el QR por URL ───
 const server = http.createServer(async (req, res) => {
@@ -97,10 +100,10 @@ client = new Client({
   authStrategy: new LocalAuth({ dataPath: join(__dirname, '.wwebjs_auth') }),
   puppeteer: {
     headless: true,
-    executablePath: IS_RAILWAY
-      ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
+    executablePath: IS_HEADLESS
+      ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium')
       : undefined,
-    args: IS_RAILWAY
+    args: IS_HEADLESS
       ? [
           '--no-sandbox', '--disable-setuid-sandbox',
           '--disable-dev-shm-usage', '--disable-gpu',
@@ -116,7 +119,7 @@ client = new Client({
 client.on('qr', async (qr) => {
   console.log('📲 QR generado — visita la URL del servicio para escanearlo');
   qrDataUrl = await qrcodeImg.toDataURL(qr, { scale: 8 });
-  if (!IS_RAILWAY) {
+  if (!IS_HEADLESS) {
     // En local, también imprimimos en terminal
     const { default: qrcodeTerminal } = await import('qrcode-terminal');
     qrcodeTerminal.generate(qr, { small: true });
@@ -126,11 +129,48 @@ client.on('qr', async (qr) => {
 client.on('ready', () => {
   connected = true;
   qrDataUrl = null;
+  reconnectAttempts = 0;
   console.log('✅ WhatsApp conectado y listo para recibir mensajes');
 });
 
-client.on('auth_failure', () => {
-  console.error('❌ Fallo de autenticación — la sesión expiró. Reinicia el servicio para escanear QR nuevo.');
+client.on('auth_failure', (msg) => {
+  console.error('❌ Fallo de autenticación — la sesión expiró:', msg);
+  console.log('🔄 Cerrando cliente para reinicio automático...');
+  connected = false;
+  setTimeout(() => {
+    client.destroy().then(() => {
+      client.initialize();
+    }).catch(() => {
+      console.error('❌ Error al destruir cliente, reiniciando proceso...');
+      process.exit(1);
+    });
+  }, 5000);
+});
+
+client.on('disconnected', (reason) => {
+  console.warn('⚠️ WhatsApp desconectado:', reason);
+  connected = false;
+  qrDataUrl = null;
+  if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+    const delay = RECONNECT_BASE_DELAY * (reconnectAttempts + 1);
+    console.log(`🔄 Reconectando intento ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS} en ${delay / 1000}s...`);
+    reconnectAttempts++;
+    setTimeout(() => {
+      client.destroy().then(() => {
+        client.initialize();
+      }).catch(() => {
+        console.error('❌ Error al destruir cliente, reiniciando proceso...');
+        process.exit(1);
+      });
+    }, delay);
+  } else {
+    console.error('❌ Máximo de intentos de reconexión alcanzado. Reiniciando proceso...');
+    process.exit(1);
+  }
+});
+
+client.on('change_state', (state) => {
+  console.log(`🔄 Estado de WhatsApp: ${state}`);
 });
 
 client.on('message_create', async (msg) => {

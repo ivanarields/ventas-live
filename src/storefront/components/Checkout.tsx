@@ -4,7 +4,8 @@ import { storeOrdersApi } from '../services/storeOrdersApi';
 import { storeAuth } from '../services/storeAuth';
 
 const BRAND = '#ff2d78';
-const WA_NUMBER = '59160003230';
+const WA_NUMBER = (import.meta.env.VITE_STORE_WA_NUMBER as string | undefined) ?? '59160003230';
+const PAYMENT_SECONDS = 60; // 1 minuto
 
 interface Props {
   items: CartItem[];
@@ -12,7 +13,7 @@ interface Props {
   onOrderComplete: () => void;
 }
 
-type Screen = 'loading' | 'empty_cart' | 'identify' | 'delivery' | 'payment' | 'verified';
+type Screen = 'loading' | 'empty_cart' | 'identify' | 'payment' | 'verified';
 
 export function Checkout({ items, onBack, onOrderComplete }: Props) {
   const total = cartTotal(items);
@@ -22,22 +23,12 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
   // Formulario
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
-  const [pinConfirm, setPinConfirm] = useState('');
-  const [showConfirm, setShowConfirm] = useState(true);
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Delivery
-  const [deliveryType, setDeliveryType] = useState<'retiro' | 'delivery'>('retiro');
-  const [deliveryDate, setDeliveryDate] = useState('');
-  const [deliverySlot, setDeliverySlot] = useState('');
-  const [deliveryAddress, setDeliveryAddress] = useState('');
-  const [deliveryNotes, setDeliveryNotes] = useState('');
-  const [slots, setSlots] = useState<Array<{name: string}>>([]);
-
   // Pedido
   const [orderId, setOrderId] = useState<number | null>(null);
-  const [timeLeft, setTimeLeft] = useState(10 * 60); // 10 minutos
+  const [timeLeft, setTimeLeft] = useState(PAYMENT_SECONDS);
   const [expired, setExpired] = useState(false);
   const [verified, setVerified] = useState(false);
   const [waNudge, setWaNudge] = useState(false); // true después de 60 seg sin verificar
@@ -52,22 +43,14 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
 
     const session = storeAuth.getCurrentUserSync();
     if (session) {
-      // ✅ Ya tiene sesión → ir directo a entrega
+      // ✅ Ya tiene sesión → ir directo al pago
       setPhone(session.phone);
-      setScreen('delivery');
+      createOrder(session.phone);
     } else {
       // No tiene sesión → mostrar formulario
       setScreen('identify');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Cargar horarios disponibles
-  useEffect(() => {
-    fetch('/api/store/delivery-slots')
-      .then(r => r.json())
-      .then(data => setSlots(Array.isArray(data) ? data : []))
-      .catch(() => setSlots([{name:'Manana'},{name:'Tarde'},{name:'Noche'}]));
   }, []);
 
   const createOrder = async (customerPhone: string) => {
@@ -84,11 +67,11 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
         total,
         customerName: '',
         customerPhone,
-        delivery_type: deliveryType,
-        delivery_date: deliveryDate || null,
-        delivery_slot: deliverySlot || null,
-        delivery_address: deliveryType === 'delivery' ? deliveryAddress : null,
-        delivery_notes: deliveryNotes || null,
+        delivery_type: 'retiro' as const,
+        delivery_date: null,
+        delivery_slot: null,
+        delivery_address: null,
+        delivery_notes: null,
       };
       const order = await storeOrdersApi.create(payload);
       setOrderId(order?.id ?? null);
@@ -123,7 +106,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
     return () => clearInterval(t);
   }, [screen, waNudge]);
 
-  // ── Polling de verificación (cada 5 s) ────────────────────────
+  // ── Polling de verificación (cada 3 s) ────────────────────────
   const checkPayment = useCallback(async () => {
     if (!orderId || verified) return;
     try {
@@ -140,7 +123,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
 
   useEffect(() => {
     if (screen !== 'payment' || verified) return;
-    const interval = setInterval(checkPayment, 3000); // cada 3 seg para respuesta inmediata
+    const interval = setInterval(checkPayment, 3000);
     return () => clearInterval(interval);
   }, [screen, verified, checkPayment]);
 
@@ -150,7 +133,6 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
     const cleanPhone = phone.trim().replace(/\D/g, '');
     if (cleanPhone.length < 8) { setAuthError('Número de WhatsApp inválido'); return; }
     if (pin.length !== 4) { setAuthError('El PIN debe tener 4 dígitos'); return; }
-    if (showConfirm && pin !== pinConfirm) { setAuthError('Los PINs no coinciden'); return; }
 
     setAuthLoading(true);
     setAuthError('');
@@ -167,7 +149,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
         token = loginData.session.access_token;
         storeAuth.saveSession(token!, { id: loginData.user.id, phone: cleanPhone, name: '' });
       } else {
-        // 2. Si login falla → registrar
+        // 2. Si login falla → registrar (primera vez, mismo PIN)
         const regRes = await fetch('/api/store-auth/register', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone: cleanPhone, pin })
@@ -191,8 +173,8 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
         storeAuth.saveSession(token!, { id: loginData2.user.id, phone: cleanPhone, name: '' });
       }
 
-      // 3. Ir a pantalla de entrega
-      setScreen('delivery');
+      // 3. Ir directo al pago
+      await createOrder(cleanPhone);
     } catch (err: any) {
       setAuthError(err.message || 'Error inesperado. Intenta de nuevo.');
       setAuthLoading(false);
@@ -249,7 +231,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
   if (screen === 'payment') {
     const mins = String(Math.floor(timeLeft / 60)).padStart(2, '0');
     const secs = String(timeLeft % 60).padStart(2, '0');
-    const pct = (timeLeft / (2 * 60)) * 100;
+    const pct = (timeLeft / PAYMENT_SECONDS) * 100;
     const tColor = timeLeft < 30 ? '#ef4444' : timeLeft < 60 ? '#f59e0b' : BRAND;
 
     const sendWA = () => {
@@ -266,7 +248,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
           <button onClick={onBack} className="w-10 h-10 rounded-full bg-white/60 flex items-center justify-center shadow-sm">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
           </button>
-          
+
           {!expired ? (
             <div className="flex items-center gap-1.5 bg-white/80 px-3 py-1.5 rounded-full shadow-sm border border-pink-50">
               <span className="text-[12px] font-black text-[#ff2d78] uppercase tracking-wider">⏳ {mins}:{secs}</span>
@@ -280,7 +262,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
 
         {/* Contenido Centrado */}
         <div className="flex-1 flex flex-col items-center justify-center px-8 pb-12 w-full max-w-md mx-auto text-center relative z-10">
-          
+
           {/* Monto y Resumen */}
           <div className="mb-8">
             <p className="text-[13px] font-bold text-gray-500 uppercase tracking-widest mb-2">Total a Pagar</p>
@@ -309,7 +291,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
           <div className="w-full space-y-3">
             {!expired ? (
               <>
-                <button 
+                <button
                   onClick={() => {
                     const link = document.createElement('a');
                     link.href = '/qr-yape.jpg';
@@ -329,7 +311,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
                   Descargar QR
                 </button>
 
-                <button 
+                <button
                   onClick={sendWA}
                   className="w-full py-4 rounded-2xl font-black text-[14px] text-gray-700 bg-white border border-gray-100 shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
@@ -343,93 +325,6 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
               </button>
             )}
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── PANTALLA: Entrega ────────────────────────────────────────
-  if (screen === 'delivery') {
-    return (
-      <div className="flex flex-col min-h-screen bg-white">
-        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3">
-          <button onClick={() => setScreen('identify')} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-50">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
-          </button>
-          <div>
-            <h2 className="text-[17px] font-black text-gray-900">Entrega</h2>
-            <p className="text-[11px] text-gray-400">Elige cuando y como recibir</p>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
-          {/* Tipo */}
-          <div>
-            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2 block">Tipo de entrega</label>
-            <div className="flex gap-2">
-              {(['retiro', 'delivery'] as const).map(t => (
-                <button key={t} onClick={() => setDeliveryType(t)}
-                  className="flex-1 py-3 rounded-xl text-[13px] font-black border-2 transition-all"
-                  style={deliveryType === t
-                    ? { borderColor: BRAND, background: '#fff0f5', color: BRAND }
-                    : { borderColor: '#f3f4f6', background: 'white', color: '#9ca3af' }}>
-                  {t === 'retiro' ? '🏠 Retiro' : '🚚 Delivery'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Fecha */}
-          <div>
-            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Fecha</label>
-            <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)}
-              className="w-full px-4 py-3.5 bg-gray-50 rounded-xl font-bold border border-gray-100 outline-none focus:border-pink-300" />
-          </div>
-
-          {/* Horario */}
-          <div>
-            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Horario</label>
-            <div className="flex flex-wrap gap-2">
-              {slots.map(s => (
-                <button key={s.name} onClick={() => setDeliverySlot(s.name)}
-                  className="px-4 py-2.5 rounded-xl text-[12px] font-black border-2 transition-all"
-                  style={deliverySlot === s.name
-                    ? { borderColor: BRAND, background: '#fff0f5', color: BRAND }
-                    : { borderColor: '#f3f4f6', background: 'white', color: '#9ca3af' }}>
-                  {s.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Direccion si es delivery */}
-          {deliveryType === 'delivery' && (
-            <div>
-              <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Direccion</label>
-              <textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)}
-                placeholder="Zona, calle, numero..."
-                className="w-full px-4 py-3.5 bg-gray-50 rounded-xl font-bold border border-gray-100 outline-none focus:border-pink-300 resize-none"
-                rows={2} />
-            </div>
-          )}
-
-          {/* Nota */}
-          <div>
-            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">Nota opcional</label>
-            <textarea value={deliveryNotes} onChange={e => setDeliveryNotes(e.target.value)}
-              placeholder="Ej: tocar timbre, llamar antes..."
-              className="w-full px-4 py-3.5 bg-gray-50 rounded-xl font-bold border border-gray-100 outline-none focus:border-pink-300 resize-none"
-              rows={2} />
-          </div>
-        </div>
-
-        <div className="px-5 py-4 border-t border-gray-100">
-          <button onClick={() => createOrder(phone)}
-            disabled={authLoading || !deliveryDate || !deliverySlot}
-            className="w-full h-14 rounded-2xl font-black text-white text-[15px] shadow-lg transition-all active:scale-[0.98] disabled:opacity-40"
-            style={{ background: BRAND }}>
-            {authLoading ? 'Procesando...' : `Confirmar y pagar ${total.toFixed(2)} Bs`}
-          </button>
         </div>
       </div>
     );
@@ -499,8 +394,10 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
           <div>
             <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">
               PIN de 4 dígitos
-              {showConfirm && <span className="text-gray-400 font-medium normal-case"> — primera vez aquí</span>}
             </label>
+            <p className="text-[10px] text-gray-400 mb-2 leading-relaxed">
+              🔑 Si es tu primera vez, este PIN se guardará para tus próximas compras.
+            </p>
             <input
               type="password" inputMode="numeric" placeholder="• • • •"
               value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -508,28 +405,6 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
               maxLength={4}
             />
           </div>
-
-          {/* Confirmar PIN */}
-          {showConfirm && (
-            <div>
-              <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">
-                Confirmar PIN
-              </label>
-              <input
-                type="password" inputMode="numeric" placeholder="• • • •"
-                value={pinConfirm} onChange={e => setPinConfirm(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-[22px] font-black text-center tracking-[0.6em] outline-none focus:border-pink-400 transition-colors"
-                maxLength={4}
-              />
-            </div>
-          )}
-
-          {/* Toggle */}
-          <button type="button"
-            onClick={() => { setShowConfirm(!showConfirm); setPinConfirm(''); setAuthError(''); }}
-            className="text-[12px] font-bold text-gray-400 underline">
-            {showConfirm ? '¿Ya tienes cuenta? No confirmar PIN' : '¿Primera vez? Confirmar PIN'}
-          </button>
 
           {authError && (
             <div className="flex items-start gap-2 bg-red-50 rounded-xl px-3 py-2.5">
@@ -549,9 +424,11 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
       <div className="px-5 py-4 border-t border-gray-100">
         <button onClick={handleIdentify}
           disabled={authLoading || pin.length !== 4 || phone.replace(/\D/g, '').length < 8}
-          className="w-full h-14 rounded-2xl font-black text-white text-[15px] shadow-lg transition-all active:scale-[0.98] disabled:opacity-40"
+          className="w-full h-14 rounded-2xl font-black text-white text-[15px] shadow-lg transition-all active:scale-[0.98] disabled:opacity-40 flex items-center justify-center gap-2"
           style={{ background: BRAND }}>
-          {authLoading ? 'Procesando...' : `🛍️ Pagar ${total.toFixed(2)} Bs`}
+          {authLoading
+            ? <><div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Procesando...</>
+            : `🛍️ Pagar ${total.toFixed(2)} Bs`}
         </button>
       </div>
     </div>

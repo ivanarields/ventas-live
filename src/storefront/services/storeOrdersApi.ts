@@ -1,4 +1,4 @@
-import { supabase } from '../../lib/supabase';
+import { storeAuth } from './storeAuth';
 
 export interface StoreOrderItem {
   productId: string;
@@ -29,9 +29,8 @@ export interface StoreOrder extends CreateStoreOrderPayload {
 
 export const storeOrdersApi = {
   create: async (payload: CreateStoreOrderPayload): Promise<StoreOrder> => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token;
-    
+    const token = await storeAuth.getToken();
+
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 

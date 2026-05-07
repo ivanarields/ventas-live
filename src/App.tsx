@@ -4884,10 +4884,18 @@ const OrderItemCard: React.FC<OrderItemCardProps> = ({
           </div>
         )}
         {!isPago && tag && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <Tag size={15} />
-            <span style={{ fontSize: '10px', fontWeight: 800, marginTop: '1px' }}>{tag}</span>
-          </div>
+          tag.toUpperCase().startsWith('WEB')
+            ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }} title="Compra por tienda web">
+                <ShoppingCart size={15} />
+              </div>
+            )
+            : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <Tag size={15} />
+                <span style={{ fontSize: '10px', fontWeight: 800, marginTop: '1px' }}>{tag}</span>
+              </div>
+            )
         )}
         {isPago && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>

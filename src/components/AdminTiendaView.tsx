@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ExternalLink, Plus, Edit2, Trash2, Package, ShoppingBag,
   Check, X, Image as ImageIcon, ChevronDown, ChevronUp,
-  Send, AlertCircle, RefreshCw, Camera, Loader2, Copy,
+  Send, AlertCircle, RefreshCw, Camera, Loader2, Copy, Users,
 } from 'lucide-react';
 
 const MAX_PHOTOS = 3;
@@ -113,7 +113,7 @@ const EMPTY_FORM = {
 };
 
 export function AdminTiendaView({ userId, authToken }: { userId: string; authToken: string }) {
-  const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'confirmaciones' | 'config'>('productos');
+  const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'clientes' | 'confirmaciones' | 'config'>('productos');
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [selectionRequests, setSelectionRequests] = useState<any[]>([]);
@@ -132,6 +132,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [orderFilter, setOrderFilter] = useState<'all' | 'pending' | 'paid' | 'cancelled'>('all');
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
+  const [storeProfiles, setStoreProfiles] = useState<any[]>([]);
   const formRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -243,6 +244,15 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         window.open(`https://wa.me/${data.phone}?text=${msg}`, '_blank');
       }
     } catch (e) { console.error(e); }
+  };
+
+  const loadStoreProfiles = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/store-profiles', { headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` } });
+      if (res.ok) setStoreProfiles(await res.json());
+    } catch (e) { console.error('Error cargando clientes tienda:', e); }
+    finally { setLoading(false); }
   };
 
   const loadSettings = async () => {
@@ -474,19 +484,14 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
           )}
         </button>
         <button
-          onClick={() => { setSubTab('confirmaciones'); loadSelectionRequests(); }}
+          onClick={() => { setSubTab('clientes'); loadStoreProfiles(); }}
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-black transition-all"
-          style={subTab === 'confirmaciones'
+          style={subTab === 'clientes'
             ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' }
             : { color: '#9ca3af' }}
         >
-          <AlertCircle size={14} />
-          Confirmar
-          {selectionRequests.length > 0 && (
-            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full text-white" style={{ background: '#f59e0b' }}>
-              {selectionRequests.length}
-            </span>
-          )}
+          <Users size={14} />
+          Clientes
         </button>
         <button
           onClick={() => { setSubTab('config'); loadSettings(); }}
@@ -943,6 +948,87 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   )}
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── CLIENTES ─── */}
+      {subTab === 'clientes' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-black text-gray-800">Clientes registrados</p>
+              <p className="text-[11px] text-gray-400">Compraron en la tienda o tienen perfil</p>
+            </div>
+            <button onClick={loadStoreProfiles} className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center text-gray-500">
+              <RefreshCw size={15} />
+            </button>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-white rounded-2xl p-3 text-center border border-gray-100">
+              <p className="text-[26px] font-black" style={{ color: BRAND }}>{storeProfiles.length}</p>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Total clientes</p>
+            </div>
+            <div className="bg-white rounded-2xl p-3 text-center border border-gray-100">
+              <p className="text-[26px] font-black text-emerald-500">
+                {storeProfiles.filter(p => p.orders && p.orders.length > 0).length}
+              </p>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Con pedidos</p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map(n => <div key={n} className="h-16 rounded-2xl bg-gray-100 animate-pulse" />)}
+            </div>
+          ) : storeProfiles.length === 0 ? (
+            <div className="text-center py-10 text-gray-400">
+              <Users size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="font-black text-sm">Sin clientes aún</p>
+              <p className="text-xs mt-1">Aparecerán cuando alguien compre en la tienda</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {storeProfiles.map((profile: any, idx: number) => {
+                const phone = profile.phone || '';
+                const name = profile.name || 'Cliente tienda';
+                const orderCount = profile.orders?.length ?? 0;
+                const total = Number(profile.total ?? 0);
+                return (
+                  <div key={profile.key || idx} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3">
+                    {/* Avatar */}
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-black text-white text-[13px]"
+                      style={{ background: `hsl(${(phone.charCodeAt(0) || 0) * 47 % 360}, 60%, 60%)` }}>
+                      {name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-black text-gray-800 truncate">{name}</p>
+                      <p className="text-[11px] text-gray-400">{phone ? `+591 ${phone}` : 'Sin teléfono'}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-[13px] font-black" style={{ color: BRAND }}>
+                        {total > 0 ? `${total.toFixed(0)} Bs` : '—'}
+                      </p>
+                      <p className="text-[10px] text-gray-400 font-medium">
+                        {orderCount} pedido{orderCount !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    {phone && (
+                      <a href={`https://wa.me/591${phone}`} target="_blank" rel="noopener noreferrer"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{ background: '#dcfce7', color: '#16a34a' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                          <path d="M12 0C5.373 0 0 5.373 0 12c0 2.119.554 4.106 1.523 5.824L0 24l6.335-1.505A11.943 11.943 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.895 0-3.667-.497-5.2-1.367l-.37-.22-3.86.917.955-3.769-.241-.386A9.959 9.959 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+                        </svg>
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

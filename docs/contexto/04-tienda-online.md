@@ -1,220 +1,578 @@
-# Tienda Online — Documento Completo
+# Tienda Online - Estado Actual
 
-## Qué es
+Actualizado: 2026-05-06
 
-Tienda pública donde los clientes ven y reservan productos de ropa.
-Tiene su propia base de datos separada del sistema principal (consignación).
-Cuando un cliente paga, el sistema une automáticamente ambos mundos: crea el pedido en la Mesa de Preparación y registra el pago en la Lista de Pagos de la app principal.
+## Qué Es
 
----
+La tienda online es la PWA pública donde las clientas ven productos, reservan prendas, confirman entrega/retiro y consultan su perfil.
 
-## Bases de datos
+La tienda tiene base de datos propia y no debe usar la base principal para guardar fotos, productos, perfiles de tienda ni historial visual.
 
-| Base | Proyecto Supabase | Para qué |
-|------|-------------------|----------|
-| Tienda | `thgbfurscfjcmgokyyif` | productos, órdenes, clientes de tienda |
-| Principal | `vhczofpmxzbqzboysoca` | clientes, pagos, pedidos, casilleros |
+Regla crítica:
 
-La tienda escribe en **ambas** bases cuando se confirma un pago.
+```txt
+App principal / ChehiAppAbril = pagos, pedidos, clientes principales, casilleros.
+Panel WhatsApp / PanelPedido = mensajes y fotos reales de WhatsApp.
+TiendaOnline = productos, pedidos online, perfiles de tienda, historial y links a fotos.
+```
 
----
+## Bases De Datos
 
-## Tablas de la tienda (Supabase `thgbfurscfjcmgokyyif`)
+| Base | Proyecto Supabase | Uso |
+|---|---|---|
+| TiendaOnline | `thgbfurscfjcmgokyyif` | productos, pedidos online, perfiles de tienda, configuración, referencias a fotos |
+| PanelPedido | `vwaocoaeenavxkcshyuf` | chats WhatsApp, fotos reales, bucket `whatsapp-media`, evidencias live |
+| ChehiAppAbril | `vhczofpmxzbqzboysoca` | sistema principal: pagos, pedidos, clientes, casilleros |
+
+La tienda puede integrarse con el sistema principal cuando una venta confirmada necesita aparecer en preparación, pero **no usa la base principal para storage ni historial visual de tienda**.
+
+## Regla De Fotos
+
+Las fotos reales de WhatsApp viven en:
+
+```txt
+PanelPedido / whatsapp-media
+```
+
+La tienda guarda solamente links/referencias en:
+
+```txt
+TiendaOnline / store_customer_media
+```
+
+No se copian todas las fotos a TiendaOnline. No se duplican imágenes. No se suben fotos de WhatsApp a la base principal.
+
+Flujo recomendado:
+
+```txt
+Cliente manda foto por WhatsApp
+-> PanelPedido guarda foto real en whatsapp-media
+-> TiendaOnline crea/actualiza perfil de clienta
+-> TiendaOnline guarda media_url/panel_mensaje_id como referencia
+-> Perfil de tienda muestra la foto leyendo el link
+```
+
+## Storage
+
+TiendaOnline tiene bucket propio:
+
+```txt
+store_images
+```
+
+Uso previsto:
+
+```txt
+Fotos propias de productos creados desde admin de tienda.
+```
+
+Regla crítica:
+
+```txt
+Si falla subir a store_images en TiendaOnline, debe fallar.
+Nunca usar ChehiAppAbril como fallback.
+```
+
+Esto ya fue corregido en `/api/upload-image`.
+
+## Tablas Principales De TiendaOnline
 
 ### `products`
-```
-id, name, description, price, stock, category, brand
-images          — array de URLs de fotos
-sizes           — array de tallas disponibles (ej: ["S","M","L"])
-color, material, condition
-available       — true/false: se muestra en la tienda pública
-featured        — destacado en portada
-ai_confidence   — confianza del análisis IA al catalogar
-views           — contador de visitas
-created_at, updated_at
-```
-**Regla clave:** `stock = 0` muestra sello "VENDIDO" en la tienda (no oculta el producto). `available = false` sí lo oculta completamente.
 
-### `store_orders`
-```
-id, customer_name, customer_wa  — datos del comprador
-items           — JSON: [{productId, name, price, quantity, size}]
-total           — monto total en Bs
-status          — ver estados más abajo
-payment_method  — "qr", "transfer", etc.
-payment_ref     — referencia del pago (fuente que lo confirmó)
-payment_verified_at — timestamp de cuando se verificó
-wa_proof_received   — true si llegó comprobante por WA
-wa_message_id       — ID del mensaje WA del comprobante
-expires_at      — cuándo expira la reserva (2 minutos desde creación)
-notes
+Catálogo público.
+
+```txt
+id, name, description, price, category, brand
+images          array de URLs
+sizes           array de tallas
+stock           cantidad disponible
+available       si se muestra en tienda
+featured        destacado
+condition, color, material
+views
 created_at, updated_at
 ```
 
-**Estados de `store_orders.status`:**
-| Estado | Significado |
-|--------|-------------|
-| `pending` | Reservado, esperando pago (expira en 2 min si no paga) |
-| `paid` | Pago verificado automáticamente (banco o WA+código) |
-| `confirmed` | Confirmado manualmente por el operador |
-| `cancelled` | Expiró sin pago o fue cancelado |
-| `pending_manual_review` | Llegó WA pero no se pudo verificar automáticamente |
+Reglas:
+
+```txt
+stock = 0 muestra producto vendido.
+available = false oculta el producto.
+```
 
 ### `store_customers`
-```
-id, whatsapp, display_name, pin_hash
-total_orders, total_spent
-```
-Auth: email ficticio `{phone}@tiendaleydi.com` + PIN de 4 dígitos.
-No requiere email real — experiencia sin fricción.
 
----
+Perfil de clienta dentro de la tienda.
 
-## Flujo completo de una compra
-
-```
-1. Cliente navega productos en la tienda pública
-   ↓
-2. Selecciona producto → ingresa nombre y número WA → confirma pedido
-   POST /api/store-orders
-   → store_orders creado con status: "pending"
-   → reserva exclusiva por 2 minutos (otro cliente no puede comprar el mismo producto)
-   → si no paga en 2 min → status: "cancelled" (por intervalo automático cada 30 seg)
-   ↓
-3. Cliente hace transferencia bancaria por el monto exacto
-   ↓
-   VÍA A — MacroDroid captura la notificación bancaria:
-   POST /api/store/ingest-bank
-   → Motor de cuadrangulación intenta cruzar con store_orders pending
-   → Si match → confirmStoreOrder()
-   
-   VÍA B — Cliente manda foto de comprobante por WhatsApp:
-   POST /api/store/ingest-wa
-   → IA extrae monto y código de pedido (#1042)
-   → Motor de cuadrangulación intenta cruzar
-   → Si match → confirmStoreOrder()
-   ↓
-4. confirmStoreOrder() hace 3 cosas:
-   a) store_orders.status → "paid", guarda payment_verified_at
-   b) products.stock → 0 (muestra sello VENDIDO)
-   c) UNIFICACIÓN: busca o crea cliente en la DB principal (customers)
-      → crea pedido en DB principal (pedidos) con status "procesar" y label_type "WEB"
-      → crea pago en DB principal (pagos) con method "Tienda Online"
-   ↓
-5. En la app principal:
-   → El pedido aparece en la Mesa de Preparación (tarjeta amarilla "PROCESAR")
-   → El pago aparece en la Lista de Pagos con method "Tienda Online"
-   → El operador lo procesa igual que cualquier otro pedido
+```txt
+id
+whatsapp
+display_name
+pin_hash
+total_orders
+total_spent
+created_at, updated_at
 ```
 
----
+La tienda usa experiencia sin email real:
 
-## Motor de cuadrangulación (matching inteligente)
-
-Cuando llega un pago bancario o comprobante WA, el motor intenta identificar a qué pedido corresponde con 3 niveles de confianza:
-
-| Nivel | Condición | Acción |
-|-------|-----------|--------|
-| **Máxima** | Código de pedido `#1042` + monto coinciden | Verifica automáticamente |
-| **Alta** | Monto único en ventana de tiempo (solo 1 pedido con ese monto) | Verifica automáticamente |
-| **Alta** | Monto + número WA coinciden exactamente | Verifica automáticamente |
-| **Media** | Múltiples pedidos con el mismo monto | No verifica — espera más datos |
-| **Ninguna** | Sin match | Queda como `pending_manual_review` |
-
----
-
-## Endpoints de la tienda (todos en server.ts)
-
-### Auth de clientes
-```
-POST /api/store-auth/register    — registra con teléfono + PIN 4 dígitos
-POST /api/store-auth/login       — login con teléfono + PIN
-GET  /api/store-auth/me          — sesión actual + historial de órdenes
+```txt
+email ficticio: {phone}@tiendaleydi.com
+PIN de 4 dígitos
 ```
 
-### Catálogo de productos
-```
-GET    /api/products             — catálogo público (paginado, filtrable por categoría/búsqueda)
-  query params: page, limit, category, search, admin=true (para ver todos incluyendo no disponibles)
-POST   /api/products             — crear producto (requiere x-user-id)
-PATCH  /api/products/:id         — editar producto
-DELETE /api/products/:id         — eliminar producto
-POST   /api/upload-image         — sube foto al storage (base64 → supabase storage 'store_images')
-```
+Si una clienta entra por WhatsApp pero todavía no tiene cuenta, la tienda puede crear un perfil `profile-only` para guardar historial/referencias.
 
-### Órdenes
-```
-POST  /api/store-orders                    — crear pedido + reserva exclusiva 2 min
-GET   /api/store-orders/reserved-products  — qué productos están reservados ahora (para tienda pública)
-GET   /api/store-orders/:id/status         — estado de un pedido específico
-GET   /api/store-orders/me                 — mis pedidos (cliente logueado)
-GET   /api/store-orders/admin              — todos los pedidos (operador, requiere x-user-id)
-GET   /api/store-orders                    — lista general
-PATCH /api/store-orders/:id                — actualizar estado (status, wa_sent, hideProducts)
-```
+### `store_orders`
 
-### Motor de pagos
-```
-POST /api/store/ingest-bank    — recibe notificación bancaria MacroDroid para la tienda
-POST /api/store/ingest-wa      — recibe comprobante WA de la tienda
-GET  /api/store/whatsapp-photos — fotos WA relacionadas a órdenes de tienda
-```
+Pedidos creados desde la tienda.
 
-### Admin
-```
-GET /api/admin/store-profiles  — perfiles de clientes de tienda (vista en app principal)
-```
-
----
-
-## Conexión tienda ↔ sistema principal
-
-Cuando `confirmStoreOrder()` confirma un pago:
-
-1. **Crea o actualiza `customers`** en la DB principal (por número WA)
-2. **Crea `pedidos`** en la DB principal con:
-   - `status: "procesar"` → aparece en Mesa de Preparación
-   - `label_type: "WEB"` → el operador sabe que vino de la tienda
-   - `source: "WEB"`
-   - `web_items_list` → lista de productos comprados
-3. **Crea `pagos`** en la DB principal con:
-   - `method: "Tienda Online"`
-   - aparece en la Lista de Pagos diferenciado
-
----
-
-## Comportamiento de reservas
-
-- Al crear un pedido → reserva exclusiva de **2 minutos**
-- Si el cliente paga dentro de 2 min → queda `paid`
-- Si no paga → `cancelled` automáticamente (intervalo cada 30 seg en server.ts)
-- Productos cancelados vuelven a `available: true`
-
----
-
-## Variables de entorno necesarias
-
-```
-VITE_STORE_SUPABASE_URL=https://thgbfurscfjcmgokyyif.supabase.co
-VITE_STORE_SUPABASE_ANON_KEY=[anon key]
-STORE_SUPABASE_SERVICE_ROLE_KEY=[service role key]
+```txt
+id
+customer_id
+customer_name
+customer_wa
+items
+total
+status
+payment_method
+payment_ref
+payment_verified_at
+wa_proof_received
+wa_message_id
+expires_at
+delivery_type
+delivery_date
+delivery_slot
+delivery_address
+delivery_notes
+delivery_status
+customer_note
+admin_note
+customer_selection
+created_at, updated_at
 ```
 
----
+Estados usados:
 
-## Estado actual y pendientes de la tienda
+| Estado | Significado |
+|---|---|
+| `pending` | Pedido reservado, esperando pago |
+| `paid` | Pago verificado |
+| `ready` | Listo para entrega/retiro |
+| `delivered` | Entregado |
+| `cancelled` | Cancelado/vencido |
 
-**Funcionando:**
-- Catálogo público con paginación, filtros por categoría, búsqueda
-- Reserva exclusiva con expiración automática
-- Motor de matching automático (3 niveles de confianza)
-- Unificación de identidad: tienda ↔ sistema principal al confirmar pago
-- Productos vendidos muestran sello "VENDIDO" (stock=0) sin ocultarse
-- Pago de tienda aparece en Lista de Pagos de la app principal
-- Pedido de tienda aparece en Mesa de Preparación
+Reserva actual:
 
-**Pendiente / por mejorar:**
-- Verificación manual de pedidos en `pending_manual_review` desde la app
-- Notificación WA al cliente cuando se confirma el pedido (función `enqueueStoreConfirmation` existe pero depende del bridge WA)
-- Vista de gestión de tienda más completa en la app principal
-- RLS en Supabase tienda (actualmente sin seguridad a nivel de filas)
+```txt
+10 minutos
+```
+
+### `store_customer_media`
+
+Historial visual de clientas. Guarda links, no archivos físicos.
+
+```txt
+id
+customer_id
+customer_wa
+customer_name
+media_url            link a foto real
+media_type
+panel_mensaje_id     ID del mensaje en PanelPedido si viene de WhatsApp
+source_type          whatsapp_panel, selection_request, external_purchase, etc.
+source_id
+order_id
+purchase_id
+tipo                 prenda, comprobante, referencia
+status               candidata, seleccionada, comprada, descartada
+description
+message_created_at
+metadata
+created_at, updated_at
+```
+
+Uso:
+
+```txt
+Perfil de tienda muestra prendas/fotos de la clienta por media_url.
+```
+
+### `store_selection_requests`
+
+Casos donde la tienda necesita que la clienta confirme prendas.
+
+```txt
+id
+customer_id
+customer_wa
+customer_name
+suggested_items
+candidate_photos
+confidence_score
+status
+token
+expires_at
+selected_items
+notes
+source_type
+source_id
+created_at, updated_at
+```
+
+Estados:
+
+```txt
+pending_customer
+opened
+confirmed
+rejected
+expired
+cancelled
+```
+
+### `store_settings`
+
+Configuración editable de tienda.
+
+```txt
+store_name
+store_phone
+reservation_minutes
+delivery_enabled
+pickup_enabled
+next_live_date
+next_live_time
+delivery_note
+address
+```
+
+### `store_delivery_slots`
+
+Horarios de entrega/retiro.
+
+Seed actual:
+
+```txt
+Manana  08:00-12:00
+Tarde   12:00-17:00
+Noche   17:00-21:00
+```
+
+### `store_external_purchases`
+
+Historial de compras que no nacen directamente del carrito online, por ejemplo ventas Live o registros manuales.
+
+```txt
+id
+customer_id
+source
+source_id
+customer_wa
+customer_name
+items
+total
+status
+purchase_date
+payload
+created_at
+```
+
+### `store_message_log`
+
+Historial de mensajes generados para WhatsApp.
+
+```txt
+id
+order_id
+selection_request_id
+customer_wa
+template_key
+message_body
+status
+created_at
+```
+
+### `store_favorites`
+
+Favoritos por clienta.
+
+```txt
+id
+customer_wa
+product_id
+created_at
+```
+
+## Páginas Y Links
+
+Producción:
+
+```txt
+https://ventas-live.vercel.app/tienda
+```
+
+Local:
+
+```txt
+http://localhost:3004/tienda
+```
+
+Rutas por hash:
+
+```txt
+/tienda                         portada
+/tienda#gallery                 catálogo
+/tienda#cart                    carrito
+/tienda#checkout                checkout
+/tienda#profile                 perfil de clienta
+/tienda#customer-center         centro de clientas
+/tienda#live-confirmation       confirmación live
+/tienda#producto/{id}           detalle de producto
+```
+
+Confirmación de prendas por token:
+
+```txt
+/tienda/selection?token={token}
+```
+
+Ejemplos de producto:
+
+```txt
+https://ventas-live.vercel.app/tienda#producto/7
+https://ventas-live.vercel.app/tienda#producto/6
+https://ventas-live.vercel.app/tienda#producto/5
+```
+
+## Flujo De Compra Online
+
+```txt
+1. Clienta entra a /tienda
+2. Abre catálogo o producto
+3. Agrega prendas al carrito
+4. Va a checkout
+5. Se identifica con WhatsApp + PIN
+6. Elige entrega/retiro, fecha y horario
+7. Se crea store_orders con reserva de 10 minutos
+8. Paga y se verifica el pago
+9. El pedido queda listo para preparación/seguimiento
+```
+
+## Flujo De Perfil De Clienta
+
+Objetivo: todas las clientas tengan perfil en la tienda, aunque lleguen por WhatsApp o por tienda online.
+
+```txt
+Clienta por tienda
+-> store_customers
+-> store_orders
+-> historial de pedidos y prendas
+
+Clienta por WhatsApp
+-> PanelPedido recibe mensajes/fotos
+-> TiendaOnline crea/actualiza store_customers
+-> TiendaOnline guarda links en store_customer_media
+-> perfil muestra historial visual
+```
+
+## Flujo De Confirmación De Prendas
+
+```txt
+1. IA/operador detecta duda o varias fotos candidatas
+2. Se crea store_selection_requests
+3. Se genera link /tienda/selection?token=...
+4. Operador manda link por WhatsApp
+5. Clienta selecciona prendas correctas o rechaza
+6. Tienda guarda selected_items
+7. Tienda actualiza store_customer_media como seleccionada/comprada
+```
+
+## Endpoints De Tienda
+
+### Frontend público
+
+```txt
+GET /tienda
+GET /tienda#gallery
+GET /tienda#producto/:id
+GET /tienda/selection?token=...
+```
+
+### Auth tienda
+
+```txt
+POST /api/store-auth/register
+POST /api/store-auth/login
+GET  /api/store-auth/me
+```
+
+### Productos
+
+```txt
+GET    /api/products
+POST   /api/products
+PATCH  /api/products/:id
+DELETE /api/products/:id
+POST   /api/upload-image
+```
+
+`/api/upload-image` sube solamente a TiendaOnline bucket `store_images`.
+
+### Pedidos
+
+```txt
+POST  /api/store-orders
+GET   /api/store-orders/reserved-products
+GET   /api/store-orders/:id/status
+GET   /api/store-orders/me
+GET   /api/store-orders/admin
+GET   /api/store-orders
+PATCH /api/store-orders/:id
+```
+
+### Pagos y WhatsApp tienda
+
+```txt
+POST /api/store/ingest-bank
+POST /api/store/ingest-wa
+POST /api/store/match-payment
+GET  /api/store/whatsapp-photos
+POST /api/store/notify-live-ready
+```
+
+Estos endpoints conectan la reserva de tienda con comprobantes, notificaciones bancarias, fotos de WhatsApp y preparación operativa. No deben mover fotos reales a ChehiAppAbril.
+
+### Configuración y perfil visual
+
+```txt
+GET   /api/store/settings
+PATCH /api/store/settings
+GET   /api/store/delivery-slots
+GET   /api/store/customer-media/:phone
+POST  /api/store/customer-media
+GET   /api/store/external-purchases/:phone
+POST  /api/store/external-purchases
+```
+
+### Confirmación de prendas
+
+```txt
+POST /api/store/selection-request
+GET  /api/store/selection/:token
+POST /api/store/selection/:token/confirm
+POST /api/store/selection/:token/reject
+POST /api/store/selection/:id/send-link
+GET  /api/store/selection-requests
+```
+
+## Migración Aplicada
+
+La migración de tienda fue aplicada en:
+
+```txt
+TiendaOnline / thgbfurscfjcmgokyyif
+```
+
+Archivo:
+
+```txt
+docs/nuevo sistema de tienda/migracion-tienda-mayo.sql
+```
+
+Resultado esperado/verificado:
+
+```txt
+store_settings responde OK
+store_delivery_slots responde OK
+store_customer_media responde OK
+store_selection_requests responde OK
+store_external_purchases responde OK
+bucket store_images creado
+```
+
+## Variables De Entorno
+
+```txt
+VITE_STORE_SUPABASE_URL
+VITE_STORE_SUPABASE_ANON_KEY
+STORE_SUPABASE_SERVICE_ROLE_KEY
+STORE_URL
+```
+
+Estas variables apuntan a TiendaOnline. No deben apuntar a ChehiAppAbril.
+
+## Integración Con Sistema Principal
+
+La tienda no debe usar la base principal para almacenamiento de fotos ni perfiles de tienda.
+
+La integración con la app principal debe limitarse a eventos operativos cuando una venta confirmada necesita entrar al flujo de preparación.
+
+Integración actual al confirmar un pedido de tienda:
+
+```txt
+store_orders.status = paid
+products.stock = 0 para productos vendidos
+customers en ChehiAppAbril se crea/actualiza por WhatsApp si corresponde
+pedidos en ChehiAppAbril se crea con status procesar, label WEB y source WEB
+pagos en ChehiAppAbril se crea con method Tienda Online
+```
+
+Regla operativa:
+
+```txt
+TiendaOnline confirma venta
+-> crear/actualizar pedido operativo en ChehiAppAbril si corresponde
+-> operador prepara en Mesa de Preparación
+```
+
+Regla:
+
+```txt
+Fotos e historial visual no van a ChehiAppAbril.
+Links de fotos viven en TiendaOnline.
+Fotos reales viven en PanelPedido.
+```
+
+## Estado Actual
+
+Funcionando:
+
+```txt
+Catálogo público
+Detalle de producto por link
+Carrito
+Checkout con entrega/retiro
+Reserva de 10 minutos
+Perfil de clienta
+Centro de clientas
+Confirmación de prendas por token
+Admin tienda con productos, pedidos, confirmaciones y configuración
+Referencias de fotos por clienta
+Deploy automático GitHub -> Vercel
+Migración TiendaOnline aplicada
+Bucket store_images creado
+```
+
+Pendiente recomendado:
+
+```txt
+Automatizar envío desde PanelPedido a store_customer_media para cada foto relevante.
+Definir política de qué fotos se guardan como candidata/seleccionada/comprada.
+Mejorar limpieza/retención de fotos antiguas en PanelPedido.
+Agregar RLS a TiendaOnline cuando el flujo esté estable.
+Agregar pantalla admin para ver store_customer_media por clienta.
+Evitar copiar fotos; mantener solo links salvo decisión explícita.
+```
+
+## Reglas Críticas
+
+```txt
+1. No tocar ChehiAppAbril para storage de tienda.
+2. No duplicar fotos de WhatsApp en TiendaOnline.
+3. PanelPedido guarda la foto real.
+4. TiendaOnline guarda media_url/panel_mensaje_id.
+5. Si falla storage de tienda, no usar base principal como fallback.
+6. Toda migración de tienda va solo en thgbfurscfjcmgokyyif.
+```
