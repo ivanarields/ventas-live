@@ -8,7 +8,11 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!api/|icon-|manifest\\.json|sw\\.js|assets/).*)",
+      "source": "/tienda-v2((?!/assets/).*)",
+      "destination": "/tienda-v2.html"
+    },
+    {
+      "source": "/((?!api/|icon-|manifest\\.json|sw\\.js|sw-tienda-v2\\.js|assets/).*)",
       "destination": "/index.html"
     }
   ],

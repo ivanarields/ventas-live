@@ -14,12 +14,21 @@ export default defineConfig(() => {
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
-      copyPublicDir: true
+      copyPublicDir: true,
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          tienda: path.resolve(__dirname, 'tienda-v2.html'),
+        },
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+          },
+        },
+      },
     },
     publicDir: 'public',
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };

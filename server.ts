@@ -1624,6 +1624,21 @@ const PORT = Number(process.env.PORT || 3001);
     }
   });
 
+  app.get("/api/products/:id", async (req, res) => {
+    try {
+      const { data, error } = await supabaseStore
+        .from("products")
+        .select("*")
+        .eq("id", Number(req.params.id))
+        .single();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: "Producto no encontrado" });
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
   app.post("/api/products", async (req, res) => {
     try {
       const userId = req.headers["x-user-id"] as string;
@@ -2469,15 +2484,34 @@ const PORT = Number(process.env.PORT || 3001);
       const viteModule = await import("vite");
       const vite = await viteModule.createServer({
         server: { middlewareMode: true },
-        appType: "spa",
+        appType: "custom",
       });
       app.use(vite.middlewares);
+      app.get("/tienda-v2", async (req, res, next) => {
+        try {
+          const { readFileSync } = await import("fs");
+          const html = readFileSync(path.join(process.cwd(), "tienda-v2.html"), "utf-8");
+          const transformed = await vite.transformIndexHtml(req.url, html);
+          res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
+        } catch (e) { next(e); }
+      });
+      app.get("*", async (req, res, next) => {
+        try {
+          const { readFileSync } = await import("fs");
+          const html = readFileSync(path.join(process.cwd(), "index.html"), "utf-8");
+          const transformed = await vite.transformIndexHtml(req.url, html);
+          res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
+        } catch (e) { next(e); }
+      });
     } catch (e) {
       console.log("Vite no disponible en este entorno", e);
     }
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
+    app.get("/tienda-v2", (_req, res) => {
+      res.sendFile(path.join(distPath, "tienda-v2.html"));
+    });
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
