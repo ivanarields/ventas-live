@@ -16,6 +16,7 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
   const [liked, setLiked]             = useState(false);
   const [likes, setLikes]             = useState(Math.floor(Math.random() * 80 + 12));
   const [views]                       = useState(Math.floor(Math.random() * 400 + 80));
+  const useV2Layout = window.location.pathname.includes('tienda-v2');
 
   const handleLike = () => {
     setLiked(l => !l);
@@ -31,12 +32,15 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
   };
 
   return (
-    <div className="flex flex-col bg-white" style={{ minHeight: '100dvh' }}>
+    <div
+      className="flex flex-col bg-white"
+      style={{ minHeight: '100dvh', ...(useV2Layout ? { overflowX: 'hidden' } : {}) }}
+    >
 
       {/* ── IMAGEN PRINCIPAL (GALERÍA SWIPABLE) ── */}
       <div
         className="relative w-full flex-shrink-0 bg-gray-100 overflow-hidden"
-        style={{ height: '70vh' }}
+        style={{ height: useV2Layout ? 'min(58dvh, 520px)' : '70vh' }}
       >
         <div 
           className="flex w-full h-full overflow-x-auto snap-x snap-mandatory"
@@ -117,7 +121,20 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
       </div>
 
       {/* ── CONTENIDO SCROLLABLE ── */}
-      <div className="flex-1 overflow-y-auto pb-32 -mt-4 relative z-10 bg-white rounded-t-3xl pt-5">
+      <div
+        className="flex-1 overflow-y-auto pb-32 -mt-4 relative z-10 bg-white rounded-t-3xl pt-5"
+        style={useV2Layout
+          ? {
+              marginTop: -26,
+              paddingTop: 22,
+              paddingBottom: 118,
+              borderTopLeftRadius: 30,
+              borderTopRightRadius: 30,
+              boxShadow: '0 -14px 30px rgba(17,24,39,0.08)',
+            }
+          : undefined
+        }
+      >
 
         {/* Categoría */}
         <div className="px-5 mb-1.5">
@@ -127,7 +144,7 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
         </div>
 
         {/* Nombre + Precio al estilo de la referencia 1 */}
-        <div className="px-5 flex items-start justify-between gap-4">
+        <div className="px-5 flex items-start justify-between gap-4" style={useV2Layout ? { flexWrap: 'wrap', rowGap: 8 } : undefined}>
           <h1 className="text-[22px] font-extrabold text-gray-900 leading-[1.15] flex-1">
             {product.title}
           </h1>
@@ -149,9 +166,12 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
         )}
 
         {/* ── Contador social + Talla elegante ── */}
-        <div className="mx-5 mt-5 border-t border-b border-gray-100 py-3 flex items-center justify-between">
+        <div
+          className="mx-5 mt-5 border-t border-b border-gray-100 py-3 flex items-center justify-between"
+          style={useV2Layout ? { flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' } : undefined}
+        >
           
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-5" style={useV2Layout ? { gap: 14, flexWrap: 'wrap', minWidth: 0 } : undefined}>
             {/* Vistas */}
             <div className="flex items-center gap-1.5 text-gray-400">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -181,9 +201,9 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
 
           {/* Talla estilo minimalista (derecha) */}
           {product.sizes.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" style={useV2Layout ? { width: '100%', justifyContent: 'space-between', minWidth: 0 } : undefined}>
               <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Talla:</span>
-              <div className="flex gap-1.5">
+              <div className="flex gap-1.5" style={useV2Layout ? { flexWrap: 'wrap', justifyContent: 'flex-end' } : undefined}>
                 {product.sizes.map(size => (
                   <button
                     key={size}
@@ -209,7 +229,11 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart }: Props) {
       {product.stock > 0 && (
         <div
           className="fixed bottom-0 left-0 right-0 max-w-[430px] mx-auto px-4 pt-3 pb-5 border-t border-gray-100 z-50"
-          style={{ background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(10px)' }}
+          style={{
+            background: 'rgba(255,255,255,0.96)',
+            backdropFilter: 'blur(10px)',
+            ...(useV2Layout ? { padding: '12px 14px calc(16px + env(safe-area-inset-bottom))' } : {}),
+          }}
         >
           <div className="flex gap-2">
             <button
