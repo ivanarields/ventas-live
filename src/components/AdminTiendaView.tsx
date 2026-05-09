@@ -4,6 +4,7 @@ import {
   Check, X, Image as ImageIcon, ChevronDown, ChevronUp,
   Send, AlertCircle, RefreshCw, Camera, Loader2, Copy, Users,
 } from 'lucide-react';
+import { DEFAULT_STORE_CHIPS, StoreChip, parseStoreChips, serializeStoreChips } from '../storefront-v2/config/storefrontConfig';
 
 const MAX_PHOTOS = 3;
 
@@ -118,6 +119,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [selectionRequests, setSelectionRequests] = useState<any[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [storeChips, setStoreChips] = useState<StoreChip[]>(DEFAULT_STORE_CHIPS);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -126,6 +128,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [urlInput, setUrlInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [compressing, setCompressing] = useState(false);
+  const [qrUploading, setQrUploading] = useState(false);
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [aiError, setAiError] = useState('');
   const [saveError, setSaveError] = useState('');
@@ -135,6 +138,10 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [storeProfiles, setStoreProfiles] = useState<any[]>([]);
   const formRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const categoryOptions = storeChips
+    .filter(chip => chip.kind === 'category' && chip.active && chip.value !== 'Todos')
+    .map(chip => chip.value);
+  const formCategoryOptions = categoryOptions.length > 0 ? categoryOptions : CATEGORIAS;
 
   // Auto-refresco de pedidos cada 15 segundos cuando se está en la pestaña
   useEffect(() => {
@@ -188,7 +195,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       const ai = json.data;
 
       // Mapear categoría contra las opciones disponibles
-      const catMatch = CATEGORIAS.includes(ai.categoria) ? ai.categoria : 'General';
+      const catMatch = formCategoryOptions.includes(ai.categoria) ? ai.categoria : 'General';
 
       // Mapear tallas: solo las que coincidan con las opciones disponibles
       const tallasValidas = (ai.tallas as string[]).filter(
@@ -258,7 +265,11 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const loadSettings = async () => {
     try {
       const res = await fetch('/api/store/settings');
-      if (res.ok) setSettings(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setSettings(data);
+        setStoreChips(parseStoreChips(data.store_chips));
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -271,6 +282,25 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       });
       setSettings(prev => ({ ...prev, [key]: value }));
     } catch (e) { console.error(e); }
+  };
+
+  const saveStoreChips = async (next: StoreChip[]) => {
+    const normalized = next.map((chip, idx) => ({ ...chip, sort: idx * 10 }));
+    setStoreChips(normalized);
+    await saveSetting('store_chips', serializeStoreChips(normalized));
+  };
+
+  const handleQrUpload = async (file: File) => {
+    setQrUploading(true);
+    try {
+      const compressed = await compressImage(file);
+      const url = await uploadToStorage(compressed, file.name);
+      await saveSetting('payment_qr_url', url);
+    } catch (err: any) {
+      alert(err?.message || 'No se pudo subir el QR');
+    } finally {
+      setQrUploading(false);
+    }
   };
 
   const loadAll = async () => {
@@ -366,7 +396,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         description: form.description.trim(),
         category: form.category,
         sizes: form.sizes,
-        image_url: form.images[0] ?? '',
         images: form.images,
         available: form.available,
       };
@@ -428,7 +457,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-black text-gray-900">Panel de Tienda</h2>
-          <p className="text-xs text-gray-400 font-medium">Leydi American</p>
+          <p className="text-xs text-gray-400 font-medium">Leidy American</p>
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -598,7 +627,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 <div>
                   <label className="text-[10px] font-black text-gray-400 uppercase">Categoría</label>
                   <select className="w-full mt-1 rounded-lg border border-gray-200 px-2 py-1.5 text-[12px] font-medium outline-none bg-white" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-                    {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
+                    {formCategoryOptions.map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
@@ -714,7 +743,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                       title={p.available ? 'Ocultar de la tienda' : 'Mostrar en la tienda'}
                       onClick={async () => {
                         await fetch(`/api/products/${p.id}`, {
-                          method: 'PUT',
+                          method: 'PATCH',
                           headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
                           body: JSON.stringify({ available: !p.available })
                         });
@@ -1039,6 +1068,99 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         <div className="space-y-3">
           <p className="text-sm font-black text-gray-800">Configuracion de tienda</p>
 
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-gray-800">Categorias y botones</p>
+                <p className="text-[11px] text-gray-400 font-medium">Controla los chips del catalogo oficial.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => saveStoreChips(DEFAULT_STORE_CHIPS)}
+                className="px-3 py-1.5 rounded-full bg-gray-100 text-[11px] font-black text-gray-500"
+              >
+                Restaurar
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {storeChips.map((chip, idx) => (
+                <div key={chip.id} className="grid grid-cols-[1fr_76px_34px_34px] gap-2 items-center rounded-xl border border-gray-100 bg-gray-50 p-2">
+                  <input
+                    value={chip.label}
+                    onChange={e => {
+                      const nextLabel = e.target.value;
+                      const next = storeChips.map((c, i) => {
+                        if (i !== idx) return c;
+                        const shouldMoveValue = c.id.startsWith('chip-') || c.value === c.label;
+                        return { ...c, label: nextLabel, value: shouldMoveValue ? nextLabel : c.value };
+                      });
+                      setStoreChips(next);
+                    }}
+                    onBlur={() => saveStoreChips(storeChips)}
+                    className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] font-bold outline-none"
+                  />
+                  <select
+                    value={chip.kind}
+                    onChange={e => {
+                      const next = storeChips.map((c, i) => i === idx ? { ...c, kind: e.target.value === 'promo' ? 'promo' : 'category' } : c);
+                      setStoreChips(next);
+                      saveStoreChips(next);
+                    }}
+                    className="rounded-lg border border-gray-200 bg-white px-1.5 py-1.5 text-[11px] font-black outline-none"
+                  >
+                    <option value="category">Cat.</option>
+                    <option value="promo">Promo</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = storeChips.map((c, i) => i === idx ? { ...c, active: !c.active } : c);
+                      saveStoreChips(next);
+                    }}
+                    className="h-8 rounded-lg text-[10px] font-black"
+                    style={{ background: chip.active ? '#dcfce7' : '#fee2e2', color: chip.active ? '#16a34a' : '#dc2626' }}
+                  >
+                    {chip.active ? 'ON' : 'OFF'}
+                  </button>
+                  <button
+                    type="button"
+                    title="Eliminar etiqueta"
+                    onClick={() => {
+                      if (!confirm(`Eliminar "${chip.label}"? Los productos existentes no se borran.`)) return;
+                      saveStoreChips(storeChips.filter((_, i) => i !== idx));
+                    }}
+                    className="h-8 rounded-lg bg-red-50 text-red-500 text-[13px] font-black"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const id = `chip-${Date.now()}`;
+                const next = [...storeChips, { id, label: 'Nueva', value: 'Nueva', kind: 'category' as const, icon: '', active: true, sort: storeChips.length * 10 }];
+                saveStoreChips(next);
+              }}
+              className="w-full h-10 rounded-xl border border-dashed border-pink-200 bg-pink-50 text-[12px] font-black text-[#ff2d78]"
+            >
+              Agregar categoria o promo
+            </button>
+            <button
+              type="button"
+              onClick={() => saveStoreChips(storeChips)}
+              className="w-full h-10 rounded-xl bg-[#ff2d78] text-[12px] font-black text-white shadow-sm"
+            >
+              Guardar categorias
+            </button>
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              Nota: por ahora cada producto conserva una categoria principal. Los botones Promo/Rebajas funcionan como categorias comerciales ligeras sin agregar peso al catalogo.
+            </p>
+          </div>
+
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4">
             <div>
               <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Nombre tienda</label>
@@ -1051,6 +1173,27 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               <input type="text" value={settings.store_phone || ''}
                 onChange={e => saveSetting('store_phone', e.target.value)}
                 className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">QR de pago</label>
+              <input type="text" value={settings.payment_qr_url || '/qr-yape.jpg'}
+                onChange={e => saveSetting('payment_qr_url', e.target.value)}
+                placeholder="/qr-yape.jpg o URL de imagen"
+                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
+              <label className="mt-2 flex h-10 items-center justify-center rounded-xl border border-dashed border-pink-200 bg-pink-50 text-[12px] font-black text-[#ff2d78] cursor-pointer">
+                {qrUploading ? 'Subiendo QR...' : 'Subir imagen QR'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleQrUpload(file);
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </label>
+              <p className="mt-1 text-[10px] text-gray-400 font-medium">Puedes subir una imagen, pegar una URL o dejar /qr-yape.jpg.</p>
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Proximo Live (fecha)</label>

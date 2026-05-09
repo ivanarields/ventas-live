@@ -9,26 +9,13 @@
   <link rel="icon" href="/icon-192.png" />
   <title>Tienda Leydi American</title>
   <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#fdf5f7;-webkit-font-smoothing:antialiased;overflow-x:hidden}
     .skeleton{background:linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:16px}
     @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
   </style>
   <link rel="preconnect" href="https://thgbfurscfjcmgokyyif.supabase.co" />
   <link rel="dns-prefetch" href="https://thgbfurscfjcmgokyyif.supabase.co" />
-  <script>
-    // Limpieza activa: si hay un SW viejo registrado, lo desregistramos y limpiamos cache.
-    // El SW de tienda-v2 ahora es kill-switch y se autodestruye, pero forzamos aqui tambien
-    // por si el navegador todavia no ha activado la nueva version.
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(reg => reg.unregister());
-      });
-      if (window.caches) {
-        caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
-      }
-    }
-  </script>
+  <link rel="preconnect" href="https://images.unsplash.com" />
+  <link rel="dns-prefetch" href="https://images.unsplash.com" />
 </head>
 <body>
   <div id="root">

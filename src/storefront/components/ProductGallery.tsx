@@ -118,11 +118,9 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
 
   // Categorías fijas comunes
   const categories = ['Todos', 'Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos', 'Pantalones', 'General'];
-  const useV2Layout = window.location.pathname.includes('tienda-v2');
-
   return (
-    <div className="flex flex-col min-h-screen bg-white" style={useV2Layout ? { width: '100%', overflowX: 'hidden' } : undefined}>
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-100" style={useV2Layout ? { overflow: 'hidden' } : undefined}>
+    <div className="flex flex-col min-h-screen bg-white">
+      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-100">
         <div className="flex items-center gap-3 px-5 h-16">
           <button
             onClick={onBack}
@@ -195,10 +193,7 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
           </div>
         )}
 
-        <div
-          className="flex gap-2 px-5 pb-3 overflow-x-auto scrollbar-hide"
-          style={useV2Layout ? { paddingLeft: 14, paddingRight: 14 } : undefined}
-        >
+        <div className="flex gap-2 px-5 pb-3 overflow-x-auto scrollbar-hide">
           {categories.map(cat => (
             <button
               key={cat}
@@ -215,32 +210,21 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
         </div>
       </header>
 
-      <div
-        className="flex-1 p-4 pb-8"
-        style={useV2Layout ? { padding: '16px 12px 32px', background: '#fbfbfb' } : undefined}
-      >
+      <div className="flex-1 p-4 pb-8">
         {loading ? (
-          <div className="grid grid-cols-2 gap-3" style={useV2Layout ? { gap: 12 } : undefined}>
+          <div className="grid grid-cols-2 gap-3">
             {[1, 2, 3, 4].map(n => (
               <div key={n} className="bg-gray-100 rounded-[24px] aspect-[3/4] animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3" style={useV2Layout ? { gap: 12 } : undefined}>
+          <div className="grid grid-cols-2 gap-3">
             {products.map(p => (
               <div
                 key={p.id}
                 onClick={() => !reservedMap[String(p.id)] && onProductSelect(p)}
                 className="bg-white rounded-2xl overflow-hidden flex flex-col cursor-pointer active:scale-[0.97] transition-transform"
-                style={useV2Layout
-                  ? {
-                      boxShadow: '0 8px 22px rgba(17,24,39,0.08)',
-                      borderRadius: 22,
-                      border: '1px solid rgba(17,24,39,0.06)',
-                      minWidth: 0,
-                    }
-                  : { boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }
-                }
+                style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}
               >
                 {/* Imagen */}
                 <div className="aspect-[3/4] bg-gray-100 relative overflow-hidden">
@@ -272,18 +256,12 @@ export function ProductGallery({ onProductSelect, onQuickBuy, onBack, onAddToCar
                 </div>
 
                 {/* Info */}
-                <div
-                  className="px-3 pt-2 pb-3 flex flex-col gap-1"
-                  style={useV2Layout ? { padding: '10px 11px 12px', minHeight: 72 } : undefined}
-                >
-                  <p
-                    className="font-black text-[12px] text-gray-800 leading-snug line-clamp-2"
-                    style={useV2Layout ? { fontSize: 13, lineHeight: '17px' } : undefined}
-                  >
+                <div className="px-3 pt-2 pb-3 flex flex-col gap-1">
+                  <p className="font-black text-[12px] text-gray-800 leading-snug line-clamp-2">
                     {p.title}
                   </p>
                   <div className="flex items-center justify-between gap-1">
-                    <p className="font-black text-[15px]" style={{ color: '#ff2d78', ...(useV2Layout ? { fontSize: 17, lineHeight: '24px' } : {}) }}>
+                    <p className="font-black text-[15px]" style={{ color: '#ff2d78' }}>
                       {p.price} <span className="text-[10px] text-gray-400 font-bold">Bs</span>
                     </p>
                     <button

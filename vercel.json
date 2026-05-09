@@ -8,8 +8,28 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/tienda-v2((?!/assets/).*)",
+      "source": "/tienda",
       "destination": "/tienda-v2.html"
+    },
+    {
+      "source": "/tienda/:path*",
+      "destination": "/tienda-v2.html"
+    },
+    {
+      "source": "/tienda-v2",
+      "destination": "/tienda-v2.html"
+    },
+    {
+      "source": "/tienda-v2/:path*",
+      "destination": "/tienda-v2.html"
+    },
+    {
+      "source": "/tienda-original",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/tienda-original/:path*",
+      "destination": "/index.html"
     },
     {
       "source": "/((?!api/|icon-|manifest\\.json|sw\\.js|sw-tienda-v2\\.js|assets/).*)",
