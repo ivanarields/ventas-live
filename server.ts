@@ -9,7 +9,7 @@ import { supabasePanel } from "./src/lib/supabasePanel.js";
 import { createAiRouter } from "./src/routes/ai-gateway.js";
 import { createIdentityRouter } from "./src/routes/identity.js";
 import { createLiveSalesRouter } from "./src/routes/live-sales.js";
-import { createWhatsappRouter, enqueueStoreConfirmation } from "./src/routes/whatsapp.js";
+import { createWhatsappRouter, enqueueStoreConfirmation, processNextWhatsappQueueMessage } from "./src/routes/whatsapp.js";
 import { createStoreSelectionRouter } from "./src/routes/store-selection.js";
 import { createStoreSettingsRouter } from "./src/routes/store-settings.js";
 
@@ -73,6 +73,28 @@ const isMissingDbObject = (error: any) => {
   const message = String(error?.message ?? '').toLowerCase();
   return code === '42P01' || code === '42703' || code === 'PGRST204' || message.includes('does not exist') || message.includes('schema cache');
 };
+
+function startWhatsappQueueProcessor() {
+  const key = Symbol.for('ventas-live.whatsapp-queue-processor');
+  if ((globalThis as any)[key]) return;
+  (globalThis as any)[key] = true;
+
+  const run = async () => {
+    try {
+      const result = await processNextWhatsappQueueMessage(supabaseServer, undefined, { storeOnly: true });
+      if (result.sent) {
+        console.log(`[whatsapp-auto] Mensaje enviado: ${result.message_id}`);
+      } else if (result.error) {
+        console.error('[whatsapp-auto] Error enviando mensaje:', result.error);
+      }
+    } catch (err: any) {
+      console.error('[whatsapp-auto] Error procesando cola:', err?.message ?? err);
+    }
+  };
+
+  const interval = setInterval(run, 60_000);
+  interval.unref?.();
+}
 
 async function safeSelect(client: any, table: string, columns: string, apply: (query: any) => any) {
   try {
@@ -1141,7 +1163,10 @@ const PORT = Number(process.env.PORT || 3001);
     if (error) return res.status(500).json({ error: error.message });
 
     // ── Trigger WhatsApp cuando el pedido pasa a "listo" ─────────────────
-    if (req.body.status === 'listo' && data?.customer_id) {
+    // IMPORTANTE: Los pedidos WEB (tienda online) NO disparan este mensaje
+    // porque ya recibieron su mensaje único al confirmar el pago.
+    const isWebOrder = data?.source === 'WEB' || data?.label_type === 'WEB';
+    if (req.body.status === 'listo' && data?.customer_id && !isWebOrder) {
       (async () => {
         try {
           // 1. Buscar el teléfono del cliente en la tabla principal
@@ -1165,21 +1190,20 @@ const PORT = Number(process.env.PORT || 3001);
           // 3. Construir link al perfil de tienda
           const storeBase = process.env.STORE_PUBLIC_URL ||
             `${req.protocol}://${req.get('host')}`;
-          const profileLink = `${storeBase}/tienda`;
+          const profileLink = `${storeBase}/tienda#profile`;
 
-          // 4. Mensaje personalizado
+          // 4. Mensaje personalizado (Live / pedidos manuales)
           const pedidoLabel = data.label ? ` #${data.label}` : '';
           const message =
             `¡Hola ${(customer.name ?? '').split(' ')[0] || ''}! 🎉\n` +
-            `Tu pedido${pedidoLabel} está *listo para retirar*.\n\n` +
-            `Podés ver el estado de tus pedidos en tu perfil:\n` +
-            `${profileLink}\n\n` +
-            `Ingresá con tu número de teléfono y tu PIN.`;
+            `Tu pedido${pedidoLabel} está listo. ¡Muchas gracias por tu compra!\n\n` +
+            `Mirá los detalles en tu perfil:\n` +
+            `${profileLink}`;
 
           // 5. Encolar mensaje WhatsApp
           const ownerUserId = process.env.STORE_OWNER_USER_ID || userId;
           await enqueueStoreConfirmation(
-            supabaseStore,
+            supabaseServer,
             ownerUserId,
             customer.phone,
             data.id,
@@ -1541,13 +1565,132 @@ const PORT = Number(process.env.PORT || 3001);
         .order('created_at', { ascending: false })
         .limit(20);
 
-      res.json({ user: data.user, customer, orders: orders ?? [] });
+      res.json({
+        user: data.user,
+        customer,
+        orders: orders ?? [],
+        favorites: await loadFavoriteProducts(cleanPhone),
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Error interno" });
     }
   });
 
   // Upload de imágenes — usa supabaseStore (TiendaOnline)
+  const mapStoreProducts = (rows: any[], preferredOrder: number[] = []) => {
+    const order = new Map(preferredOrder.map((id, index) => [Number(id), index]));
+    return [...rows]
+      .sort((a, b) => (order.get(Number(a.id)) ?? 9999) - (order.get(Number(b.id)) ?? 9999))
+      .map(row => ({
+        id: String(row.id),
+        name: row.name,
+        title: row.name,
+        price: Number(row.price),
+        description: row.description ?? '',
+        images: Array.isArray(row.images) && row.images.length > 0 ? row.images : (row.image_url ? [row.image_url] : []),
+        sizes: Array.isArray(row.sizes) ? row.sizes : [],
+        available: row.available ?? true,
+        stock: row.stock ?? 1,
+        category: row.category ?? 'General',
+        priority_order: row.priority_order ?? 0,
+      }));
+  };
+
+  const getStoreUserPhone = async (req: any, res: any): Promise<string | null> => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      res.status(401).json({ error: 'Token requerido' });
+      return null;
+    }
+    const { data, error } = await supabaseStore.auth.getUser(token);
+    if (error || !data.user) {
+      res.status(401).json({ error: 'Sesion invalida' });
+      return null;
+    }
+    return data.user.email?.replace('@tiendaleydi.com', '').replace(/\D/g, '') ?? '';
+  };
+
+  const loadFavoriteProducts = async (phone: string) => {
+    const cleanPhone = String(phone ?? '').replace(/\D/g, '');
+    if (!cleanPhone) return [];
+    const { data: favoriteRows, error } = await supabaseStore
+      .from('store_favorites')
+      .select('product_id')
+      .eq('customer_wa', cleanPhone)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const ids = [...new Set((favoriteRows ?? []).map((row: any) => Number(row.product_id)).filter(Boolean))];
+    if (ids.length === 0) return [];
+    const { data, error: productsError } = await supabaseStore
+      .from('products')
+      .select('*')
+      .in('id', ids)
+      .eq('available', true);
+    if (productsError) throw productsError;
+    return mapStoreProducts(data ?? [], ids);
+  };
+
+  app.get('/api/store-favorites', async (req, res) => {
+    try {
+      const phone = await getStoreUserPhone(req, res);
+      if (!phone) return;
+      res.json({ products: await loadFavoriteProducts(phone) });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Error al cargar favoritos' });
+    }
+  });
+
+  app.post('/api/store-favorites', async (req, res) => {
+    try {
+      const phone = await getStoreUserPhone(req, res);
+      if (!phone) return;
+      const productId = Number(req.body?.productId);
+      if (!productId) return res.status(400).json({ error: 'productId requerido' });
+      await supabaseStore.from('store_favorites').delete().eq('customer_wa', phone).eq('product_id', productId);
+      const { error } = await supabaseStore.from('store_favorites').insert({ customer_wa: phone, product_id: productId });
+      if (error) throw error;
+      res.json({ products: await loadFavoriteProducts(phone) });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Error al guardar favorito' });
+    }
+  });
+
+  app.post('/api/store-favorites/sync', async (req, res) => {
+    try {
+      const phone = await getStoreUserPhone(req, res);
+      if (!phone) return;
+      const productIds = Array.isArray(req.body?.productIds)
+        ? [...new Set(req.body.productIds.map((id: any) => Number(id)).filter(Boolean))]
+        : [];
+      for (const productId of productIds) {
+        await supabaseStore.from('store_favorites').delete().eq('customer_wa', phone).eq('product_id', productId);
+      }
+      if (productIds.length > 0) {
+        const { error } = await supabaseStore
+          .from('store_favorites')
+          .insert(productIds.map(productId => ({ customer_wa: phone, product_id: productId })));
+        if (error) throw error;
+      }
+      res.json({ products: await loadFavoriteProducts(phone) });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Error al sincronizar favoritos' });
+    }
+  });
+
+  app.delete('/api/store-favorites', async (req, res) => {
+    try {
+      const phone = await getStoreUserPhone(req, res);
+      if (!phone) return;
+      const productId = Number(req.body?.productId);
+      if (!productId) return res.status(400).json({ error: 'productId requerido' });
+      const { error } = await supabaseStore.from('store_favorites').delete().eq('customer_wa', phone).eq('product_id', productId);
+      if (error) throw error;
+      res.json({ products: await loadFavoriteProducts(phone) });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Error al eliminar favorito' });
+    }
+  });
+
   app.post("/api/upload-image", async (req, res) => {
     try {
       const { base64Data, fileName, contentType } = req.body;
@@ -1556,17 +1699,23 @@ const PORT = Number(process.env.PORT || 3001);
       const base64String = base64Data.split(',')[1] || base64Data;
       const buffer = Buffer.from(base64String, 'base64');
       
-      // Las imagenes de tienda deben vivir solo en TiendaOnline.
-      // Nunca usar ChehiApp como fallback para no contaminar la base principal.
-      const uploadResult = await supabaseStore.storage
+      let uploadClient = supabaseStore;
+      let uploadResult = await supabaseStore.storage
         .from('store_images')
         .upload(fileName, buffer, { contentType: contentType || 'image/webp', upsert: true });
 
       if (uploadResult.error) {
-        throw uploadResult.error;
+        const message = String(uploadResult.error.message ?? '').toLowerCase();
+        if (message.includes('row-level security') || message.includes('violates row-level security')) {
+          uploadClient = supabaseServer;
+          uploadResult = await supabaseServer.storage
+            .from('store_images')
+            .upload(fileName, buffer, { contentType: contentType || 'image/webp', upsert: true });
+        }
+        if (uploadResult.error) throw uploadResult.error;
       }
 
-      const { data: publicUrlData } = supabaseStore.storage
+      const { data: publicUrlData } = uploadClient.storage
         .from('store_images')
         .getPublicUrl(uploadResult.data.path);
         
@@ -1583,6 +1732,7 @@ const PORT = Number(process.env.PORT || 3001);
   app.use('/api/whatsapp', createWhatsappRouter(supabaseServer));
   app.use('/api/store', createStoreSelectionRouter(supabaseStore));
   app.use('/api/store', createStoreSettingsRouter(supabaseStore));
+  startWhatsappQueueProcessor();
   // ==========================================================================
 
   app.get("/api/products", async (req, res) => {
@@ -1592,8 +1742,11 @@ const PORT = Number(process.env.PORT || 3001);
       const limit = parseInt(req.query.limit as string) || 50; // Por defecto 50, se puede pedir menos (ej. 15)
       const category = req.query.category as string;
       const search = req.query.search as string;
+      const publicStorefront = !showAll;
 
-      let query = supabaseStore.from("products").select("*", { count: 'exact' });
+      let query = supabaseStore
+        .from("products")
+        .select("*", { count: 'exact' });
 
       if (!showAll) query = query.eq("available", true);
       
@@ -1611,6 +1764,12 @@ const PORT = Number(process.env.PORT || 3001);
 
       const { data, count, error } = await query;
       if (error) throw error;
+
+      if (publicStorefront) {
+        res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+      } else {
+        res.setHeader("Cache-Control", "no-store");
+      }
       
       res.json({
         data: data ?? [],
@@ -1633,6 +1792,7 @@ const PORT = Number(process.env.PORT || 3001);
         .single();
       if (error) throw error;
       if (!data) return res.status(404).json({ error: "Producto no encontrado" });
+      res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
@@ -1671,9 +1831,10 @@ const PORT = Number(process.env.PORT || 3001);
     try {
       const userId = req.headers["x-user-id"] as string;
       if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+      const { image_url, ...safeBody } = req.body ?? {};
       const { data, error } = await supabaseStore
         .from("products")
-        .update(req.body)
+        .update(safeBody)
         .eq("id", Number(req.params.id))
         .select()
         .single();
@@ -1724,6 +1885,7 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
+      res.setHeader("Cache-Control", "public, s-maxage=3, stale-while-revalidate=10");
       res.json(reservedMap);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
@@ -2082,17 +2244,8 @@ const PORT = Number(process.env.PORT || 3001);
       .single();
 
     if (error || !data) return false;
-    
-    // 0. Encolar mensaje de WhatsApp confirmando el pedido
-    if (data.customer_wa) {
-      enqueueStoreConfirmation(
-        supabaseStore, 
-        (data.user_id || 'mobile'), 
-        data.customer_wa, 
-        data.id
-      ).catch(e => console.error('[whatsapp-queue] Error encolando confirmación:', e));
-    }
 
+    const ownerUserId = process.env.STORE_OWNER_USER_ID || data.user_id || 'store-auto';
 
     // 1. Ocultar productos vendidos
     try {
@@ -2104,10 +2257,12 @@ const PORT = Number(process.env.PORT || 3001);
       console.error('[store-match] Error ocultando productos:', e);
     }
 
+    // Nombre que vamos a usar tanto en panel como en el mensaje WA.
+    let finalName = '';
+
     // 2. FUSIÓN DE IDENTIDAD GLOBAL Y ENVÍO A ALMACÉN
     try {
       // Intentar obtener el nombre real desde el evento de pago si la fuente es el banco
-      let finalName = '';
       if (source.includes('bank') || source.includes('macrodroid')) {
          const { data: bankEvent } = await supabaseServer
            .from('payment_events')
@@ -2121,7 +2276,6 @@ const PORT = Number(process.env.PORT || 3001);
       let globalCustomerId = null;
 
       // El user_id del operador dueño de la tienda (para que aparezca en su sistema principal)
-      const ownerUserId = process.env.STORE_OWNER_USER_ID || data.user_id || 'store-auto';
 
       if (waNumber) {
         // Buscar si el cliente ya existe en el sistema físico (por teléfono, sin filtro de user_id)
@@ -2205,6 +2359,34 @@ const PORT = Number(process.env.PORT || 3001);
 
     } catch (e) {
       console.error('[store-match] Error en fusión logística:', e);
+    }
+
+    // 4. Encolar el ÚNICO mensaje de WhatsApp para la clienta de tienda.
+    //    Va al final para poder usar el nombre real (del banco si lo extrajimos).
+    //    El operador NO disparará otro mensaje cuando toque "PEDIDO LISTO":
+    //    los pedidos WEB se filtran en PATCH /api/pedidos/:id.
+    if (data.customer_wa) {
+      try {
+        const storeBase = process.env.STORE_PUBLIC_URL || 'https://leidydiaz.live';
+        const profileLink = `${storeBase}/tienda#profile`;
+        const nameForGreeting = (finalName || data.customer_name || '').trim();
+        const firstName = nameForGreeting.split(' ')[0] || '';
+        const greeting = firstName ? `¡Hola ${firstName}! ` : '¡Hola! ';
+        const storeMessage =
+          `${greeting}🎉\n` +
+          `Tu pago fue confirmado. Tu pedido #${data.id} está listo. ` +
+          `¡Muchas gracias por tu compra!\n\n` +
+          `Mirá los detalles en tu perfil:\n${profileLink}`;
+        await enqueueStoreConfirmation(
+          supabaseServer,
+          ownerUserId,
+          data.customer_wa,
+          data.id,
+          storeMessage,
+        );
+      } catch (waErr: any) {
+        console.error('[whatsapp-queue] Error encolando confirmación:', waErr?.message ?? waErr);
+      }
     }
 
     console.log(`[store-match] ✅ Pedido #${orderId} VERIFICADO y unificado via ${source}`);
@@ -2487,21 +2669,22 @@ const PORT = Number(process.env.PORT || 3001);
         appType: "custom",
       });
       app.use(vite.middlewares);
-      app.get("/tienda-v2", async (req, res, next) => {
+      const renderViteHtml = async (req: any, res: any, next: any, fileName: string) => {
         try {
           const { readFileSync } = await import("fs");
-          const html = readFileSync(path.join(process.cwd(), "tienda-v2.html"), "utf-8");
+          const html = readFileSync(path.join(process.cwd(), fileName), "utf-8");
           const transformed = await vite.transformIndexHtml(req.url, html);
           res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
         } catch (e) { next(e); }
+      };
+      app.get(["/tienda", "/tienda/*", "/tienda-v2", "/tienda-v2/*"], (req, res, next) => {
+        renderViteHtml(req, res, next, "tienda-v2.html");
+      });
+      app.get(["/tienda-original", "/tienda-original/*"], (req, res, next) => {
+        renderViteHtml(req, res, next, "index.html");
       });
       app.get("*", async (req, res, next) => {
-        try {
-          const { readFileSync } = await import("fs");
-          const html = readFileSync(path.join(process.cwd(), "index.html"), "utf-8");
-          const transformed = await vite.transformIndexHtml(req.url, html);
-          res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
-        } catch (e) { next(e); }
+        renderViteHtml(req, res, next, "index.html");
       });
     } catch (e) {
       console.log("Vite no disponible en este entorno", e);
@@ -2509,8 +2692,11 @@ const PORT = Number(process.env.PORT || 3001);
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("/tienda-v2", (_req, res) => {
+    app.get(["/tienda", "/tienda/*", "/tienda-v2", "/tienda-v2/*"], (_req, res) => {
       res.sendFile(path.join(distPath, "tienda-v2.html"));
+    });
+    app.get(["/tienda-original", "/tienda-original/*"], (_req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

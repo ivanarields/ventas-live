@@ -17,7 +17,6 @@ type Screen = 'loading' | 'empty_cart' | 'identify' | 'payment' | 'verified';
 
 export function Checkout({ items, onBack, onOrderComplete }: Props) {
   const total = cartTotal(items);
-  const useV2Layout = window.location.pathname.includes('tienda-v2');
 
   const [screen, setScreen] = useState<Screen>('loading');
 
@@ -47,10 +46,20 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
       // ✅ Ya tiene sesión → ir directo al pago
       setPhone(session.phone);
       createOrder(session.phone);
-    } else {
-      // No tiene sesión → mostrar formulario
-      setScreen('identify');
+      return;
     }
+
+    // No tiene sesión → mostrar formulario.
+    // Si vino con ?phone=... en la URL (link de WhatsApp), pre-llenar.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const phoneFromUrl = params.get('phone');
+      if (phoneFromUrl) {
+        const cleaned = phoneFromUrl.replace(/\D/g, '').replace(/^591/, '').slice(0, 8);
+        if (cleaned.length === 8) setPhone(cleaned);
+      }
+    } catch {}
+    setScreen('identify');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -333,11 +342,8 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
 
   // ── PANTALLA: Identificación (solo si no hay sesión) ──────────
   return (
-    <div className="flex flex-col min-h-screen bg-white" style={useV2Layout ? { background: '#fbfbfb', overflowX: 'hidden' } : undefined}>
-      <div
-        className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3"
-        style={useV2Layout ? { padding: '14px 18px 12px', boxShadow: '0 1px 0 rgba(17,24,39,0.04)' } : undefined}
-      >
+    <div className="flex flex-col min-h-screen bg-white">
+      <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3">
         <button onClick={onBack}
           className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-50">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -350,15 +356,9 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
         </div>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto px-5 py-5 space-y-5"
-        style={useV2Layout ? { padding: '16px 14px 112px', maxWidth: 430, width: '100%', margin: '0 auto' } : undefined}
-      >
+      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
         {/* Resumen compacto */}
-        <div
-          className="bg-gray-50 rounded-2xl p-4"
-          style={useV2Layout ? { background: 'white', border: '1px solid rgba(17,24,39,0.06)', boxShadow: '0 8px 22px rgba(17,24,39,0.06)' } : undefined}
-        >
+        <div className="bg-gray-50 rounded-2xl p-4">
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-2">Tu pedido</p>
           {items.map((item, idx) => (
             <div key={idx} className="flex items-center gap-2 py-1">
@@ -389,13 +389,13 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
             <p className="text-[10px] text-gray-400 mb-2 leading-relaxed">
               📱 Usa tu número real de WhatsApp. Lo necesitamos para confirmar tu pago automáticamente y enviarte el estado de tu pedido.
             </p>
-            <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden focus-within:border-pink-400 transition-colors" style={useV2Layout ? { background: 'white' } : undefined}>
+            <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden focus-within:border-pink-400 transition-colors">
               <span className="px-3 text-[13px] font-black text-gray-400 bg-gray-50 border-r border-gray-200 py-3.5">+591</span>
               <input
                 type="tel" inputMode="numeric" placeholder="60001234"
-                value={phone} onChange={e => setPhone(e.target.value)}
+                value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 8))}
                 className="flex-1 px-3 py-3.5 text-[15px] font-bold bg-white outline-none"
-                maxLength={8} autoFocus
+                maxLength={8} autoFocus={phone.length !== 8}
               />
             </div>
           </div>
@@ -412,8 +412,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
               type="password" inputMode="numeric" placeholder="• • • •"
               value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
               className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-[22px] font-black text-center tracking-[0.6em] outline-none focus:border-pink-400 transition-colors"
-              style={useV2Layout ? { background: 'white', letterSpacing: '0.45em' } : undefined}
-              maxLength={4}
+              maxLength={4} autoFocus={phone.length === 8}
             />
           </div>
 
@@ -432,24 +431,7 @@ export function Checkout({ items, onBack, onOrderComplete }: Props) {
         </div>
       </div>
 
-      <div
-        className="px-5 py-4 border-t border-gray-100"
-        style={useV2Layout
-          ? {
-              position: 'fixed',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              maxWidth: 430,
-              margin: '0 auto',
-              background: 'rgba(255,255,255,0.96)',
-              backdropFilter: 'blur(10px)',
-              padding: '12px 14px calc(16px + env(safe-area-inset-bottom))',
-              zIndex: 30,
-            }
-          : undefined
-        }
-      >
+      <div className="px-5 py-4 border-t border-gray-100">
         <button onClick={handleIdentify}
           disabled={authLoading || pin.length !== 4 || phone.replace(/\D/g, '').length < 8}
           className="w-full h-14 rounded-2xl font-black text-white text-[15px] shadow-lg transition-all active:scale-[0.98] disabled:opacity-40 flex items-center justify-center gap-2"

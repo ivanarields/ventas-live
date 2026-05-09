@@ -4992,12 +4992,10 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     }
     setIsNotifying(true);
     try {
-      const res = await fetch('/api/store/notify-live-ready', {
+      await apiFetch('/api/store/notify-live-ready', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: person.phone })
       });
-      if (!res.ok) throw new Error('Error al notificar');
       confetti({ particleCount: 150, spread: 70, origin: { y: 0.3 }, colors: ['#ff2d78', '#ffffff'] });
     } catch (err) {
       alert('Error al enviar notificación por WhatsApp');

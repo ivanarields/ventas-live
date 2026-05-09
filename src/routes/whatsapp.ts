@@ -252,55 +252,12 @@ export function createWhatsappRouter(supabase: SupabaseClient) {
 
     try {
       // 1. Tomar mensaje atómico (FOR UPDATE SKIP LOCKED via RPC)
-      const { data: msg, error: rpcError } = await supabase
-        .rpc('fn_dequeue_whatsapp_message', { p_user_id: userId });
-
-      if (rpcError) return res.status(500).json({ error: rpcError.message });
-      if (!msg) return res.json({ ok: true, sent: false, reason: 'queue_empty' });
-
-      const message = msg as QueuedMessage;
-
-      // 2. Llamar al bridge de Railway
-      let bridgeOk = false;
-      let bridgeError = '';
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
-        const r = await fetch(`${BRIDGE_URL}/api/send`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-webhook-secret': WEBHOOK_SECRET,
-          },
-          body: JSON.stringify({ phone: message.phone, message: message.message_body }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (r.ok) {
-          bridgeOk = true;
-        } else {
-          const errBody = await r.json().catch(() => ({}));
-          bridgeError = (errBody as any).error || `HTTP ${r.status}`;
-        }
-      } catch (fetchErr: any) {
-        bridgeError = fetchErr.message || 'bridge_unreachable';
+      const result = await processNextWhatsappQueueMessage(supabase, userId);
+      if (!result.ok && result.error) {
+        return res.status(result.statusCode ?? 500).json(result);
       }
+      return res.json(result);
 
-      // 3. Actualizar estado en BD
-      if (bridgeOk) {
-        await supabase
-          .from('whatsapp_message_queue')
-          .update({ status: 'sent', sent_at: new Date().toISOString() })
-          .eq('id', message.id);
-        res.json({ ok: true, sent: true, message_id: message.id, phone: message.phone });
-      } else {
-        await supabase
-          .from('whatsapp_message_queue')
-          .update({ status: 'failed', error_detail: bridgeError })
-          .eq('id', message.id);
-        res.status(502).json({ ok: false, sent: false, error: bridgeError, message_id: message.id });
-      }
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -375,4 +332,85 @@ export async function enqueueStoreConfirmation(
 
   if (error) return { ok: false, error: error.message };
   return { ok: true, queued: data };
+}
+
+export async function processNextWhatsappQueueMessage(
+  supabase: SupabaseClient,
+  userId?: string,
+  options: { storeOnly?: boolean } = {},
+) {
+  let message: QueuedMessage | null = null;
+
+  if (userId) {
+    const { data: msg, error: rpcError } = await supabase
+      .rpc('fn_dequeue_whatsapp_message', { p_user_id: userId });
+
+    if (rpcError) return { ok: false, sent: false, error: rpcError.message, statusCode: 500 };
+    if (!msg) return { ok: true, sent: false, reason: 'queue_empty' };
+    message = msg as QueuedMessage;
+  } else {
+    let pendingQuery = supabase
+      .from('whatsapp_message_queue')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    if (options.storeOnly) {
+      pendingQuery = pendingQuery.eq('reference_type', 'store_order');
+    }
+
+    const { data: pending, error: pendingError } = await pendingQuery.maybeSingle();
+
+    if (pendingError) return { ok: false, sent: false, error: pendingError.message, statusCode: 500 };
+    if (!pending) return { ok: true, sent: false, reason: 'queue_empty' };
+
+    const { data: claimed, error: claimError } = await supabase
+      .from('whatsapp_message_queue')
+      .update({ status: 'sending' })
+      .eq('id', pending.id)
+      .eq('status', 'pending')
+      .select()
+      .maybeSingle();
+
+    if (claimError) return { ok: false, sent: false, error: claimError.message, statusCode: 500 };
+    if (!claimed) return { ok: true, sent: false, reason: 'already_claimed' };
+    message = claimed as QueuedMessage;
+  }
+
+  let bridgeError = '';
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const r = await fetch(`${BRIDGE_URL}/api/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-webhook-secret': WEBHOOK_SECRET,
+      },
+      body: JSON.stringify({ phone: message.phone, message: message.message_body }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (r.ok) {
+      await supabase
+        .from('whatsapp_message_queue')
+        .update({ status: 'sent', sent_at: new Date().toISOString(), error_detail: null })
+        .eq('id', message.id);
+      return { ok: true, sent: true, message_id: message.id, phone: message.phone };
+    }
+
+    const errBody = await r.json().catch(() => ({}));
+    bridgeError = (errBody as any).error || `HTTP ${r.status}`;
+  } catch (fetchErr: any) {
+    bridgeError = fetchErr.message || 'bridge_unreachable';
+  }
+
+  await supabase
+    .from('whatsapp_message_queue')
+    .update({ status: 'failed', error_detail: bridgeError })
+    .eq('id', message.id);
+
+  return { ok: false, sent: false, error: bridgeError, message_id: message.id, statusCode: 502 };
 }

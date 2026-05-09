@@ -5,15 +5,17 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
   const router = Router();
 
   const DEFAULT_SETTINGS: Record<string, string> = {
-    store_name: 'Leydi American',
+    store_name: 'Leidy American',
     store_phone: '59160003230',
-    reservation_minutes: '10',
+    reservation_minutes: '1',
     delivery_enabled: 'true',
     pickup_enabled: 'true',
     next_live_date: '',
     next_live_time: '',
     delivery_note: 'Entregas de lunes a sabado.',
     address: 'Consulta por WhatsApp',
+    store_chips: '',
+    payment_qr_url: '/qr-yape.jpg',
   };
 
   const DEFAULT_DELIVERY_SLOTS = [

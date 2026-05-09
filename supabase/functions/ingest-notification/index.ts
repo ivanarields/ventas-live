@@ -943,44 +943,34 @@ Deno.serve(async (req) => {
             }
 
             if (matched) {
-              // Confirmar el pedido en la tienda
-              const { data: updatedOrder } = await storeClient
-                .from('store_orders')
-                .update({
-                  status: 'paid',
-                  payment_verified_at: new Date().toISOString(),
-                  payment_method: 'qr',
-                  payment_ref: `chehi:${rawHash}:${confidence}`,
-                })
-                .eq('id', matched.id)
-                .eq('status', 'pending')
-                .select()
-                .single();
+              const serverUrl = Deno.env.get('SERVER_URL') ?? 'https://leidydiaz.live';
+              const response = await fetch(`${serverUrl}/api/store/match-payment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  orderId: matched.id,
+                  source: `chehi:${rawHash}:${confidence}`,
+                }),
+              });
 
-              if (updatedOrder) {
-                // Ocultar productos vendidos automáticamente
-                const productIds = (updatedOrder.items ?? [])
-                  .map((i: { productId: unknown }) => i.productId)
-                  .filter(Boolean);
-                if (productIds.length > 0) {
-                  await storeClient.from('products').update({ available: false }).in('id', productIds);
-                }
-
-                // Guardar el evento de pago en la tienda
-                await storeClient.from('payment_events').insert({
-                  source: 'chehi_ingest',
-                  raw_text: candidateText.slice(0, 300),
-                  amount,
-                  sender_name: payerNameRaw,
-                  sender_wa: '',
-                  processed: true,
-                  match_confidence: confidence,
-                  hash: rawHash,
-                  matched_order_id: matched.id,
-                });
-
-                console.log(`[tienda-store] ✅ Pedido #${matched.id} verificado (${confidence}). Monto: ${amount} Bs`);
+              if (!response.ok) {
+                const detail = await response.text().catch(() => '');
+                throw new Error(`No se pudo confirmar tienda #${matched.id}: ${response.status} ${detail}`);
               }
+
+              await storeClient.from('payment_events').insert({
+                source: 'chehi_ingest',
+                raw_text: candidateText.slice(0, 300),
+                amount,
+                sender_name: payerNameRaw,
+                sender_wa: '',
+                processed: true,
+                match_confidence: confidence,
+                hash: rawHash,
+                matched_order_id: matched.id,
+              });
+
+              console.log(`[tienda-store] Pedido #${matched.id} confirmado por servidor (${confidence}). Monto: ${amount} Bs`);
             }
           } catch (storeErr) {
             // El error de la tienda NO debe bloquear el flujo de ChehiApp

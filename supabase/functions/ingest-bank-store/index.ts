@@ -11,7 +11,7 @@ const STORE_URL = Deno.env.get('SUPABASE_URL')!;
 const STORE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // URL pública de tu servidor (ngrok en dev, dominio en prod)
-const SERVER_URL = Deno.env.get('SERVER_URL') ?? 'http://localhost:3004';
+const SERVER_URL = Deno.env.get('SERVER_URL') ?? 'https://leidydiaz.live';
 
 Deno.serve(async (req: Request) => {
   // CORS para MacroDroid
@@ -88,35 +88,24 @@ Deno.serve(async (req: Request) => {
       hash: hashKey,
     };
 
-    // 4. Si hay match → confirmar el pedido directamente en la DB
+    // 4. Si hay match, confirmar por el servidor Express para crear pedido, pago y WhatsApp
     if (matched) {
-      const { data: updatedOrder } = await supabase
-        .from('store_orders')
-        .update({
-          status: 'paid',
-          payment_verified_at: new Date().toISOString(),
-          payment_method: 'qr',
-          payment_ref: `bank:${hashKey}`,
-        })
-        .eq('id', matched.id)
-        .eq('status', 'pending') // idempotencia
-        .select()
-        .single();
+      const response = await fetch(`${SERVER_URL}/api/store/match-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: matched.id,
+          source: `bank:${hashKey}`,
+        }),
+      });
 
-      if (updatedOrder) {
-        eventRow.matched_order_id = matched.id;
-
-        // Ocultar productos vendidos
-        const productIds = (updatedOrder.items ?? [])
-          .map((i: any) => i.productId)
-          .filter(Boolean);
-
-        if (productIds.length > 0) {
-          await supabase.from('products').update({ available: false }).in('id', productIds);
-        }
-
-        console.log(`[ingest-bank-store] ✅ Pedido #${matched.id} verificado. Monto: ${parsedAmount} Bs`);
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`No se pudo confirmar tienda #${matched.id}: ${response.status} ${detail}`);
       }
+
+      eventRow.matched_order_id = matched.id;
+      console.log(`[ingest-bank-store] Pedido #${matched.id} confirmado por servidor. Monto: ${parsedAmount} Bs`);
     }
 
     await supabase.from('payment_events').insert(eventRow);
