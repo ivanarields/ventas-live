@@ -22,7 +22,7 @@ App de Leidy: PWA para gestionar consignación de ropa + tienda online + pagos a
 
 2. **Si algo en el código no coincide con la documentación, el código manda.** Actualizá la documentación.
 
-3. **Verificá colores y nombres en el código antes de escribirlos en un documento.** No asumas. Por ejemplo: las tarjetas de PROCESAR son amarillas, no azules.
+3. **Verificá colores y nombres en el código antes de escribirlos en un documento.** No asumas. Por ejemplo: las tarjetas de PROCESAR son ámbar, no azules.
 
 ---
 
