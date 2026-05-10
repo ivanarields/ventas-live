@@ -1,4 +1,4 @@
-# Sistema de Pagos y Casilleros
+# Sistema de Pagos y Etiquetas
 
 Última revisión: 2026-05-10. Verificado contra el código real.
 

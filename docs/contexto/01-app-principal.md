@@ -1,181 +1,159 @@
 # App Principal — Ventas Live
 
-## Stack tecnológico
-
-- **Frontend:** React 19, TypeScript 5.8, Vite 6, Tailwind CSS v4
-- **Backend:** Express.js (`server.ts`) — sirve Vite en dev, API REST en prod
-- **Base de datos principal:** Supabase `vhczofpmxzbqzboysoca` (ChehiAppAbril)
-- **Auth:** Supabase Auth (email/password) — `ivanariel.fb@gmail.com` / `Chehi2024!`
-- **IA:** OpenRouter (modelo `google/gemini-2.5-flash-lite`)
-- **Deploy:** Vercel (proyecto `ventas-live`)
-- **Dominio principal:** `leidydiaz.live`
+Última revisión: 2026-05-10. Verificado contra el código real (`src/App.tsx`).
 
 ---
 
-## Flujo operativo del operador (4 pantallas)
+## Nombres de pantallas (nomenclatura oficial)
 
-```
-Lista de Pagos → Perfil del Cliente → Mesa de Preparación → Regreso al Perfil
-```
+Estas son las 6 pestañas del menú inferior con sus nombres correctos:
 
-### Pantalla 1 — Lista de Pagos
-- Lista de clientes con nombre y monto pagado.
-- Filtros: ojo (oculta entregados), # (solo con WhatsApp).
-- Botón **"Registrar"** para pago en efectivo manual.
-- Botón **"Live"** procesa todos los chats WhatsApp pendientes en paralelo.
-- Tocar un nombre → abre Perfil del Cliente.
+| Nombre visible | Código interno | Ícono | Lo que muestra |
+|---|---|---|---|
+| **Cobros** | `home` | Casa | Resumen del día: ingresos, pedidos, accesos rápidos |
+| **Etiquetas** | `entrega` | Caja | Etiquetas asignadas a pedidos + Comprobantes Live |
+| **Pagos** | `payments` | Billetera | Lista de pagos del día por cliente |
+| **Finanzas** | `finance` | Gráfico | Transacciones de ingresos y gastos |
+| **Tienda** | `tienda` | Tienda | Panel admin de la tienda online |
+| **Config** | `settings` | Engranaje | Configuración: WhatsApp, etiquetas, versión |
 
-### Pantalla 2 — Perfil del Cliente
-- Cabecera: nombre + botón WhatsApp.
-- Tarjetas de total adeudado y total pagado.
-- Historial con tarjetas de colores:
-  - **Gris** = solo pago, sin pedido asociado.
-  - **Amarillo** = pedido en estado PROCESAR.
-  - **Azul** = pedido LISTO con etiqueta de casillero.
-- Tocar una tarjeta amarilla → abre Mesa de Preparación.
-- Botón **"+ Pedido"** crea un pedido nuevo.
-
-### Pantalla 3 — Mesa de Preparación
-- Táctil, optimizada para manos ocupadas.
-- Ícono camiseta: +1 prenda. Ícono bolsa: +1 bolsa. Reset: vuelve a cero.
-- Botón **"PEDIDO LISTO"**: guarda el conteo, asigna casillero automáticamente.
-
-### Pantalla 4 — Regreso automático
-- Después de "PEDIDO LISTO", vuelve al Perfil.
-- El pedido aparece en azul con su etiqueta (ej: `3` numérico, `B` alfabético, o `WEB-1042` si es de tienda).
-- La X cierra el perfil y vuelve a Lista de Pagos.
+> **"Mesa de Preparación"**: este nombre NO existe en la UI. Es un concepto interno que usaba Claude para explicar la pantalla. La pantalla real muestra ícono de camiseta y bolsa, con el botón **"MARCAR COMO LISTO"**. En los documentos se llama "pantalla de conteo".
 
 ---
 
-## Tablas principales (DB ChehiAppAbril)
+## Pestaña Cobros (home)
 
-```
-customers               clientes (id, name, phone, full_name, normalized_name, active_label, active_label_type)
-pagos                   pagos recibidos (id, nombre, pago, date, method, status, customer_id, user_id)
-pedidos                 pedidos en proceso (id, status, total_amount, label, label_type, source, web_items_list)
-orders                  pedidos del sistema de casilleros (id, order_status, customer_id)
-order_bags              bolsas individuales por pedido
-storage_containers      casilleros físicos (NUMERIC_SHARED 1-100, ALPHA_COMPLEX A-Z)
-container_allocations   asignaciones activas/históricas
-transactions            ingresos y gastos
-categories              categorías de transacciones
-live_sessions           agenda de TikTok Lives
-app_users               usuarios de la app (multi-operador, sin RLS por ahora)
-whatsapp_message_queue  cola de mensajes WhatsApp pendientes de envío
-```
+Pantalla de inicio. Muestra un resumen de todo el día.
 
-Todas las tablas tienen `user_id TEXT` para multi-operador (filtrado en server, sin RLS de Supabase activo).
+**Contenido en orden:**
+1. **Banner PWA** — aparece solo si la app no está instalada
+2. **Tarjeta de ingresos** — "Ingresos hoy" en grande (Bs), más Pagos hoy / Total acumulado / Mes
+3. **Grilla de pedidos** — tres cifras: Procesar / Listos / Total (pedidos del día)
+4. **Acceso rápido** — tres botones que llevan directo a: Etiquetas (muestra cuántos listos) / Pagos / Panel Tienda
+5. **Próximo Live** — solo aparece si hay un live programado
+6. **Pagos recientes** — lista de los últimos pagos del día
 
 ---
 
-## Endpoints del servidor (`server.ts`)
+## Pestaña Etiquetas (entrega)
 
-### Auth
-```
-POST /api/auth/login | logout
-GET  /api/auth/me
-```
+Tiene dos sub-pestañas dentro:
 
-### Core (CRUD)
-```
-GET POST PATCH DELETE   /api/clientes
-GET POST PATCH DELETE   /api/pagos | /api/pagos-lista
-GET POST PATCH DELETE   /api/pedidos
-GET POST PATCH DELETE   /api/transacciones
-GET POST PATCH DELETE   /api/categorias | /api/lives | /api/ideas
-```
+### Sub-pestaña "Etiquetas" (primera)
+Muestra todas las etiquetas activas con pedidos asignados.
 
-### Sistema de casilleros
-```
-POST /api/orders                        crear pedido + asignar casillero
-POST /api/orders/:id/update-bags        actualizar bolsas + migrar casillero si aplica
-POST /api/orders/:id/deliver            marcar entregado + liberar casillero
-GET  /api/storage/containers            estado actual de todos los casilleros
-GET  /api/orders/:id/allocation-history historial de un pedido
-GET PATCH /api/storage/config           configuración de capacidad
-```
+- **"Etiquetas de 1 bolsa"** — etiquetas numéricas (1–100), fondo azul, 1 bolsa por pedido
+- **"Etiquetas de 2+ bolsas"** — etiquetas alfabéticas (A–Z), fondo fucsia, múltiples bolsas
+- Cada etiqueta muestra el nombre de la clienta y los pedidos dentro
+- Tocar un pedido abre un modal con: etiqueta grande, "Etiqueta exclusiva" (letra) o "Etiqueta compartida" (número), cantidad de bolsas y prendas, botón entregar
+- Estado vacío: "Sin etiquetas asignadas"
 
-### IA (`src/routes/ai-gateway.ts`)
-```
-POST /api/ai/product-from-images        cataloga producto desde fotos
-POST /api/ai/analyze-image              análisis general de imagen
-POST /api/ai/analyze-qr                 lee QR de comprobante
-POST /api/ai/summarize-conversation     resume chat WA + detecta comprobante
-GET PATCH /api/ai/prompts               gestión de prompts
-GET POST /api/ai/config                 configuración de IA
-GET /api/ai/usage                       estadísticas
-```
-
-### Tienda Online
-```
-POST /api/store-auth/register | login
-GET  /api/store-auth/me                 incluye orders y favorites de la clienta
-GET POST /api/products
-PATCH DELETE /api/products/:id
-POST /api/upload-image                  sube SOLO al bucket store_images de TiendaOnline
-GET POST /api/store-orders
-PATCH /api/store-orders/:id
-GET /api/store-orders/me | admin | reserved-products | :id/status
-POST /api/store/ingest-bank             cruza pago bancario con orden de tienda
-POST /api/store/ingest-wa               procesa comprobante WhatsApp
-POST /api/store/match-payment           cruce manual o desde Edge Function
-GET POST /api/store/settings | delivery-slots
-GET POST /api/store/customer-media | external-purchases
-POST /api/store/notify-live-ready
-```
-
-### WhatsApp (`src/routes/whatsapp.ts`)
-```
-GET  /api/whatsapp/queue                lista mensajes pendientes
-POST /api/whatsapp/queue                encola un mensaje
-PATCH /api/whatsapp/queue/:id           edita o cancela mensaje pending
-POST /api/whatsapp/send-next            toma 1 mensaje y lo envía al bridge
-POST /api/whatsapp/retry/:id            reintenta un mensaje failed
-```
-
-### Live Sales (`src/routes/live-sales.ts`)
-```
-GET  /api/live-sales/cards
-POST /api/live-sales/cards
-PATCH /api/live-sales/cards/:id
-POST /api/live-sales/cards/:id/archive
-GET  /api/live-sales/day-orders
-POST /api/live-sales/payments/:id/verify-manual   verifica pago morado a mano
-POST /api/live-sales/payments/:id/reject
-GET  /api/live-sales/conversations | pending-conversations
-DELETE /api/live-sales/conversations
-```
+### Sub-pestaña "Comprobantes Live" (segunda)
+Muestra el panel de pedidos y comprobantes de WhatsApp Live (`PanelPedidos`). Ver `02-sistema-pagos.md` para detalle completo.
 
 ---
 
-## Convenciones del código
+## Pestaña Pagos (payments)
 
-- `App.tsx` monolítico (~7400 líneas) — no extraer salvo funcionalidad totalmente autocontenida.
-- Después de cada mutación: llamar `onRefresh()` o `loadData()` para re-sincronizar estado local.
-- Nuevos call-sites usan `pagosApi`, `clientesApi`, etc. directamente (no `firebase-compat`).
-- Fechas: usar `getFullYear/getMonth/getDate()` para fechas locales de Bolivia, no `toISOString()`.
-- Lógica de casilleros y normalización de nombres: siempre en el backend, nunca en el cliente.
-- Modales: flags booleanos en `useState` — sin librería de modales.
+Lista de pagos del día seleccionado, agrupados por cliente.
+
+**Cada grupo muestra:**
+- Ícono de check con color según origen:
+  - **Verde** — verificado automáticamente por MacroDroid
+  - **Morado/Violeta** — verificado manualmente O hay comprobante WA pendiente
+  - **Gris** — efectivo u otro tipo sin clasificar
+- Nombre del cliente y monto total (Bs, en fucsia)
+- Botón **"Verificar"** en violeta — aparece solo cuando hay comprobante WA pendiente; al tocarlo confirma el pago sin ir a otra pantalla
+
+**Filtros en la barra superior:**
+- Ojo — oculta clientes que ya retiraron
+- `#` — muestra solo clientes con número de WhatsApp
+- Botón "Live" (color morado) — procesa todas las conversaciones WA del día con IA
 
 ---
 
-## Variables de entorno principales
+## Pestaña Finanzas (finance)
 
-```
-PORT=3004
-SUPABASE_URL / VITE_SUPABASE_URL = https://vhczofpmxzbqzboysoca.supabase.co
-SUPABASE_SERVICE_ROLE_KEY        (server)
-VITE_SUPABASE_ANON_KEY           (browser)
-PANEL_SUPABASE_URL = https://vwaocoaeenavxkcshyuf.supabase.co
-PANEL_SUPABASE_SERVICE_KEY       (server)
-VITE_STORE_SUPABASE_URL = https://thgbfurscfjcmgokyyif.supabase.co
-VITE_STORE_SUPABASE_ANON_KEY     (browser)
-STORE_SUPABASE_SERVICE_ROLE_KEY  (server)
-STORE_OWNER_USER_ID = 13dcb065-6099-4776-982c-18e98ff2b27a
-STORE_PUBLIC_URL = https://leidydiaz.live
-WHATSAPP_BRIDGE_URL = http://134.122.123.253:3001
-WEBHOOK_SECRET = ventas-live-bridge-2026
-OPENROUTER_API_KEY               (server)
-OPENROUTER_MODEL = google/gemini-2.5-flash-lite
-INGEST_DEVICE_SECRET             (server)
-```
+Transacciones de ingresos y gastos del negocio. Separado del flujo de cobros de clientas.
+
+---
+
+## Pestaña Tienda (tienda)
+
+Panel admin para gestionar la tienda online en `leidydiaz.live`. Muestra productos, stock y pedidos web. Ver `04-tienda-online.md` para detalle completo.
+
+---
+
+## Pestaña Config (settings)
+
+- Conexión WhatsApp
+- **Capacidad de etiquetas** — ajusta bolsas máximas por etiqueta numérica
+- Versión de la app y base de datos
+
+---
+
+## Flujo del perfil de una clienta
+
+Desde la pestaña **Pagos**, tocar el nombre de una clienta abre su perfil.
+
+### Tarjetas de pedido — colores reales (OrderItemCard)
+
+| Color de borde | Estado | Lo que significa |
+|---|---|---|
+| **Gris** (`#f1f5f9`) | Solo pago, sin pedido | Se registró un pago pero no hay pedido asociado |
+| **Ámbar** (`#FEF3C7`) | PROCESAR | Pedido creado, falta contar prendas y bolsas |
+| **Azul** (`#E0F2FE`) | LISTO | Pedido contado y con etiqueta asignada |
+| **Verde** (`#DCFCE7`) | ENTREGADO | La clienta retiró su ropa |
+
+### Acciones desde el perfil
+
+- Tocar tarjeta **PROCESAR** → abre la pantalla de conteo
+- Tocar tarjeta **LISTO** → abre la pantalla de conteo en modo edición
+- Botón **"+ Pedido"** → crea un pedido nuevo para la clienta
+
+### Pantalla de conteo (antes llamada "Mesa de Preparación")
+
+No tiene título en pantalla. Muestra:
+- **Ícono camiseta** — toca para sumar prendas
+- **Ícono bolsa** — toca para sumar bolsas
+- **Ícono etiqueta** — bloqueado, muestra la etiqueta que asignará el sistema
+- Botón de reset: "Resumen del Pedido"
+- Botón principal: **"MARCAR COMO LISTO"** (si está en PROCESAR) o **"GUARDAR CAMBIOS"** (si ya está LISTO)
+
+Al tocar "MARCAR COMO LISTO": Supabase asigna la etiqueta automáticamente según el total de bolsas de la clienta. El operador nunca elige la etiqueta.
+
+---
+
+## Sistema de etiquetas — reglas de asignación
+
+| Bolsas totales de la clienta | Tipo de etiqueta |
+|---|---|
+| 1 bolsa | Numérica (1–100), compartida con otras clientas |
+| 2+ bolsas | Alfabética (A–Z), exclusiva para esa clienta |
+
+- Si la clienta ya tiene etiqueta alfabética activa → nuevo pedido hereda la misma letra
+- Si suma 2+ bolsas en total → migra automáticamente de número a letra (transacción atómica en PostgreSQL)
+- Al marcar ENTREGADO → etiqueta liberada
+
+**Capacidades reales (producción):**
+- Etiquetas numéricas: 1–100 (hasta 5 pedidos por etiqueta)
+- Etiquetas alfabéticas: A–Z (hasta 20 bolsas por etiqueta)
+
+---
+
+## Estructura de datos principal
+
+Todas las tablas están en **ChehiAppAbril** (`vhczofpmxzbqzboysoca`):
+
+| Tabla | Propósito |
+|---|---|
+| `customers` | Clientas con nombre, teléfono, etiqueta activa |
+| `pagos` | Pagos recibidos (efectivo, MacroDroid, tienda, WA manual) |
+| `pedidos` | Pedidos en proceso o listos |
+| `storage_containers` | Etiquetas físicas (1–100 y A–Z) |
+| `container_allocations` | Asignaciones activas e históricas |
+| `orders` | Sistema de etiquetas vinculado a pedidos |
+| `order_bags` | Bolsas individuales por pedido |
+| `transactions` | Ingresos y gastos de finanzas |
+| `live_sessions` | Lives programados |
+| `app_users` | Usuarios de la app |

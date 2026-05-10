@@ -2084,7 +2084,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               : { background: '#f3f4f6', color: '#6b7280' }}
           >
             <div className="w-2 h-2 rounded-full bg-blue-400/80" />
-            <span className="text-[10px] font-bold">Casilleros</span>
+            <span className="text-[10px] font-bold">Etiquetas</span>
           </button>
           <button
             onClick={() => setActiveSubTab('pedidos')}
@@ -2107,14 +2107,14 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       {NUMERIC.some(code => byLabel(code).length > 0) && (
         <section className="space-y-2">
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
-            Numéricos — 1 bolsa
+            Etiquetas de 1 bolsa
           </p>
           <div className="grid grid-cols-2 gap-2">
             {NUMERIC.filter(code => byLabel(code).length > 0).map(code => {
               const occupants = byLabel(code);
               return (
                 <div key={code} className="rounded-2xl p-3 border-2 bg-blue-50/50 border-blue-100 transition-all">
-                  <p className="text-[9px] font-black text-blue-300 uppercase tracking-widest mb-1.5 px-0.5">Casillero {code}</p>
+                  <p className="text-[9px] font-black text-blue-300 uppercase tracking-widest mb-1.5 px-0.5">Etiqueta {code}</p>
                   <div className="space-y-1">
                     {occupants.map((p: any, i: number) => (
                       <button
@@ -2137,7 +2137,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       {ALPHA.some(code => byLabel(code).length > 0) && (
         <section className="space-y-2">
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
-            Alfabéticos — 2+ bolsas
+            Etiquetas de 2+ bolsas
           </p>
           <div className="space-y-2">
             {ALPHA.filter(code => byLabel(code).length > 0).map(code => {
@@ -2145,7 +2145,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               return (
                 <div key={code} className="w-full rounded-2xl px-4 py-3 border-2 flex flex-col gap-2 transition-all text-left bg-[#FFF0F5] border-brand/20">
                   <div>
-                    <p className="text-[9px] font-black text-brand/40 uppercase tracking-widest mb-0.5">Casillero {code}</p>
+                    <p className="text-[9px] font-black text-brand/40 uppercase tracking-widest mb-0.5">Etiqueta {code}</p>
                     <p className="font-black text-[14px] text-gray-900 leading-tight">{occupants[0]?.customerName}</p>
                     <p className="text-[11px] font-bold text-brand mt-0.5">
                       {occupants.length} pedido{occupants.length !== 1 ? 's' : ''} · {occupants.reduce((s: number, p: any) => s + (p.bagCount || 0), 0)} bolsas total
@@ -2175,8 +2175,8 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
             <Package className="w-8 h-8 text-gray-300" />
           </div>
-          <p className="text-[13px] font-bold text-gray-400">Sin pedidos en casilleros</p>
-          <p className="text-[11px] text-gray-300 mt-1">Los casilleros aparecerán cuando haya pedidos listos</p>
+          <p className="text-[13px] font-bold text-gray-400">Sin etiquetas asignadas</p>
+          <p className="text-[11px] text-gray-300 mt-1">Las etiquetas aparecen cuando un pedido se marca como listo</p>
         </div>
       )}
 
@@ -2208,7 +2208,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               <div>
                 <p className="font-black text-xl text-gray-900">{selectedPedido.customerName}</p>
                 <p className="text-[12px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">
-                  Casillero {selectedPedido.labelType === 'letter' ? 'exclusivo' : 'compartido'}
+                  Etiqueta {selectedPedido.labelType === 'letter' ? 'exclusiva' : 'compartida'}
                 </p>
               </div>
             </div>

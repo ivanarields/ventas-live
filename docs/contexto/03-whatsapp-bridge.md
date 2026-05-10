@@ -1,10 +1,14 @@
 # WhatsApp Bridge
 
+Última revisión: 2026-05-10. Verificado contra el código real (`src/routes/whatsapp.ts`).
+
+---
+
 ## Qué es
 
 Servicio Node.js que conecta el WhatsApp del negocio con la aplicación.
-Funciona como espejo: todo mensaje/foto que llega al WhatsApp queda guardado en la DB del panel.
-También se usa para **enviar** mensajes salientes (confirmaciones de tienda, etc.).
+Funciona como espejo: todo mensaje o foto que llega al WhatsApp queda guardado en la DB del panel (PanelPedido).
+También se usa para **enviar** mensajes salientes (confirmaciones de tienda online, etc.).
 
 ---
 
@@ -16,18 +20,18 @@ También se usa para **enviar** mensajes salientes (confirmaciones de tienda, et
 - **Secret de webhook:** `WEBHOOK_SECRET=ventas-live-bridge-2026`
 - **Teléfono de prueba:** `59172698959` (variable `LIVE_SALES_TEST_PHONE`)
 
-**Migración previa:** estaba en Railway (`bridge-production-13f7.up.railway.app`). Migrado a DigitalOcean en commit `da72962`.
+**Migración previa:** estaba en Railway. Migrado a DigitalOcean en commit `da72962`.
 
 ---
 
-## Cómo funciona (recibir mensajes)
+## Cómo funciona — recibir mensajes
 
 ```
 WhatsApp del negocio
     ↓ mensaje/foto entrante
 Bridge en DigitalOcean
-    ↓ webhook envía a la app
-POST a leidydiaz.live (con header x-webhook-secret)
+    ↓ webhook envía a la app (header x-webhook-secret)
+POST a leidydiaz.live
     → guarda en panel_clientes (crea o actualiza por phone)
     → guarda en panel_mensajes (content, has_media, media_url)
     → si es imagen: sube a Supabase Storage del panel (bucket whatsapp-media)
@@ -35,25 +39,25 @@ POST a leidydiaz.live (con header x-webhook-secret)
 
 ---
 
-## Cómo funciona (enviar mensajes)
+## Cómo funciona — enviar mensajes
 
-```
-1. Servidor encola mensaje en whatsapp_message_queue (DB ChehiAppAbril).
-2. Procesador automático cada 60 seg toma el siguiente con storeOnly:
-   - Solo mensajes con reference_type='store_order'.
-   - Lock atómico con UPDATE SET status='sending' WHERE status='pending'.
-3. POST al bridge: http://134.122.123.253:3001/api/send
-   Headers: x-webhook-secret: ventas-live-bridge-2026
-   Body: { phone: '+591XXXXXXXX', message: 'texto' }
-4. Bridge responde OK → status='sent', sent_at=NOW().
-5. Si falla → status='failed', error_detail.
-6. Mensajes que NO son de tienda (Live, manuales) se envían desde el panel
-   con el botón "Envío Seguro" que llama POST /api/whatsapp/send-next.
-```
+Hay dos modos de envío:
+
+### Automático (procesador cada 60 seg)
+1. Servidor encola mensaje en `whatsapp_message_queue` (ChehiAppAbril).
+2. Procesador toma el siguiente con `storeOnly: true` — solo mensajes con `reference_type='store_order'`.
+3. Lock atómico: `UPDATE SET status='sending' WHERE status='pending'` (evita doble envío).
+4. `POST http://134.122.123.253:3001/api/send` con `x-webhook-secret`.
+5. Bridge responde OK → `status='sent'`. Si falla → `status='failed'`.
+
+### Manual — "Envío Seguro" (desde la pestaña Pagos o Comprobantes Live)
+- Operador toca el botón de envío en el panel de WhatsApp.
+- Llama `POST /api/whatsapp/send-next` **sin** filtro `storeOnly` — envía cualquier tipo de mensaje.
+- Delay aleatorio de 2–4 minutos para no parecer bot.
 
 ---
 
-## Base de datos del panel (`vwaocoaeenavxkcshyuf`)
+## Base de datos del panel (`vwaocoaeenavxkcshyuf` — PanelPedido)
 
 ```
 panel_clientes
@@ -64,23 +68,25 @@ panel_clientes
 panel_mensajes
     id, cliente_id, direction (in/out), content
     has_media, media_url, media_type
-    transcripcion (audios)
+    transcripcion (para audios)
     whatsapp_message_id (deduplicación)
     created_at
 ```
+
+> La tabla `whatsapp_message_queue` vive en **ChehiAppAbril** (`vhczofpmxzbqzboysoca`), no en PanelPedido.
 
 ---
 
 ## Procesamiento con IA
 
-Cuando el operador aprieta "Live" en la app o entra al chat de un cliente:
+Cuando el operador toca el botón **"Live"** en la pestaña **Pagos**:
 
 1. `POST /api/ai/summarize-conversation { clienteId }`
 2. Servidor lee `panel_mensajes` desde la última sesión.
-3. OpenRouter (`google/gemini-2.5-flash-lite`) extrae: nombre, monto, hora, comprobante.
+3. OpenRouter (`google/gemini-2.5-flash-lite`, `thinkingBudget: 0`) extrae: nombre, monto, hora, foto de comprobante.
 4. Guarda resultado en `panel_clientes.resumen`.
-5. Crea/actualiza `pagos_venta_live`.
-6. Intenta cruzar con MacroDroid (`matchLivePaymentWithMacrodroid`).
+5. Crea o actualiza registro en `pagos_venta_live` (PanelPedido).
+6. Intenta cruzar con notificación MacroDroid (`matchLivePaymentWithMacrodroid`).
 
 ---
 
@@ -88,20 +94,19 @@ Cuando el operador aprieta "Live" en la app o entra al chat de un cliente:
 
 ```
 GET  /api/live-sales/pending-conversations    lista clientes con mensajes no procesados
-POST /api/ai/summarize-conversation           procesa un cliente específico
+POST /api/ai/summarize-conversation           procesa un cliente específico con IA
 DELETE /api/live-sales/conversations          limpia conversaciones del día
 GET POST PATCH /api/whatsapp/queue            cola de mensajes pendientes
-POST /api/whatsapp/send-next                  envío manual desde el panel
-POST /api/whatsapp/retry/:id                  reintenta mensaje failed
+POST /api/whatsapp/send-next                  envío manual ("Envío Seguro")
+POST /api/whatsapp/retry/:id                  reintenta mensaje fallido
 ```
 
 ---
 
 ## Requisitos del bridge
 
-- Proceso Node.js **persistente** (no serverless).
-- Almacenamiento para sesión WA (`.wwebjs_auth/`).
-- Puerto público (3001) para recibir webhook de WA.
-- Variables: URL de la app, webhook secret, credenciales del panel Supabase.
+- Proceso Node.js **persistente** (no serverless — necesita sesión WA activa).
+- Almacenamiento local para sesión WA (`.wwebjs_auth/`).
+- Puerto público 3001 para recibir webhook del bridge.
 
-Si se vuelve a migrar (a otro VPS), solo hay que actualizar `WHATSAPP_BRIDGE_URL` en `.env` y en Vercel.
+Si se migra a otro servidor: solo actualizar `WHATSAPP_BRIDGE_URL` en `.env` de Vercel.

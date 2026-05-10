@@ -826,8 +826,8 @@ function TabSistema() {
       {/* Casilleros */}
       <div className="flex items-center justify-between py-1">
         <div>
-          <p className="text-[12px] font-black text-gray-700">Casilleros Numéricos</p>
-          <p className="text-[10px] text-gray-400">Bolsas máx por casillero</p>
+          <p className="text-[12px] font-black text-gray-700">Capacidad de etiquetas</p>
+          <p className="text-[10px] text-gray-400">Bolsas máx por etiqueta</p>
         </div>
         <div className="flex items-center gap-2">
           <button
