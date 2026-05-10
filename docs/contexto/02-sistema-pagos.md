@@ -1,4 +1,4 @@
-# Sistema de Pagos y Casilleros
+# Sistema de Pagos y Etiquetas
 
 Última revisión: 2026-05-10. Verificado contra el código real.
 
@@ -180,27 +180,27 @@ El procesador automático corre en el servidor cada 60 segundos con filtro `stor
 
 ---
 
-## Sistema de casilleros
+## Sistema de etiquetas
 
 ### Capacidades reales (verificadas en producción)
 
-| Tipo | Códigos | Máx pedidos por casillero | Máx bolsas por casillero |
+| Tipo | Códigos | Máx pedidos por etiqueta | Máx bolsas por etiqueta |
 |---|---|---|---|
-| `NUMERIC_SHARED` | 1 al 100 (100 casilleros) | 5 pedidos simples | — |
-| `ALPHA_COMPLEX` | A a Z (26 casilleros) | — | 20 bolsas |
+| `NUMERIC_SHARED` | 1 al 100 (100 etiquetas) | 5 pedidos simples | — |
+| `ALPHA_COMPLEX` | A a Z (26 etiquetas) | — | 20 bolsas |
 
 > Estos números vienen de las migraciones 041 y 042. La migración 001 tenía solo 1–4 y A–D con 12 bolsas; los valores actuales fueron expandidos después.
 
 ### Reglas de asignación
 
-- Pedido en estado `procesar` → **sin casillero todavía**
-- Pedido marcado `LISTO` con **1 bolsa** → casillero numérico (el de menor número disponible)
-- Pedido marcado `LISTO` con **2+ bolsas** → casillero alfabético
-- Si el cliente ya tiene casillero letra activo → nuevo pedido **hereda la misma letra**
-- Si se agrega una bolsa a un pedido ya listo y la suma total del cliente supera 1 bolsa → **migra automáticamente** de numérico a alfabético en una transacción atómica
-- Al marcar `entregado` → casillero liberado (`RELEASED`)
+- Pedido en estado `procesar` → **sin etiqueta todavía**
+- Pedido marcado `LISTO` con **1 bolsa** → etiqueta numérica (la de menor número disponible)
+- Pedido marcado `LISTO` con **2+ bolsas** → etiqueta alfabética
+- Si la clienta ya tiene etiqueta letra activa → nuevo pedido **hereda la misma letra**
+- Si se agrega una bolsa y la suma total supera 1 bolsa → **migra automáticamente** de numérica a alfabética en una transacción atómica
+- Al marcar `entregado` → etiqueta liberada (`RELEASED`)
 
-El operador **nunca elige** el casillero — el backend lo asigna solo.
+El operador **nunca elige** la etiqueta — el backend la asigna solo.
 
 ### Funciones PL/pgSQL
 
@@ -208,16 +208,16 @@ El operador **nunca elige** el casillero — el backend lo asigna solo.
 fn_assign_container(order_id, user_id)      — asigna con FOR UPDATE SKIP LOCKED (evita race conditions)
 fn_migrate_to_complex(order_id)             — migra de numérico a alfabético
 fn_release_container(order_id, reason)      — libera al entregar
-fn_recalc_container_state(container_id)     — recalcula estado del casillero
+fn_recalc_container_state(container_id)     — recalcula estado de la etiqueta
 ```
 
 ### Migraciones relevantes
 
 | Migración | Qué hace |
 |---|---|
-| `001_labeling_system.sql` | Seed inicial: casilleros 1–4 y A–D, max_simple_orders=4, max_bags=12 |
-| `041_group_orders_by_client_alpha.sql` | Agrega casilleros 5–100 (numéricos) y E–Z (alfabéticos); agrupa por cliente |
-| `042_v2_total_bags_per_customer.sql` | Sube max_bags_capacity a 20 para todos los ALPHA_COMPLEX |
+| `001_labeling_system.sql` | Seed inicial: etiquetas 1–4 y A–D, max_simple_orders=4, max_bags=12 |
+| `041_group_orders_by_client_alpha.sql` | Agrega etiquetas 5–100 (numéricas) y E–Z (alfabéticas); agrupa por cliente |
+| `042_v2_total_bags_per_customer.sql` | Sube max_bags_capacity a 20 para todas las etiquetas alfabéticas |
 | `043_fix_downgrade_last_order.sql` | Permite degradar de letra a número cuando es el único pedido activo del cliente |
 
 ---
@@ -231,7 +231,7 @@ fn_recalc_container_state(container_id)     — recalcula estado del casillero
 | `pagos` | Todo pago recibido (efectivo, MacroDroid, tienda, manual WA) |
 | `pedidos` | Pedidos de ropa en proceso o listos |
 | `customers` | Clientes con teléfono, etiqueta activa, firebase_id |
-| `storage_containers` | Casilleros físicos |
+| `storage_containers` | Etiquetas físicas (tabla interna del sistema) |
 | `container_allocations` | Asignaciones activas e históricas |
 | `orders` | Sistema de etiquetas (vinculado a pedidos) |
 | `order_bags` | Bolsas individuales por pedido |

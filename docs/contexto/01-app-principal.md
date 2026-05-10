@@ -1,126 +1,159 @@
 # App Principal — Ventas Live
 
-## Stack tecnológico
-- **Frontend:** React 19, TypeScript 5.8, Vite 6, Tailwind CSS v4
-- **Backend:** Express.js (`server.ts`) — sirve Vite en dev, API REST en prod
-- **Base de datos:** Supabase (PostgreSQL) — proyecto `vhczofpmxzbqzboysoca`
-- **Auth:** Supabase Auth (email/password) — `ivanariel.fb@gmail.com` / `Chehi2024!`
-- **IA:** OpenRouter (modelo: `google/gemini-2.5-flash-lite`)
-- **Deploy:** Vercel (proyecto `prj_gNNLSgdwI2QSyPLmoAZ0PksGNUdG`)
+Última revisión: 2026-05-10. Verificado contra el código real (`src/App.tsx`).
 
 ---
 
-## Flujo operativo principal (4 pantallas)
+## Nombres de pantallas (nomenclatura oficial)
 
-```
-Lista de Pagos → Perfil del Cliente → Mesa de Preparación → Regreso al Perfil
-```
+Estas son las 6 pestañas del menú inferior con sus nombres correctos:
 
-1. **Lista de Pagos** — clientes con nombre y monto. Filtros: ojo (oculta entregados), # (solo con WA). Botón "Registrar" para efectivo. Botón "Live" para procesar todos los chats WA pendientes.
-2. **Perfil del Cliente** — total adeudado/pagado. Tarjetas: gris (solo pago), amarillo (PROCESAR), azul (LISTO con etiqueta).
-3. **Mesa de Preparación** — táctil. Camiseta: +1 prenda. Bolsa: +1 bolsa. "PEDIDO LISTO" guarda y asigna casillero.
-4. **Regreso al Perfil** — pedido aparece en azul con etiqueta (ej: "3" o "H"). Flecha vuelve a Lista de Pagos.
+| Nombre visible | Código interno | Ícono | Lo que muestra |
+|---|---|---|---|
+| **Cobros** | `home` | Casa | Resumen del día: ingresos, pedidos, accesos rápidos |
+| **Etiquetas** | `entrega` | Caja | Etiquetas asignadas a pedidos + Comprobantes Live |
+| **Pagos** | `payments` | Billetera | Lista de pagos del día por cliente |
+| **Finanzas** | `finance` | Gráfico | Transacciones de ingresos y gastos |
+| **Tienda** | `tienda` | Tienda | Panel admin de la tienda online |
+| **Config** | `settings` | Engranaje | Configuración: WhatsApp, etiquetas, versión |
 
----
-
-## Arquitectura de datos
-
-### Tablas principales (DB `vhczofpmxzbqzboysoca`)
-```
-customers           — clientes (nombre, phone, active_label, active_label_type)
-pagos               — pagos recibidos (nombre, pago, date, method, verification_origin)
-pedidos             — pedidos en proceso (status: procesar/listo/entregado, bag_count)
-orders              — pedidos en sistema de casilleros (order_status: READY/DELIVERED)
-order_bags          — bolsas individuales por pedido
-storage_containers  — casilleros físicos (NUMERIC_SHARED y ALPHA_COMPLEX)
-container_allocations — asignaciones activas/históricas de casilleros
-transactions        — ingresos y gastos financieros
-categories          — categorías de transacciones
-live_sessions       — agenda de TikTok Lives
-app_users           — usuarios de la app
-```
-
-### Todas las tablas tienen `user_id TEXT` para multi-usuario (sin RLS por ahora)
+> **"Mesa de Preparación"**: este nombre NO existe en la UI. Es un concepto interno que usaba Claude para explicar la pantalla. La pantalla real muestra ícono de camiseta y bolsa, con el botón **"MARCAR COMO LISTO"**. En los documentos se llama "pantalla de conteo".
 
 ---
 
-## Endpoints del servidor (server.ts)
+## Pestaña Cobros (home)
 
-### Auth
-```
-POST /api/auth/login | logout
-GET  /api/auth/me
-```
+Pantalla de inicio. Muestra un resumen de todo el día.
 
-### Core
-```
-GET/POST         /api/clientes
-PATCH/DELETE     /api/clientes/:id
-GET/POST         /api/pagos | /api/pagos-lista
-PATCH/DELETE     /api/pagos/:id
-GET/POST         /api/pedidos
-PATCH/DELETE     /api/pedidos/:id
-GET/POST         /api/transacciones
-PATCH/DELETE     /api/transacciones/:id
-GET/POST         /api/categorias | /api/lives | /api/ideas
-```
-
-### Sistema de casilleros
-```
-POST /api/orders                        — crear pedido + asignar casillero
-POST /api/orders/:id/update-bags        — actualizar bolsas + migrar casillero si aplica
-POST /api/orders/:id/deliver            — marcar entregado + liberar casillero
-GET  /api/storage/containers            — estado actual de todos los casilleros
-GET  /api/orders/:id/allocation-history — historial de casilleros de un pedido
-GET/PATCH /api/storage/config           — configuración de capacidad
-```
-
-### IA (ai-gateway)
-```
-POST /api/ai/product-from-images        — cataloga producto desde fotos
-POST /api/ai/analyze-image              — análisis general de imagen
-POST /api/ai/analyze-qr                 — lee QR de comprobante
-POST /api/ai/summarize-conversation     — resume chat WA + detecta comprobante
-GET/PATCH /api/ai/prompts               — gestión de prompts
-GET/POST /api/ai/config                 — configuración de IA
-GET  /api/ai/usage                      — estadísticas de uso
-```
-
-### Tienda Online
-```
-POST /api/store-auth/register | login
-GET  /api/store-auth/me
-GET/POST /api/products
-PATCH/DELETE /api/products/:id
-GET/POST /api/store-orders
-PATCH /api/store-orders/:id
-GET  /api/store-orders/me | admin | reserved-products
-POST /api/store/ingest-bank             — cruza pago bancario con orden de tienda
-POST /api/store/ingest-wa               — procesa comprobante WA de tienda
-GET  /api/store/whatsapp-photos         — fotos WA relacionadas a tienda
-```
-
-### Live Sales (src/routes/live-sales.ts)
-```
-GET  /api/live-sales/cards              — tarjetas del panel WA
-POST /api/live-sales/cards
-PATCH /api/live-sales/cards/:id
-POST /api/live-sales/cards/:id/archive
-GET  /api/live-sales/day-orders         — pedidos del día
-POST /api/live-sales/payments/:id/verify-manual  — verificar pago morado manualmente
-POST /api/live-sales/payments/:id/reject
-POST /api/live-sales/day-orders/:id/archive
-GET  /api/live-sales/conversations      — conversaciones WA del panel
-GET  /api/live-sales/pending-conversations — conversaciones pendientes de procesar
-DELETE /api/live-sales/conversations
-```
+**Contenido en orden:**
+1. **Banner PWA** — aparece solo si la app no está instalada
+2. **Tarjeta de ingresos** — "Ingresos hoy" en grande (Bs), más Pagos hoy / Total acumulado / Mes
+3. **Grilla de pedidos** — tres cifras: Procesar / Listos / Total (pedidos del día)
+4. **Acceso rápido** — tres botones que llevan directo a: Etiquetas (muestra cuántos listos) / Pagos / Panel Tienda
+5. **Próximo Live** — solo aparece si hay un live programado
+6. **Pagos recientes** — lista de los últimos pagos del día
 
 ---
 
-## Convenciones del código
+## Pestaña Etiquetas (entrega)
 
-- `App.tsx` monolítico (~8000 líneas) — no extraer salvo funcionalidad autocontenida
-- Después de cada mutación: llamar `onRefresh()` o `loadData()` para re-sincronizar
-- Nuevos call-sites usan `pagosApi`, `clientesApi`, etc. directamente (no firebase-compat)
-- Fechas: usar `getFullYear/getMonth/getDate()` para fechas locales, no `toISOString()`
-- Lógica de casilleros: siempre en el backend, nunca en el cliente
+Tiene dos sub-pestañas dentro:
+
+### Sub-pestaña "Etiquetas" (primera)
+Muestra todas las etiquetas activas con pedidos asignados.
+
+- **"Etiquetas de 1 bolsa"** — etiquetas numéricas (1–100), fondo azul, 1 bolsa por pedido
+- **"Etiquetas de 2+ bolsas"** — etiquetas alfabéticas (A–Z), fondo fucsia, múltiples bolsas
+- Cada etiqueta muestra el nombre de la clienta y los pedidos dentro
+- Tocar un pedido abre un modal con: etiqueta grande, "Etiqueta exclusiva" (letra) o "Etiqueta compartida" (número), cantidad de bolsas y prendas, botón entregar
+- Estado vacío: "Sin etiquetas asignadas"
+
+### Sub-pestaña "Comprobantes Live" (segunda)
+Muestra el panel de pedidos y comprobantes de WhatsApp Live (`PanelPedidos`). Ver `02-sistema-pagos.md` para detalle completo.
+
+---
+
+## Pestaña Pagos (payments)
+
+Lista de pagos del día seleccionado, agrupados por cliente.
+
+**Cada grupo muestra:**
+- Ícono de check con color según origen:
+  - **Verde** — verificado automáticamente por MacroDroid
+  - **Morado/Violeta** — verificado manualmente O hay comprobante WA pendiente
+  - **Gris** — efectivo u otro tipo sin clasificar
+- Nombre del cliente y monto total (Bs, en fucsia)
+- Botón **"Verificar"** en violeta — aparece solo cuando hay comprobante WA pendiente; al tocarlo confirma el pago sin ir a otra pantalla
+
+**Filtros en la barra superior:**
+- Ojo — oculta clientes que ya retiraron
+- `#` — muestra solo clientes con número de WhatsApp
+- Botón "Live" (color morado) — procesa todas las conversaciones WA del día con IA
+
+---
+
+## Pestaña Finanzas (finance)
+
+Transacciones de ingresos y gastos del negocio. Separado del flujo de cobros de clientas.
+
+---
+
+## Pestaña Tienda (tienda)
+
+Panel admin para gestionar la tienda online en `leidydiaz.live`. Muestra productos, stock y pedidos web. Ver `04-tienda-online.md` para detalle completo.
+
+---
+
+## Pestaña Config (settings)
+
+- Conexión WhatsApp
+- **Capacidad de etiquetas** — ajusta bolsas máximas por etiqueta numérica
+- Versión de la app y base de datos
+
+---
+
+## Flujo del perfil de una clienta
+
+Desde la pestaña **Pagos**, tocar el nombre de una clienta abre su perfil.
+
+### Tarjetas de pedido — colores reales (OrderItemCard)
+
+| Color de borde | Estado | Lo que significa |
+|---|---|---|
+| **Gris** (`#f1f5f9`) | Solo pago, sin pedido | Se registró un pago pero no hay pedido asociado |
+| **Ámbar** (`#FEF3C7`) | PROCESAR | Pedido creado, falta contar prendas y bolsas |
+| **Azul** (`#E0F2FE`) | LISTO | Pedido contado y con etiqueta asignada |
+| **Verde** (`#DCFCE7`) | ENTREGADO | La clienta retiró su ropa |
+
+### Acciones desde el perfil
+
+- Tocar tarjeta **PROCESAR** → abre la pantalla de conteo
+- Tocar tarjeta **LISTO** → abre la pantalla de conteo en modo edición
+- Botón **"+ Pedido"** → crea un pedido nuevo para la clienta
+
+### Pantalla de conteo (antes llamada "Mesa de Preparación")
+
+No tiene título en pantalla. Muestra:
+- **Ícono camiseta** — toca para sumar prendas
+- **Ícono bolsa** — toca para sumar bolsas
+- **Ícono etiqueta** — bloqueado, muestra la etiqueta que asignará el sistema
+- Botón de reset: "Resumen del Pedido"
+- Botón principal: **"MARCAR COMO LISTO"** (si está en PROCESAR) o **"GUARDAR CAMBIOS"** (si ya está LISTO)
+
+Al tocar "MARCAR COMO LISTO": Supabase asigna la etiqueta automáticamente según el total de bolsas de la clienta. El operador nunca elige la etiqueta.
+
+---
+
+## Sistema de etiquetas — reglas de asignación
+
+| Bolsas totales de la clienta | Tipo de etiqueta |
+|---|---|
+| 1 bolsa | Numérica (1–100), compartida con otras clientas |
+| 2+ bolsas | Alfabética (A–Z), exclusiva para esa clienta |
+
+- Si la clienta ya tiene etiqueta alfabética activa → nuevo pedido hereda la misma letra
+- Si suma 2+ bolsas en total → migra automáticamente de número a letra (transacción atómica en PostgreSQL)
+- Al marcar ENTREGADO → etiqueta liberada
+
+**Capacidades reales (producción):**
+- Etiquetas numéricas: 1–100 (hasta 5 pedidos por etiqueta)
+- Etiquetas alfabéticas: A–Z (hasta 20 bolsas por etiqueta)
+
+---
+
+## Estructura de datos principal
+
+Todas las tablas están en **ChehiAppAbril** (`vhczofpmxzbqzboysoca`):
+
+| Tabla | Propósito |
+|---|---|
+| `customers` | Clientas con nombre, teléfono, etiqueta activa |
+| `pagos` | Pagos recibidos (efectivo, MacroDroid, tienda, WA manual) |
+| `pedidos` | Pedidos en proceso o listos |
+| `storage_containers` | Etiquetas físicas (1–100 y A–Z) |
+| `container_allocations` | Asignaciones activas e históricas |
+| `orders` | Sistema de etiquetas vinculado a pedidos |
+| `order_bags` | Bolsas individuales por pedido |
+| `transactions` | Ingresos y gastos de finanzas |
+| `live_sessions` | Lives programados |
+| `app_users` | Usuarios de la app |

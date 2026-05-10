@@ -11,7 +11,7 @@ La tienda tiene base de datos propia y no debe usar la base principal para guard
 Regla crítica:
 
 ```txt
-App principal / ChehiAppAbril = pagos, pedidos, clientes principales, casilleros.
+App principal / ChehiAppAbril = pagos, pedidos, clientes principales, etiquetas.
 Panel WhatsApp / PanelPedido = mensajes y fotos reales de WhatsApp.
 TiendaOnline = productos, pedidos online, perfiles de tienda, historial y links a fotos.
 ```
@@ -22,7 +22,7 @@ TiendaOnline = productos, pedidos online, perfiles de tienda, historial y links 
 |---|---|---|
 | TiendaOnline | `thgbfurscfjcmgokyyif` | productos, pedidos online, perfiles de tienda, configuración, referencias a fotos |
 | PanelPedido | `vwaocoaeenavxkcshyuf` | chats WhatsApp, fotos reales, bucket `whatsapp-media`, evidencias live |
-| ChehiAppAbril | `vhczofpmxzbqzboysoca` | sistema principal: pagos, pedidos, clientes, casilleros |
+| ChehiAppAbril | `vhczofpmxzbqzboysoca` | sistema principal: pagos, pedidos, clientes, etiquetas |
 
 La tienda puede integrarse con el sistema principal cuando una venta confirmada necesita aparecer en preparación, pero **no usa la base principal para storage ni historial visual de tienda**.
 
@@ -524,7 +524,7 @@ Regla operativa:
 ```txt
 TiendaOnline confirma venta
 -> crear/actualizar pedido operativo en ChehiAppAbril si corresponde
--> operador prepara en Mesa de Preparación
+-> operador prepara en pantalla de conteo
 ```
 
 Regla:

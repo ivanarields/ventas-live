@@ -823,7 +823,7 @@ function TabSistema() {
       {/* WhatsApp */}
       <WhatsappConnectionPanel />
 
-      {/* Casilleros */}
+      {/* Etiquetas */}
       <div className="flex items-center justify-between py-1">
         <div>
           <p className="text-[12px] font-black text-gray-700">Casilleros Numéricos</p>

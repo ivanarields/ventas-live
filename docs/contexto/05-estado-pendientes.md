@@ -10,11 +10,11 @@
 - Pago manual en efectivo via botón "Registrar"
 - Botón "Live" procesa todos los chats WA pendientes en paralelo
 
-### Sistema de casilleros
-- 1 bolsa → casillero numérico asignado automáticamente
-- 2+ bolsas → casillero alfabético asignado automáticamente
-- Al agregar segunda bolsa → migración automática de numérico a letra
-- Entrega → casillero liberado correctamente
+### Sistema de etiquetas
+- 1 bolsa → etiqueta numérica asignada automáticamente
+- 2+ bolsas → etiqueta alfabética asignada automáticamente
+- Al agregar segunda bolsa → migración automática de numérica a letra
+- Entrega → etiqueta liberada correctamente
 - Historial completo de asignaciones preservado
 
 ### IA
@@ -34,7 +34,7 @@
 | 2026-05-06 | Fix fecha local Bolivia en formulario de pagos | `3ae02b3` |
 | 2026-05-06 | Panel IA muestra modelo activo como badge, sin form de configuración | `3ae02b3` |
 | 2026-05-05 | Botón "Live" procesa todas las conversaciones WA del día | `f604f01` |
-| 2026-05-05 | Casilleros: asignación solo al marcar LISTO (no al crear pedido) | `114a295` |
+| 2026-05-05 | Etiquetas: asignación solo al marcar LISTO (no al crear pedido) | `114a295` |
 | 2026-05-05 | Dos comprobantes mismo monto → 2 registros separados (bug fix) | `114a295` |
 | 2026-05-05 | Excluir pagos MacroDroid ya asignados del matching | `114a295` |
 | 2026-05-05 | Tienda: productos VENDIDO muestran sello en vez de ocultarse | `abf7724` |
@@ -51,7 +51,7 @@
 | D | Comprobante de solo texto (sin foto) | Alta |
 | E | Mismo comprobante enviado dos veces | Alta |
 | F | Editar pago con datos incorrectos | Media |
-| G | Eliminar pago y verificar liberación de casillero | Media |
+| G | Eliminar pago y verificar liberación de etiqueta | Media |
 | H | Pago fraccionado (cliente paga en 2 partes) | Media |
 
 ---
@@ -68,7 +68,7 @@
 ## Migraciones de DB aplicadas
 
 La DB principal tiene 43 migraciones aplicadas (001 a 043).
-La última relevante: `043_fix_downgrade_last_order.sql` — permite degradar casillero letra a número cuando es el último pedido activo del cliente.
+La última relevante: `043_fix_downgrade_last_order.sql` — permite degradar etiqueta letra a número cuando es el último pedido activo del cliente.
 
 ---
 

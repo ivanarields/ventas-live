@@ -8,7 +8,7 @@ import { supabase, type StorageContainer, type AllocationRow } from "../lib/supa
 // ============================================================================
 
 export interface SyncPedidoResult {
-  /** Código de casillero asignado por Supabase (ej: "1", "A") */
+  /** Código de etiqueta asignado por Supabase (ej: "1", "A") */
   containerCode: string;
   /** ID numérico del pedido en Supabase */
   orderId: number;
@@ -31,9 +31,9 @@ export interface SyncPedidoInput {
 }
 
 /**
- * Sincroniza un pedido de Firebase a Supabase y asigna/actualiza su casillero.
+ * Sincroniza un pedido de Firebase a Supabase y asigna/actualiza su etiqueta.
  * - Si el cliente no existe en Supabase, lo crea (por firebase_id).
- * - Si el pedido no existe, lo crea y asigna casillero.
+ * - Si el pedido no existe, lo crea y asigna etiqueta.
  * - Si ya existe y cambió de SIMPLE a COMPLEX, migra automáticamente.
  * - Si ya existe y no cambió la clasificación, actualiza y mantiene la etiqueta.
  */
@@ -77,7 +77,7 @@ export async function syncPedidoLabel(input: SyncPedidoInput): Promise<SyncPedid
 }
 
 /**
- * Libera el casillero cuando un pedido se entrega o se elimina.
+ * Libera la etiqueta cuando un pedido se entrega o se elimina.
  * Identifica el pedido por su firebase_id.
  */
 export async function releasePedidoLabel(

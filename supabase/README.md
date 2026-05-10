@@ -1,62 +1,50 @@
-# Supabase — Sistema de etiquetas y casilleros
+# Supabase — Sistema de etiquetas
 
-## Setup inicial
+## Bases de datos
 
-### 1. Crear proyecto en Supabase
-1. Ir a https://supabase.com/dashboard
-2. "New project" → elegir nombre, región y password de base de datos
-3. Esperar ~2 min a que el proyecto se provisione
+| Nombre | ID | Para qué |
+|---|---|---|
+| **ChehiAppAbril** | `vhczofpmxzbqzboysoca` | Sistema principal: pagos, clientes, pedidos, etiquetas, cola WhatsApp |
+| **TiendaOnline** | `thgbfurscfjcmgokyyif` | Productos web, pedidos web, perfiles de tienda |
+| **PanelPedido** | `vwaocoaeenavxkcshyuf` | Chats WhatsApp, fotos reales en bucket `whatsapp-media` |
 
-### 2. Correr las migraciones SQL
-En el dashboard de Supabase → **SQL Editor** → pegar y ejecutar en orden:
+## Aplicar migraciones
 
-1. `supabase/migrations/001_labeling_system.sql` (tablas + seed de 8 casilleros)
-2. `supabase/migrations/002_allocation_functions.sql` (funciones transaccionales)
-
-### 3. Configurar variables de entorno
-Copiar `.env.example` a `.env` y completar:
-- `VITE_SUPABASE_URL` y `SUPABASE_URL` — mismo valor (Settings → API → Project URL)
-- `VITE_SUPABASE_ANON_KEY` — Settings → API → anon / public key
-- `SUPABASE_SERVICE_ROLE_KEY` — Settings → API → service_role key (¡secreto!)
-
-### 4. Probar endpoints
-```bash
-npm run dev
-```
+Las migraciones están en `supabase/migrations/`. Se aplican en el SQL Editor del dashboard de Supabase (proyecto ChehiAppAbril), en orden numérico (`001` al `043+`).
 
 ```bash
-# Ver casilleros
-curl http://localhost:3001/api/storage/containers
-
-# Crear pedido simple (1 bolsa) → asigna casillero numérico
-curl -X POST http://localhost:3001/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customerId":1,"totalBags":1,"totalItems":5}'
-
-# Crear pedido complejo (3 bolsas) → asigna casillero alfabético
-curl -X POST http://localhost:3001/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customerId":1,"totalBags":3,"totalItems":20}'
-
-# Migrar pedido simple a complejo
-curl -X POST http://localhost:3001/api/orders/1/update-bags \
-  -H "Content-Type: application/json" \
-  -d '{"newTotalBags":2}'
-
-# Entregar → libera casillero
-curl -X POST http://localhost:3001/api/orders/1/deliver
+C:/Users/IVAN/bin/supabase.exe db push
 ```
 
-## Arquitectura
+## Etiquetas (sistema de asignación)
 
-```
-Frontend (App.tsx)
-       ↓ fetch()
-server.ts (endpoints)
-       ↓ supabaseServer.rpc()
-PostgreSQL (fn_assign_container, fn_migrate_to_complex, fn_release_container)
-       ↓ FOR UPDATE SKIP LOCKED
-storage_containers + container_allocations
+El sistema asigna etiquetas físicas a los pedidos según cantidad de bolsas:
+
+| Tipo | Códigos | Capacidad |
+|---|---|---|
+| `NUMERIC_SHARED` | 1–100 | Hasta 5 pedidos simples (1 bolsa) |
+| `ALPHA_COMPLEX` | A–Z | Hasta 20 bolsas por clienta |
+
+Funciones PL/pgSQL con `FOR UPDATE SKIP LOCKED`:
+```sql
+fn_assign_container(order_id, user_id)
+fn_migrate_to_complex(order_id)
+fn_release_container(order_id, reason)
+fn_recalc_container_state(container_id)
 ```
 
-Toda la lógica transaccional vive en las funciones PL/pgSQL. El backend sólo orquesta y el frontend sólo muestra el resultado.
+La lógica transaccional vive en PostgreSQL. El servidor solo orquesta; el frontend solo muestra el resultado.
+
+## Deploy de Edge Functions
+
+```bash
+# ChehiAppAbril
+C:/Users/IVAN/bin/supabase.exe functions deploy ingest-notification --no-verify-jwt --project-ref vhczofpmxzbqzboysoca
+
+# TiendaOnline
+C:/Users/IVAN/bin/supabase.exe functions deploy ingest-bank-store --no-verify-jwt --project-ref thgbfurscfjcmgokyyif
+```
+
+## Variables de entorno necesarias
+
+Ver `docs/contexto/05-estado-pendientes.md` para la lista completa.

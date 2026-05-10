@@ -2,7 +2,7 @@
  * Rutas para tarjetas temporales de venta live en el Panel WhatsApp.
  *
  * Fase 1: estas rutas solo escriben en la base del Panel WhatsApp.
- * No crean pagos, pedidos, clientes principales ni casilleros.
+ * No crean pagos, pedidos, clientes principales ni etiquetas.
  */
 
 import { Router, Request, Response } from 'express';
