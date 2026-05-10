@@ -208,7 +208,7 @@ El operador **nunca elige** la etiqueta — el backend la asigna solo.
 fn_assign_container(order_id, user_id)      — asigna con FOR UPDATE SKIP LOCKED (evita race conditions)
 fn_migrate_to_complex(order_id)             — migra de numérico a alfabético
 fn_release_container(order_id, reason)      — libera al entregar
-fn_recalc_container_state(container_id)     — recalcula estado del casillero
+fn_recalc_container_state(container_id)     — recalcula estado de la etiqueta
 ```
 
 ### Migraciones relevantes
@@ -231,7 +231,7 @@ fn_recalc_container_state(container_id)     — recalcula estado del casillero
 | `pagos` | Todo pago recibido (efectivo, MacroDroid, tienda, manual WA) |
 | `pedidos` | Pedidos de ropa en proceso o listos |
 | `customers` | Clientes con teléfono, etiqueta activa, firebase_id |
-| `storage_containers` | Casilleros físicos |
+| `storage_containers` | Etiquetas físicas (tabla interna del sistema) |
 | `container_allocations` | Asignaciones activas e históricas |
 | `orders` | Sistema de etiquetas (vinculado a pedidos) |
 | `order_bags` | Bolsas individuales por pedido |

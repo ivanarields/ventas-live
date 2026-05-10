@@ -268,7 +268,7 @@ const normalizeName = (name: string) => {
  * que calculaba etiquetas en el navegador. Ahora PostgreSQL es el único árbitro.
  *
  * Uso: después de hacer commit del batch de Firebase con los cambios del pedido,
- * llamá a `syncLabelsForCustomer` para que Supabase asigne/migre/libere casilleros
+ * llamá a `syncLabelsForCustomer` para que Supabase asigne/migre/libere etiquetas
  * y los escriba de vuelta en Firebase.
  */
 async function syncLabelsForCustomer(
@@ -2028,14 +2028,14 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
 
   const handleTestCleanup = async () => {
     if (isCleaningTests) return;
-    const command = window.prompt('Pruebas: escribe RESET para limpiar casilleros, etiquetas y conversaciones WhatsApp.');
+    const command = window.prompt('Pruebas: escribe RESET para limpiar etiquetas y conversaciones WhatsApp.');
     const normalized = command?.trim().toUpperCase();
     if (!normalized) return;
     if (normalized !== 'RESET') {
       alert('Comando inválido. Usa RESET.');
       return;
     }
-    if (!window.confirm('Esto limpiará casilleros, etiquetas y conversaciones WhatsApp. No borra pagos. ¿Continuar?')) return;
+    if (!window.confirm('Esto limpiará etiquetas y conversaciones WhatsApp. No borra pagos. ¿Continuar?')) return;
 
     setIsCleaningTests(true);
     try {

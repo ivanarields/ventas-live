@@ -1,21 +1,28 @@
-# Conector WhatsApp → Supabase
+# WhatsApp Bridge
 
-Microservicio que escucha mensajes de WhatsApp y los envía a la Edge Function `ingest-whatsapp` en Supabase.
+Microservicio Node.js que conecta el WhatsApp del negocio con la aplicación.
+
+## Alojamiento actual
+
+- **Host:** DigitalOcean droplet
+- **URL:** `http://134.122.123.253:3001`
+- **Variable en app:** `WHATSAPP_BRIDGE_URL=http://134.122.123.253:3001`
+- **Secret de webhook:** `WEBHOOK_SECRET=ventas-live-bridge-2026`
 
 ## Cómo funciona
 
-1. Se conecta a WhatsApp Web con un código QR
-2. Cuando llega un mensaje, lo captura (texto, foto, audio, video, PDF)
-3. Si tiene archivo, lo sube a Supabase Storage (bucket `whatsapp-media`)
-4. Envía el payload completo a la Edge Function `ingest-whatsapp`
-5. La Edge Function guarda el cliente y el mensaje en la base de datos
+1. Se conecta a WhatsApp Web (sesión persistente en `.wwebjs_auth/`)
+2. Cuando llega un mensaje o foto, lo captura y lo reenvía a la app via webhook
+3. La app guarda el cliente en `panel_clientes` y el mensaje en `panel_mensajes` (PanelPedido)
+4. Si el mensaje tiene imagen, se sube al bucket `whatsapp-media` de Supabase
 
 ## Variables de entorno (`.env`)
 
 ```
-WEBHOOK_URL="https://vwaocoaeenavxkcshyuf.supabase.co/functions/v1/ingest-whatsapp"
-SUPABASE_URL="https://vwaocoaeenavxkcshyuf.supabase.co"
-SUPABASE_SERVICE_KEY="tu-service-key"
+WEBHOOK_URL=https://leidydiaz.live/api/whatsapp/webhook
+SUPABASE_URL=https://vwaocoaeenavxkcshyuf.supabase.co
+SUPABASE_SERVICE_KEY=tu-service-key
+WEBHOOK_SECRET=ventas-live-bridge-2026
 ```
 
 ## Correr en local
@@ -24,11 +31,10 @@ SUPABASE_SERVICE_KEY="tu-service-key"
 node index.js
 ```
 
-El QR aparece en la terminal y también en la app (Configuración → Sistema).
+El QR aparece en la terminal. Escanearlo con el WhatsApp del negocio.
 
-## Despliegue en Railway
+## Notas
 
-1. Subí esta carpeta a un repositorio de GitHub
-2. Creá un proyecto en Railway apuntando a ese repo
-3. Agregá las variables de entorno en el panel de Railway
-4. El QR aparece en los Logs de Railway — lo escaneás y listo
+- Requiere proceso persistente (no serverless) — la sesión de WhatsApp Web necesita estar activa.
+- Si se migra a otro servidor: solo actualizar `WHATSAPP_BRIDGE_URL` en Vercel.
+- Los mensajes salientes se envían via `POST /api/send` con header `x-webhook-secret`.

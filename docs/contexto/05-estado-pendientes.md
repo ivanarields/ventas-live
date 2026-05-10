@@ -1,161 +1,89 @@
-# Estado Actual y Pendientes
+# Estado Actual y Pendientes — actualizado 2026-05-06
 
-Última revisión: 2026-05-10.
+## Qué está funcionando y probado ✅
 
----
+### Sistema de pagos
+- MacroDroid captura notificaciones bancarias (Yape, Yastaa) y crea pagos automáticamente
+- Comprobantes WhatsApp se procesan con IA y se cruzan con pagos MacroDroid
+- Dos comprobantes del mismo nombre/monto → 2 registros separados (no se fusionan)
+- Cada comprobante se vincula a su propio pago MacroDroid (no "roba" el de otro)
+- Pago manual en efectivo via botón "Registrar"
+- Botón "Live" procesa todos los chats WA pendientes en paralelo
 
-## Funcionando en producción ✅
+### Sistema de etiquetas
+- 1 bolsa → etiqueta numérica asignada automáticamente
+- 2+ bolsas → etiqueta alfabética asignada automáticamente
+- Al agregar segunda bolsa → migración automática de numérica a letra
+- Entrega → etiqueta liberada correctamente
+- Historial completo de asignaciones preservado
 
-### Sistema principal (pestaña Cobros + Pagos + Etiquetas)
-- Login con email/password (Supabase Auth).
-- 6 pestañas operativas: Cobros · Etiquetas · Pagos · Finanzas · Tienda · Config.
-- **Pestaña Cobros:** ingresos del día, acceso rápido a Etiquetas / Pagos / Panel Tienda.
-- **Pestaña Pagos:** lista de pagos del día por cliente con colores (verde / morado / gris).
-- **Pestaña Etiquetas → Etiquetas:** casilleros activos con etiqueta de cada clienta.
-- **Pestaña Etiquetas → Comprobantes Live:** panel de comprobantes WA (PanelPedidos).
-- **Pantalla de conteo** (antes "Mesa de Preparación"): ícono camiseta/bolsa → botón "MARCAR COMO LISTO".
-- Etiquetas: numéricas (1–100, compartidas) y alfabéticas (A–Z, exclusivas), con migración automática.
-- Pago efectivo manual desde botón "Registrar".
-- Botón "Live" procesa todos los chats WhatsApp pendientes con IA.
-- Pago con MacroDroid → ingest-notification → cruce con comprobantes WA.
-- Verificación manual de pagos morados desde pestaña Pagos (botón "Verificar").
-- Fechas locales de Bolivia (no UTC) en formularios.
+### IA
+- Panel de configuración muestra modelo activo (google/gemini-2.5-flash-lite) como badge
+- Resumen de conversaciones WA extrae nombre, monto, hora del comprobante
+- Dos modos de prompt para comprobantes: simple y completo
 
-### WhatsApp Bridge
-- Migrado de Railway a DigitalOcean (`http://134.122.123.253:3001`).
-- Espeja mensajes entrantes a `panel_mensajes` (PanelPedido).
-- Acepta envío saliente vía `POST /api/send` con webhook secret.
-
-### Tienda Online (pestaña Tienda / Panel Tienda)
-- Tienda nueva en `/tienda` (rápida, código en `src/storefront-v2/`).
-- Tienda antigua en `/tienda-original` (respaldo, código en `src/storefront/`).
-- Login obligatorio antes de pagar (teléfono + PIN, auto-registro).
-- Reserva de 1 minuto + cleanup automático.
-- Pago automático MacroDroid → Edge Function `ingest-bank-store` → `/api/store/match-payment`.
-- Inyección de pedido + pago en ChehiAppAbril con `label=WEB-{id}`, `method=Tienda Online`.
-- UN solo mensaje WhatsApp al confirmar pago.
-- Procesador automático de cola WA cada 60 seg (filtro `storeOnly`).
-- Pre-rellenado de teléfono desde URL `?phone=...`.
-
-### Edge Functions desplegadas
-- `ingest-notification` en ChehiAppAbril (versión 35).
-- `ingest-bank-store` en TiendaOnline (versión 2).
+### General
+- Fecha del formulario "Registrar Pago" usa hora local de Bolivia (no UTC)
 
 ---
 
-## Cambios recientes (2026-05-09 → 10)
+## Últimos cambios importantes
 
 | Fecha | Cambio | Commit |
-|---|---|---|
-| 2026-05-10 | Renombrar pantallas: Cobros, Etiquetas, Pagos, Config + accesos rápidos en home | `f795948` |
-| 2026-05-10 | Reescribir docs/contexto/ completos con nomenclatura correcta | — |
-| 2026-05-10 | Limpieza de docs + CLAUDE.md cortito + hook pre-commit | `70d657d` |
-| 2026-05-09 | Tienda nueva queda en `/tienda`, antigua en `/tienda-original` | `287a37a` |
-| 2026-05-09 | Mensaje único WhatsApp + flujo correcto + Edge Functions corregidas | `b13cb15` |
-| 2026-05-08 | Ajustes detalle y checkout tienda v2 | `6ab0442` |
-| 2026-05-07 | Migración bridge WA a DigitalOcean | `da72962` |
+|-------|--------|--------|
+| 2026-05-06 | Fix fecha local Bolivia en formulario de pagos | `3ae02b3` |
+| 2026-05-06 | Panel IA muestra modelo activo como badge, sin form de configuración | `3ae02b3` |
+| 2026-05-05 | Botón "Live" procesa todas las conversaciones WA del día | `f604f01` |
+| 2026-05-05 | Etiquetas: asignación solo al marcar LISTO (no al crear pedido) | `114a295` |
+| 2026-05-05 | Dos comprobantes mismo monto → 2 registros separados (bug fix) | `114a295` |
+| 2026-05-05 | Excluir pagos MacroDroid ya asignados del matching | `114a295` |
+| 2026-05-05 | Tienda: productos VENDIDO muestran sello en vez de ocultarse | `abf7724` |
 
 ---
 
-## Variables de entorno necesarias
-
-### Vercel (Production)
-```
-PORT=3004
-SUPABASE_URL / VITE_SUPABASE_URL = https://vhczofpmxzbqzboysoca.supabase.co
-SUPABASE_SERVICE_ROLE_KEY
-VITE_SUPABASE_ANON_KEY
-PANEL_SUPABASE_URL = https://vwaocoaeenavxkcshyuf.supabase.co
-PANEL_SUPABASE_SERVICE_KEY
-VITE_STORE_SUPABASE_URL = https://thgbfurscfjcmgokyyif.supabase.co
-VITE_STORE_SUPABASE_ANON_KEY
-STORE_SUPABASE_SERVICE_ROLE_KEY
-STORE_OWNER_USER_ID = 13dcb065-6099-4776-982c-18e98ff2b27a
-STORE_PUBLIC_URL = https://leidydiaz.live
-WHATSAPP_BRIDGE_URL = http://134.122.123.253:3001
-WEBHOOK_SECRET = ventas-live-bridge-2026
-OPENROUTER_API_KEY
-OPENROUTER_MODEL = google/gemini-2.5-flash-lite
-INGEST_DEVICE_SECRET
-LIVE_SALES_TEST_PHONE = 59172698959
-```
-
-### Secrets de Supabase
-- ChehiAppAbril: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `INGEST_DEVICE_SECRET`, `INGEST_USER_ID`, `SERVER_URL`.
-- TiendaOnline: `SERVER_URL=https://leidydiaz.live`.
-
----
-
-## Migraciones aplicadas
-
-ChehiAppAbril tiene 43+ migraciones (`001` a `043` confirmadas).
-TiendaOnline tiene su propia migración aplicada manualmente.
-
-Última migración relevante:
-- `043_fix_downgrade_last_order.sql` — degradar de etiqueta letra a número cuando es el último pedido activo.
-- `044_store_favorites.sql` — favoritos en TiendaOnline (commiteada, aplicación pendiente de verificar).
-
----
-
-## Pendiente prioritario
-
-### 1. Comprobante WhatsApp en MORADO en pestaña Pagos
-Cuando MacroDroid no llega a tiempo y la clienta manda comprobante por WhatsApp con código `#pedido`, el pedido debería aparecer en MORADO en la pestaña **Pagos** del operador, con la foto del comprobante visible. El operador confirma con un clic sin ir al panel admin de tienda.
-
-**Estado:** no implementado. Hoy el operador tiene que ir al panel admin de tienda y verificar manualmente.
-
-### 2. Achicar el QR de Yape
-La imagen `/qr-yape.jpg` pesa 523 KB. Debería pesar ~50 KB. Hace que la pantalla de pago tarde más de un segundo en aparecer. Aplica para las dos tiendas.
-
-### 3. Foto de prendas en el perfil de la clienta
-Hoy el perfil muestra solo el nombre del producto y el precio. Agregar la foto para que la clienta confirme visualmente lo que compró.
-
-### 4. RLS (Row Level Security)
-ChehiAppAbril: filtrado solo por `user_id` en server. Falta RLS de Supabase.
-TiendaOnline: sin RLS.
-
-### 5. Supabase Realtime
-Reemplazar el polling manual de `loadData()` por Realtime para actualizaciones automáticas en pantalla.
-
-### 6. Sesión vieja de WhatsApp lockeada
-Carpeta `Faces panel de pedido/` quedó pendiente de borrar (archivos `.wwebjs_auth/` lockeados por proceso). Borrar en próxima sesión cerrando antes el bridge local.
-
----
-
-## Pruebas pendientes recomendadas
+## Pruebas pendientes (docs/pruebas-pendientes-2026-05-06.md)
 
 | # | Prueba | Prioridad |
-|---|---|---|
-| A | Pago de tienda con MacroDroid funcionando: confirmar que llega a pestaña Etiquetas + WhatsApp | Alta |
-| B | Pago de tienda donde MacroDroid falla: comprobante por WhatsApp aparece en pestaña Pagos | Alta |
-| C | Cliente con pedido Live + pedido tienda el mismo día: agrupación correcta | Alta |
-| D | Comprobante de solo texto sin foto | Media |
-| E | Mismo comprobante enviado dos veces (idempotencia) | Media |
+|---|--------|-----------|
+| A | Verificación manual de pago morado | Alta |
+| B | Cliente con 2 pedidos activos al mismo tiempo | Alta |
+| C | MacroDroid captura notificación basura/promo | Alta |
+| D | Comprobante de solo texto (sin foto) | Alta |
+| E | Mismo comprobante enviado dos veces | Alta |
 | F | Editar pago con datos incorrectos | Media |
 | G | Eliminar pago y verificar liberación de etiqueta | Media |
 | H | Pago fraccionado (cliente paga en 2 partes) | Media |
 
 ---
 
-## Nomenclatura oficial de pantallas
+## Tareas técnicas pendientes
 
-| Nombre visible en app | Código interno | Descripción |
-|---|---|---|
-| **Cobros** | `home` | Resumen del día |
-| **Etiquetas** | `entrega` | Etiquetas asignadas + Comprobantes Live |
-| **Pagos** | `payments` | Lista de pagos del día |
-| **Finanzas** | `finance` | Ingresos y gastos |
-| **Tienda** | `tienda` | Panel admin de la tienda online |
-| **Config** | `settings` | Configuración |
-| Pantalla de conteo | — | Antes llamada "Mesa de Preparación". Sin título en UI. Botón: "MARCAR COMO LISTO" |
+- **Migrar WhatsApp Bridge** de Railway a otro alojamiento (ver `03-whatsapp-bridge.md`)
+- **RLS (Row Level Security)** en Supabase — actualmente filtrado solo por `user_id` en servidor
+- **Supabase Realtime** — reemplazar el polling manual de `loadData()` para actualizaciones en tiempo real
+- **Tienda:** flujo completo de verificación de pagos end-to-end (ver `04-tienda-online.md`)
 
 ---
 
-## Reglas inviolables
+## Migraciones de DB aplicadas
 
-1. **No tocar el sistema principal** salvo necesidad explícita. Las 6 pestañas y el flujo de etiquetas funcionan; cambios en `App.tsx`, `server.ts` core deben justificarse.
-2. **Las fotos de WhatsApp viven solo en PanelPedido**, no en TiendaOnline ni en ChehiAppAbril.
-3. **Los pedidos web tienen `source='WEB'`** y NO disparan el segundo mensaje "PEDIDO LISTO".
-4. **Antes de cada commit**, actualizar el archivo de `docs/contexto/` correspondiente.
-5. **`STORE_OWNER_USER_ID` es crítica** — si falta en Vercel, pedidos quedan invisibles.
-6. **Nomenclatura consistente**: usar siempre los nombres oficiales de pantallas (Cobros, Etiquetas, Pagos, Finanzas, Tienda, Config) tanto en código como en documentos.
+La DB principal tiene 43 migraciones aplicadas (001 a 043).
+La última relevante: `043_fix_downgrade_last_order.sql` — permite degradar etiqueta letra a número cuando es el último pedido activo del cliente.
+
+---
+
+## Variables de entorno necesarias (.env local)
+
+```
+PORT=3004
+VITE_SUPABASE_URL / SUPABASE_URL=https://vhczofpmxzbqzboysoca.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=[key]
+OPENROUTER_API_KEY=[key]
+OPENROUTER_MODEL=google/gemini-2.5-flash-lite
+PANEL_SUPABASE_URL=https://vwaocoaeenavxkcshyuf.supabase.co
+PANEL_SUPABASE_SERVICE_KEY=[key]
+VITE_STORE_SUPABASE_URL=https://thgbfurscfjcmgokyyif.supabase.co
+STORE_SUPABASE_SERVICE_ROLE_KEY=[key]
+WHATSAPP_BRIDGE_URL=https://bridge-production-13f7.up.railway.app
+WEBHOOK_SECRET=ventas-live-bridge-2026
+```

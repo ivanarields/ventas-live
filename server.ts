@@ -2225,7 +2225,7 @@ const PORT = Number(process.env.PORT || 3001);
 
   /**
    * Marca un pedido como pagado, oculta los productos vendidos,
-   * y UNIFICA la identidad para inyectar el pedido a la Mesa de Preparación (Casilleros).
+   * y UNIFICA la identidad para inyectar el pedido a la pantalla de conteo (etiquetas).
    */
   async function confirmStoreOrder(orderId: number, source: string) {
     const now = new Date().toISOString();
