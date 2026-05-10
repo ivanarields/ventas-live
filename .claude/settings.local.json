@@ -8,7 +8,10 @@
       "Read(*)",
       "Glob(*)",
       "Grep(*)",
-      "Skill(*)"
+      "Skill(*)",
+      "Bash(vercel inspect *)",
+      "Bash(vercel ls *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp"
     ]
   }
 }
