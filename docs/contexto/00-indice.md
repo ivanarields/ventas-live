@@ -1,54 +1,67 @@
 # Índice del Sistema — Ventas Live
 
-**Aplicación:** PWA de gestión de ropa en consignación para "Chehi App Abril"
-**Dueña:** Leidy Candy Diaz Sanchez
-**Producción:** https://ventas-live.vercel.app
-**Repositorio:** https://github.com/ivanarields/ventas-live
+**Aplicación:** PWA de gestión de ropa en consignación + tienda online + WhatsApp + MacroDroid.
+**Dueña:** Leidy Candy Diaz Sanchez.
+**Producción:** https://leidydiaz.live (alias: leidycandy.me, www.leidydiaz.live).
+**Repositorio:** https://github.com/ivanarields/ventas-live.
+
+Última revisión completa de docs: **2026-05-10**.
 
 ---
 
-## Módulos del sistema
+## Documentos en esta carpeta
 
-### 1. App Principal (`01-app-principal.md`)
-PWA React + Express en Vercel. Gestiona clientes, pagos, pedidos, casilleros y finanzas.
-DB principal: Supabase `vhczofpmxzbqzboysoca` (ChehiAppAbril).
-
-### 2. Sistema de Pagos y Casilleros (`02-sistema-pagos.md`)
-MacroDroid captura notificaciones bancarias → Edge Function las procesa → crea pagos.
-Casilleros numéricos (1 bolsa) y alfabéticos (2+ bolsas) se asignan automáticamente.
-
-### 3. WhatsApp Bridge (`03-whatsapp-bridge.md`)
-Servicio Node.js en Railway que espeja el WhatsApp del negocio.
-Recibe mensajes/fotos, los guarda en la DB del panel (`vwaocoaeenavxkcshyuf`).
-Se quiere migrar a otro alojamiento.
-
-### 4. Tienda Online (`04-tienda-online.md`)
-Tienda pública de productos. DB separada: Supabase `thgbfurscfjcmgokyyif`.
-Los pagos de la tienda se cruzan con el sistema principal vía `ingest-bank`.
-
-### 5. Estado Actual y Pendientes (`05-estado-pendientes.md`)
-Qué está funcionando, últimos cambios, pruebas realizadas, tareas pendientes.
+| Archivo | Qué cubre |
+|---|---|
+| `00-indice.md` | Este archivo — mapa general |
+| `01-app-principal.md` | Sistema principal: 4 pantallas, flujo del operador |
+| `02-sistema-pagos.md` | Pagos automáticos (MacroDroid), comprobantes WhatsApp, casilleros |
+| `03-whatsapp-bridge.md` | Bridge de WhatsApp (en DigitalOcean), cola de mensajes |
+| `04-tienda-online.md` | Tienda web (`/tienda`), checkout, pedidos web, integración con sistema principal |
+| `05-estado-pendientes.md` | Qué está hecho hoy, qué falta, últimos cambios |
 
 ---
 
-## Credenciales clave
+## Tres bases de datos en Supabase
 
-| Sistema | URL / ID |
-|---------|----------|
-| App principal | https://ventas-live.vercel.app |
-| Supabase principal | https://vhczofpmxzbqzboysoca.supabase.co |
-| Supabase panel WA | https://vwaocoaeenavxkcshyuf.supabase.co |
-| Supabase tienda | https://thgbfurscfjcmgokyyif.supabase.co |
-| WhatsApp Bridge | https://bridge-production-13f7.up.railway.app |
-| User ID operador | `13dcb065-6099-4776-982c-18e98ff2b27a` |
-| Puerto local dev | 3004 |
+| Nombre | ID interno | Para qué |
+|---|---|---|
+| **ChehiAppAbril** | `vhczofpmxzbqzboysoca` | Sistema principal: pagos, clientes, pedidos, casilleros, cola WhatsApp |
+| **TiendaOnline** | `thgbfurscfjcmgokyyif` | Productos web, pedidos web (`store_orders`), perfiles de clienta web |
+| **PanelPedido** | `vwaocoaeenavxkcshyuf` | Chats WhatsApp (`panel_mensajes`), fotos reales en bucket `whatsapp-media` |
+
+**Regla crítica:** las fotos reales viven en PanelPedido. TiendaOnline solo guarda links. ChehiAppAbril nunca guarda fotos de tienda ni WhatsApp.
+
+---
+
+## URLs de producción
+
+- App operador: `https://leidydiaz.live`
+- Tienda nueva (oficial, rápida): `https://leidydiaz.live/tienda`
+- Tienda antigua (respaldo): `https://leidydiaz.live/tienda-original`
+- Tienda v2 directo: `https://leidydiaz.live/tienda-v2`
+
+---
+
+## Identificadores clave
+
+| Cosa | Valor |
+|---|---|
+| User ID del operador (Iván) | `13dcb065-6099-4776-982c-18e98ff2b27a` |
+| Auth del operador | `ivanariel.fb@gmail.com` / `Chehi2024!` |
+| Bridge WhatsApp | `http://134.122.123.253:3001` (DigitalOcean) |
+| Webhook secret del bridge | `ventas-live-bridge-2026` |
+
+---
 
 ## Comandos esenciales
 
 ```bash
-npm run dev          # Servidor local (Express + Vite HMR) en puerto 3004
-npm run build        # Build producción → dist/
-C:/Users/IVAN/bin/supabase.exe db push  # Aplicar migraciones pendientes
-# Deploy Edge Function:
+npm run dev          # Servidor local en puerto 3004
+npm run build        # Compilar para producción
+npm run lint         # Verificar tipos TypeScript
+
+# Edge Functions
 C:/Users/IVAN/bin/supabase.exe functions deploy ingest-notification --no-verify-jwt --project-ref vhczofpmxzbqzboysoca
+C:/Users/IVAN/bin/supabase.exe functions deploy ingest-bank-store --no-verify-jwt --project-ref thgbfurscfjcmgokyyif
 ```
