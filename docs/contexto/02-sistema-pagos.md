@@ -118,8 +118,19 @@ La tienda en `/tienda` tiene su propio flujo de pago automático separado del ca
     → Ventana de búsqueda: 10 minutos
     → Llama a tryMatchOrder({ windowMinutes: 10 })
     → Si banco ya procesó → confirmStoreOrder()
-    → Si banco no llegó todavía → log "esperando banco", no hace nada
+    → Si banco no llegó todavía → marca `wa_proof_received = true` en store_order
+       (el pedido queda en estado 'pending' esperando verificación manual)
 ```
+
+### Flujo de verificación manual de tienda
+
+Cuando el banco no llega (MacroDroid sin internet, etc.) pero la clienta envió el comprobante por WA, el operador puede verificar manualmente desde la **pestaña Pagos**:
+
+1. `/api/store/pending-manual` devuelve store_orders con `status='pending'` y `wa_proof_received=true` del día actual
+2. Aparecen como tarjetas **moradas** con badge **WEB** en la parte superior de la pestaña Pagos
+3. El operador toca **"Verificar"** → `POST /api/store/verify-manual/:id` → llama a `confirmStoreOrder()`
+4. `confirmStoreOrder()` ejecuta los mismos 7 pasos que el flujo automático (pedido, pago, WhatsApp)
+5. El pago queda en **verde** con badge WEB y se envía el mensaje de confirmación automáticamente
 
 ### `tryMatchOrder()` — Niveles de confianza
 

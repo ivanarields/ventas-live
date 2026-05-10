@@ -31,6 +31,7 @@
 
 | Fecha | Cambio | Commit |
 |-------|--------|--------|
+| 2026-05-10 | Verificación manual de pedidos web desde pestaña Pagos (tarjetas moradas WEB) | pendiente commit |
 | 2026-05-06 | Fix fecha local Bolivia en formulario de pagos | `3ae02b3` |
 | 2026-05-06 | Panel IA muestra modelo activo como badge, sin form de configuración | `3ae02b3` |
 | 2026-05-05 | Botón "Live" procesa todas las conversaciones WA del día | `f604f01` |

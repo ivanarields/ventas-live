@@ -2515,7 +2515,39 @@ const PORT = Number(process.env.PORT || 3001);
     }
   });
 
-  // ── Endpoint 5: Espejo de Fotos de WhatsApp para la Tienda ──────
+  // ── Endpoint 5: Pedidos de tienda esperando verificación manual ──
+  app.get('/api/store/pending-manual', async (_req, res) => {
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const { data, error } = await supabaseStore
+        .from('store_orders')
+        .select('id, customer_wa, customer_name, total, items, created_at')
+        .eq('status', 'pending')
+        .eq('wa_proof_received', true)
+        .gte('created_at', todayStart.toISOString())
+        .order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data ?? []);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint 6: Verificación manual de pago de tienda por el operador ──
+  app.post('/api/store/verify-manual/:storeOrderId', async (req, res) => {
+    try {
+      const storeOrderId = parseInt(req.params.storeOrderId);
+      if (isNaN(storeOrderId)) return res.status(400).json({ error: 'ID inválido' });
+      const confirmed = await confirmStoreOrder(storeOrderId, 'manual-web');
+      if (!confirmed) return res.status(400).json({ error: 'No se pudo confirmar — ya pagado o no existe' });
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint 7: Espejo de Fotos de WhatsApp para la Tienda ──────
   // Devuelve las fotos enviadas por un número de WhatsApp (para conciliación de Live)
   app.get('/api/store/whatsapp-photos', async (req, res) => {
     try {

@@ -74,6 +74,9 @@ export const pagosApi = {
     apiFetch(`/api/pagos/${id}`, { method: "DELETE" }),
   verifyLivePayment: (id: string | number) =>
     apiFetch(`/api/live-sales/payments/${id}/verify-manual`, { method: "POST" }),
+  pendingWebOrders: () => apiFetch("/api/store/pending-manual"),
+  verifyWebStoreOrder: (storeOrderId: number) =>
+    apiFetch(`/api/store/verify-manual/${storeOrderId}`, { method: "POST" }),
 };
 
 // ─── PEDIDOS ──────────────────────────────────────────────────────────────────

@@ -2564,6 +2564,8 @@ function PaymentsView({
   const [isDeletingTodayPayments, setIsDeletingTodayPayments] = useState(false);
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
   const [verifyingLivePaymentId, setVerifyingLivePaymentId] = useState<string | null>(null);
+  const [verifyingWebOrderId, setVerifyingWebOrderId] = useState<number | null>(null);
+  const [pendingWebOrders, setPendingWebOrders] = useState<any[]>([]);
   const [procesandoLive, setProcesandoLive] = useState(false);
   const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
 
@@ -2644,6 +2646,26 @@ function PaymentsView({
       alert(error?.message ?? 'Error al borrar pagos de hoy');
     } finally {
       setIsDeletingTodayPayments(false);
+    }
+  };
+
+  useEffect(() => {
+    pagosApi.pendingWebOrders()
+      .then((data: any) => setPendingWebOrders(Array.isArray(data) ? data : []))
+      .catch(() => setPendingWebOrders([]));
+  }, [payments]);
+
+  const verifyWebStoreOrder = async (storeOrderId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setVerifyingWebOrderId(storeOrderId);
+    try {
+      await pagosApi.verifyWebStoreOrder(storeOrderId);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error verificando pago web:', error);
+      alert('No se pudo verificar el pago');
+    } finally {
+      setVerifyingWebOrderId(null);
     }
   };
 
@@ -2911,7 +2933,39 @@ function PaymentsView({
       </div>
 
       <div className="space-y-3">
-        {groupedPayments.length === 0 ? (
+        {/* Pedidos de tienda con comprobante WA pendiente de verificación manual */}
+        {pendingWebOrders.map((order: any) => (
+          <div key={`web-pending-${order.id}`} className="card-modern p-0 overflow-hidden">
+            <div className="w-full pl-2 pr-4 py-4 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <div className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#faf5ff', color: '#a855f7' }}>
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <div className="flex flex-col items-start min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-black bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-md uppercase tracking-wider">WEB</span>
+                    <span className="font-bold text-base-text text-sm uppercase tracking-tight truncate">
+                      {order.customer_name || order.customer_wa || 'Cliente Tienda'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-base-text-muted">Pedido #{order.id} · Comprobante recibido</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <button
+                  onClick={(e) => verifyWebStoreOrder(order.id, e)}
+                  disabled={verifyingWebOrderId === order.id}
+                  className="px-3 py-2 rounded-xl bg-violet-50 text-violet-600 border border-violet-100 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 active:scale-95"
+                >
+                  {verifyingWebOrderId === order.id ? '...' : 'Verificar'}
+                </button>
+                <span className="font-extrabold text-brand text-base">Bs {order.total}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {groupedPayments.length === 0 && pendingWebOrders.length === 0 ? (
           <div className="text-center py-24 opacity-20">
             <Wallet className="w-16 h-16 mx-auto mb-4" />
             <p className="text-sm font-bold uppercase tracking-[0.2em]">
@@ -2921,10 +2975,11 @@ function PaymentsView({
         ) : (
           groupedPayments.map((group: any, groupIdx: number) => {
             const palette = verificationPalette(group.verificationOrigin ?? 'other');
+            const isWebPayment = group.history.some((p: any) => p.method === 'Tienda Online');
             return (
             <div key={`${group.nombre}-${groupIdx}`} className="card-modern p-0 overflow-hidden">
               {/* Header Card */}
-              <div 
+              <div
                 onClick={() => {
                   if (showOnlyWithPhone && group.phone) {
                     window.open(`https://wa.me/${group.phone.replace(/\D/g, '')}`, '_blank');
@@ -2945,6 +3000,9 @@ function PaymentsView({
                     <CheckCircle2 className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col items-start min-w-0">
+                    {isWebPayment && (
+                      <span className="text-[9px] font-black bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-md uppercase tracking-wider mb-0.5">WEB</span>
+                    )}
                     <span className="font-bold text-base-text text-sm text-left leading-tight uppercase tracking-tight truncate w-full">
                       {showOnlyWithPhone ? group.phone.replace('+591', '').trim() : group.nombre}
                     </span>
