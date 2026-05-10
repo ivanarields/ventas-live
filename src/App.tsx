@@ -960,18 +960,19 @@ const Logo = () => (
   </div>
 );
 
-const TabButton = ({ active, icon: Icon, onClick }: any) => (
-  <button 
+const TabButton = ({ active, icon: Icon, label, onClick }: any) => (
+  <button
     onClick={onClick}
-    className={`flex flex-col items-center justify-center flex-1 py-2.5 transition-all relative ${active ? 'text-brand' : 'text-base-text-muted'}`}
+    className={`flex flex-col items-center justify-center flex-1 py-1.5 transition-all relative ${active ? 'text-brand' : 'text-base-text-muted'}`}
   >
-    <div className={`p-2 rounded-xl transition-all ${active ? 'bg-brand/10' : ''}`}>
-      <Icon className={`w-6 h-6 ${active ? 'scale-110' : 'scale-100'}`} />
+    <div className={`p-1.5 rounded-xl transition-all ${active ? 'bg-brand/10' : ''}`}>
+      <Icon className={`w-5 h-5 ${active ? 'scale-110' : 'scale-100'}`} />
     </div>
+    {label && <span className="text-[8px] font-bold uppercase tracking-wide mt-0.5">{label}</span>}
     {active && (
-      <motion.div 
-        layoutId="tab-indicator" 
-        className="absolute bottom-2 w-1 h-1 bg-brand rounded-full" 
+      <motion.div
+        layoutId="tab-indicator"
+        className="absolute bottom-1 w-1 h-1 bg-brand rounded-full"
       />
     )}
   </button>
@@ -1530,6 +1531,7 @@ export default function App() {
               onAdd={() => setShowAddModal('order')}
               isInstallable={isInstallable}
               onInstall={handleInstallClick}
+              onNavigate={(tab: string) => setCurrentTab(tab as any)}
             />
           )}
           {currentTab === 'entrega' && <EntregaView pedidos={pedidos} customers={customers} onSelectPerson={(id) => setSelectedPersonId(id)} onRefresh={loadData} key="entrega" />}
@@ -1582,12 +1584,12 @@ export default function App() {
 
       {/* Bottom Nav */}
       <nav className="glass-nav fixed bottom-0 w-full max-w-[480px] px-2 py-1 flex justify-between items-center z-50 gap-1 overflow-x-auto">
-        <TabButton active={currentTab === 'home'} icon={Home} onClick={() => setCurrentTab('home')} />
-        <TabButton active={currentTab === 'entrega'} icon={Package} onClick={() => setCurrentTab('entrega')} />
-        <TabButton active={currentTab === 'payments'} icon={Wallet} onClick={() => setCurrentTab('payments')} />
-        <TabButton active={currentTab === 'finance'} icon={TrendingUp} onClick={() => setCurrentTab('finance')} />
-        <TabButton active={currentTab === 'tienda'} icon={Store} onClick={() => setCurrentTab('tienda')} />
-        <TabButton active={currentTab === 'settings'} icon={Settings} onClick={() => setCurrentTab('settings')} />
+        <TabButton active={currentTab === 'home'} icon={Home} label="Cobros" onClick={() => setCurrentTab('home')} />
+        <TabButton active={currentTab === 'entrega'} icon={Package} label="Etiquetas" onClick={() => setCurrentTab('entrega')} />
+        <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => setCurrentTab('payments')} />
+        <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Finanzas" onClick={() => setCurrentTab('finance')} />
+        <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => setCurrentTab('tienda')} />
+        <TabButton active={currentTab === 'settings'} icon={Settings} label="Config" onClick={() => setCurrentTab('settings')} />
       </nav>
 
       {/* Add Modals */}
@@ -1805,7 +1807,7 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
 
 // --- Views ---
 
-function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall }: any) {
+function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate }: any) {
   const today = new Date();
   const todayStr = today.toDateString();
 
@@ -1895,6 +1897,43 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
           <p className="text-2xl font-black text-gray-700">{pedidosTotal}</p>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Total</p>
         </div>
+      </div>
+
+      {/* Acceso rápido */}
+      <div className="grid grid-cols-3 gap-3">
+        <button
+          onClick={() => onNavigate?.('entrega')}
+          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
+          style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+        >
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
+            <Package className="w-4 h-4" style={{ color: '#ff2d78' }} />
+          </div>
+          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Etiquetas</p>
+          <p className="text-[9px] text-gray-400">{pedidosListos} listo{pedidosListos !== 1 ? 's' : ''}</p>
+        </button>
+        <button
+          onClick={() => onNavigate?.('payments')}
+          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
+          style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+        >
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
+            <Wallet className="w-4 h-4" style={{ color: '#ff2d78' }} />
+          </div>
+          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Pagos</p>
+          <p className="text-[9px] text-gray-400">Historial</p>
+        </button>
+        <button
+          onClick={() => onNavigate?.('tienda')}
+          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
+          style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+        >
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
+            <Store className="w-4 h-4" style={{ color: '#ff2d78' }} />
+          </div>
+          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Panel Tienda</p>
+          <p className="text-[9px] text-gray-400">Pedidos web</p>
+        </button>
       </div>
 
       {/* Próximo live */}
@@ -2023,7 +2062,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       {/* Header */}
       <div className="flex items-center justify-between px-1">
         <div>
-          <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Entrega</h2>
+          <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Etiquetas</h2>
           <p className="text-[11px] text-gray-400 font-medium mt-0.5">
             {activos.length} pedido{activos.length !== 1 ? 's' : ''} activo{activos.length !== 1 ? 's' : ''}
           </p>
@@ -2055,7 +2094,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               : { background: '#f3f4f6', color: '#6b7280' }}
           >
             <div className="w-2 h-2 rounded-full" style={{ background: activeSubTab === 'pedidos' ? 'rgba(255,255,255,0.6)' : '#ff2d78' }} />
-            <span className="text-[10px] font-bold">Pedidos</span>
+            <span className="text-[10px] font-bold">Comprobantes Live</span>
           </button>
         </div>
       </div>
