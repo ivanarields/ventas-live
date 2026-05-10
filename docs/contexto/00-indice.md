@@ -14,8 +14,8 @@
 | Archivo | Qué cubre |
 |---|---|
 | `00-indice.md` | Este archivo — mapa general |
-| `01-app-principal.md` | Sistema principal: 4 pantallas, flujo del operador |
-| `02-sistema-pagos.md` | Pagos automáticos (MacroDroid), comprobantes WhatsApp, casilleros |
+| `01-app-principal.md` | Sistema principal: 6 pestañas, flujo del operador, etiquetas |
+| `02-sistema-pagos.md` | Pagos automáticos (MacroDroid), comprobantes WhatsApp, etiquetas |
 | `03-whatsapp-bridge.md` | Bridge de WhatsApp (en DigitalOcean), cola de mensajes |
 | `04-tienda-online.md` | Tienda web (`/tienda`), checkout, pedidos web, integración con sistema principal |
 | `05-estado-pendientes.md` | Qué está hecho hoy, qué falta, últimos cambios |
@@ -26,7 +26,7 @@
 
 | Nombre | ID interno | Para qué |
 |---|---|---|
-| **ChehiAppAbril** | `vhczofpmxzbqzboysoca` | Sistema principal: pagos, clientes, pedidos, casilleros, cola WhatsApp |
+| **ChehiAppAbril** | `vhczofpmxzbqzboysoca` | Sistema principal: pagos, clientes, pedidos, etiquetas, cola WhatsApp |
 | **TiendaOnline** | `thgbfurscfjcmgokyyif` | Productos web, pedidos web (`store_orders`), perfiles de clienta web |
 | **PanelPedido** | `vwaocoaeenavxkcshyuf` | Chats WhatsApp (`panel_mensajes`), fotos reales en bucket `whatsapp-media` |
 

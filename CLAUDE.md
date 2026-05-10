@@ -14,7 +14,7 @@ App de Leidy: PWA para gestionar consignación de ropa + tienda online + pagos a
 
 1. **Leé primero `docs/contexto/`** entero. Ahí está la verdad sobre cómo funciona la app. Los archivos son:
    - `00-indice.md` — mapa general
-   - `01-app-principal.md` — sistema principal (pagos, casilleros, Mesa de Preparación)
+   - `01-app-principal.md` — sistema principal (6 pestañas, etiquetas, pantalla de conteo)
    - `02-sistema-pagos.md` — flujo de pagos y MacroDroid
    - `03-whatsapp-bridge.md` — bridge de WhatsApp
    - `04-tienda-online.md` — tienda web
@@ -31,7 +31,7 @@ App de Leidy: PWA para gestionar consignación de ropa + tienda online + pagos a
 **Antes de cada `git commit`, actualizá automáticamente y SIN PREGUNTAR el archivo de `docs/contexto/` que corresponda al área tocada.**
 
 - ¿Tocaste la tienda? Actualizá `04-tienda-online.md`.
-- ¿Tocaste pagos / casilleros / Mesa de Preparación? Actualizá `01-app-principal.md` o `02-sistema-pagos.md`.
+- ¿Tocaste pagos / etiquetas / pantalla de conteo? Actualizá `01-app-principal.md` o `02-sistema-pagos.md`.
 - ¿Tocaste el bridge? Actualizá `03-whatsapp-bridge.md`.
 - ¿Pasó algo nuevo importante? Actualizá `05-estado-pendientes.md` con la fecha.
 
@@ -41,7 +41,7 @@ El usuario NO va a recordarte hacerlo. Es tu obligación.
 
 ## Bases de datos
 
-- **ChehiAppAbril** (`vhczofpmxzbqzboysoca`): sistema principal — pagos, clientes, pedidos, casilleros, cola WhatsApp.
+- **ChehiAppAbril** (`vhczofpmxzbqzboysoca`): sistema principal — pagos, clientes, pedidos, etiquetas, cola WhatsApp.
 - **TiendaOnline** (`thgbfurscfjcmgokyyif`): productos web, pedidos web, perfiles tienda.
 - **PanelPedido** (`vwaocoaeenavxkcshyuf`): chats WhatsApp, fotos reales en bucket `whatsapp-media`.
 
