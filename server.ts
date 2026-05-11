@@ -2515,14 +2515,42 @@ const PORT = Number(process.env.PORT || 3001);
           .eq('id', result.order.id);
 
         // Si ya había notificación bancaria → verificar con cuadrangulación completa
-        const { data: bankEvent } = await supabaseServer
+        const { data: bankEvent } = await supabaseStore
           .from('payment_events')
           .select('id')
           .eq('matched_order_id', result.order.id)
           .eq('processed', true)
-          .single();
+          .maybeSingle();
 
-        if (bankEvent) {
+        let mainBankPago: any = null;
+        if (!bankEvent) {
+          const orderCreatedAt = result.order.created_at
+            ? new Date(new Date(result.order.created_at).getTime() - 2 * 60 * 1000).toISOString()
+            : new Date(Date.now() - 30 * 60 * 1000).toISOString();
+          const { data: pagos } = await supabaseServer
+            .from('pagos')
+            .select('id,nombre,pago,created_at,date,method,status')
+            .eq('pago', Number(result.order.total))
+            .gte('created_at', orderCreatedAt)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          mainBankPago = pagos?.[0] ?? null;
+        }
+
+        if (bankEvent || mainBankPago) {
+          if (mainBankPago && !bankEvent) {
+            await supabaseStore.from('payment_events').insert({
+              source: 'wa_proof_main_bank',
+              raw_text: messageText ?? '',
+              amount: Number(result.order.total),
+              sender_name: mainBankPago.nombre ?? '',
+              sender_wa: fromWa.replace(/\D/g, ''),
+              processed: true,
+              match_confidence: 'maxima',
+              hash: `wa-proof:${result.order.id}:${mainBankPago.id}`,
+              matched_order_id: result.order.id,
+            } as any);
+          }
           await confirmStoreOrder(result.order.id, `wa+bank:${fromWa}:maxima`);
         } else {
           // WA llegó primero que el banco → marcar como esperando banco
