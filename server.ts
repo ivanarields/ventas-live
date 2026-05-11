@@ -1190,7 +1190,7 @@ const PORT = Number(process.env.PORT || 3001);
           // 3. Construir link al perfil de tienda
           const storeBase = process.env.STORE_PUBLIC_URL ||
             `${req.protocol}://${req.get('host')}`;
-          const profileLink = `${storeBase}/tienda#profile`;
+          const profileLink = `${storeBase}/tienda#profile/orders`;
 
           // 4. Mensaje personalizado (Live / pedidos manuales)
           const pedidoLabel = data.label ? ` #${data.label}` : '';
@@ -1984,7 +1984,7 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
-      const RESERVATION_MINUTES = 1;
+      const RESERVATION_MINUTES = 1.5;
       const { data, error } = await supabaseStore
         .from("store_orders")
         .insert({
@@ -2251,7 +2251,7 @@ const PORT = Number(process.env.PORT || 3001);
     try {
       const productIds = (data.items ?? []).map((i: any) => i.productId).filter(Boolean);
       if (productIds.length > 0) {
-        await supabaseStore.from('products').update({ stock: 0 }).in('id', productIds);
+        await supabaseStore.from('products').update({ stock: 0, available: false }).in('id', productIds);
       }
     } catch (e) {
       console.error('[store-match] Error ocultando productos:', e);
@@ -2368,7 +2368,7 @@ const PORT = Number(process.env.PORT || 3001);
     if (data.customer_wa) {
       try {
         const storeBase = process.env.STORE_PUBLIC_URL || 'https://leidydiaz.live';
-        const profileLink = `${storeBase}/tienda#profile`;
+        const profileLink = `${storeBase}/tienda#profile/orders`;
         const nameForGreeting = (finalName || data.customer_name || '').trim();
         const firstName = nameForGreeting.split(' ')[0] || '';
         const greeting = firstName ? `¡Hola ${firstName}! ` : '¡Hola! ';
@@ -2474,11 +2474,16 @@ const PORT = Number(process.env.PORT || 3001);
         order_ref: orderRef,
       };
 
-      // Intentar cruzar con pedido (ventana 10 min para WA)
+      if (!orderRef) {
+        await supabaseStore.from('wa_messages').insert(waEvent as any);
+        return res.json({ ok: true, matched: false, orderId: null, reason: 'missing_order_code' });
+      }
+
+      // Intentar cruzar con pedido solo cuando el comprobante trae codigo
       const result = await tryMatchOrder({
         senderPhone: fromWa,
-        orderRef: orderRef ?? undefined,
-        windowMinutes: 10, // ventana más amplia para WA
+        orderRef,
+        windowMinutes: 10,
       });
 
       if (result) {

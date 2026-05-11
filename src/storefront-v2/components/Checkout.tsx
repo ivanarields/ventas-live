@@ -7,7 +7,7 @@ import { storeFavoritesApi } from '../services/storeFavoritesApi';
 
 const BRAND = '#ff2d78';
 const WA_NUMBER = (import.meta.env.VITE_STORE_WA_NUMBER as string | undefined) ?? '59160003230';
-const PAYMENT_SECONDS = 60; // 1 minuto
+const PAYMENT_SECONDS = 90; // 1 minuto y medio
 
 interface Props {
   items: CartItem[];
@@ -127,7 +127,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
       });
       setElapsedSec(e => {
         const next = e + 1;
-        if (next >= 60 && !waNudge) setWaNudge(true);
+        if (next >= 90 && !waNudge) setWaNudge(true);
         return next;
       });
     }, 1000);

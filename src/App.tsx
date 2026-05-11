@@ -3147,19 +3147,10 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
     
     setIsSubmitting(true);
     try {
-      // Convert date string to ISO format correctly to avoid timezone offsets
-      const now = new Date();
+      // Guardar siempre el dia exacto elegido en el formulario
       const [year, month, day] = date.split('-').map(Number);
       const selectedD = new Date(year, month - 1, day, 12, 0, 0);
-      let finalDateStr = date;
-      
-      if (selectedD.toDateString() === now.toDateString()) {
-        // If it's today, we can use the current time for better sorting
-        finalDateStr = now.toISOString();
-      } else {
-        // For other days, we use noon to ensure it stays on the same day across timezones
-        finalDateStr = selectedD.toISOString();
-      }
+      const finalDateStr = selectedD.toISOString();
 
       // Get or create customer profile
       const customerId = selectedCustomerId || await getOrCreateCustomer(name, phone);

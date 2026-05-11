@@ -185,7 +185,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         body: JSON.stringify({ imageUrls: form.images }),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ ok: false, error: 'Respuesta inválida del servidor' }));
 
       if (!res.ok || !json.ok) {
         setAiError(json.error || 'No se pudo analizar las imágenes.');

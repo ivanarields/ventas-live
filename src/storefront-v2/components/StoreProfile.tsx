@@ -39,7 +39,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [favorites, setFavorites] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>(initialTab ?? 'saved');
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'orders');
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
   const [pickupDates, setPickupDates] = useState<Array<{ date: string; label: string; slots: string[] }>>([]);
@@ -181,10 +181,10 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
   const nextOrder = activeOrders[0];
 
   const tabs: Array<{ id: Tab; label: string }> = [
-    { id: 'saved', label: 'Favoritos' },
     { id: 'orders', label: 'Pedidos' },
-    { id: 'entrega', label: 'Entrega' },
+    { id: 'saved', label: 'Favoritos' },
     { id: 'confirmar', label: 'Confirmar' },
+    { id: 'entrega', label: 'Entrega' },
     { id: 'settings', label: 'Ajustes' },
   ];
 

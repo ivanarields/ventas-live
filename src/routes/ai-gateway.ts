@@ -458,10 +458,19 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       const result = await callAi({ userId, feature: 'product_vision', prompt: buildProductCatalogPrompt(), imageParts, maxTokens: 400, temperature: 0.2, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta de la IA' });
 
-      const m = result.text.match(/\{[\s\S]*\}/);
-      if (!m) return res.status(422).json({ ok: false, error: 'Respuesta no parseable' });
-      const parsed = JSON.parse(m[0]);
-      res.json({ ok: true, data: parsed });
+      const cleanText = String(result.text ?? '').trim().replace(/```json|```/g, '');
+      const firstBrace = cleanText.indexOf('{');
+      const lastBrace = cleanText.lastIndexOf('}');
+      if (firstBrace < 0 || lastBrace <= firstBrace) {
+        return res.status(422).json({ ok: false, error: 'Respuesta no parseable' });
+      }
+
+      try {
+        const parsed = JSON.parse(cleanText.slice(firstBrace, lastBrace + 1));
+        res.json({ ok: true, data: parsed });
+      } catch (parseErr: any) {
+        return res.status(422).json({ ok: false, error: parseErr?.message || 'Respuesta no parseable' });
+      }
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message });
     }

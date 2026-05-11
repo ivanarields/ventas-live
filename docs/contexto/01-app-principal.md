@@ -1,6 +1,6 @@
 # App Principal — Ventas Live
 
-Última revisión: 2026-05-10. Verificado contra el código real (`src/App.tsx`).
+Última revisión: 2026-05-11. Verificado contra el código real (`src/App.tsx`).
 
 ---
 
@@ -69,6 +69,9 @@ Lista de pagos del día seleccionado, agrupados por cliente.
 - Ojo — oculta clientes que ya retiraron
 - `#` — muestra solo clientes con número de WhatsApp
 - Botón "Live" (color morado) — procesa todas las conversaciones WA del día con IA
+
+**Pagos manuales:**
+Al crear un pago manual, la fecha elegida en el formulario se guarda exactamente como fue seleccionada (sin mezclarla con "hoy"), asegurando que cada pago aparezca en el día correcto.
 
 ---
 

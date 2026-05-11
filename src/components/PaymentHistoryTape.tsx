@@ -173,6 +173,11 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
                 <span style={{ fontSize: '9px', color: isActive ? mutedColor : '#cbd5e1', marginTop: '4px', fontWeight: 700, textTransform: 'uppercase' }}>
                   {formattedTime}
                 </span>
+                {payment.method === 'Tienda Online' && (
+                  <span style={{ marginTop: '4px', fontSize: '8px', fontWeight: 900, color: '#16a34a', background: '#dcfce7', padding: '2px 6px', borderRadius: '999px', textTransform: 'uppercase' }}>
+                    WEB
+                  </span>
+                )}
                 <span
                   aria-label={`Pago ${label}`}
                   title={label}

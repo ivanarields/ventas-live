@@ -1,6 +1,6 @@
 # Tienda Online - Estado Actual
 
-Actualizado: 2026-05-10
+Actualizado: 2026-05-11 (noche - IA robusta)
 
 ## Qué Es
 
@@ -97,7 +97,7 @@ Reglas:
 
 ```txt
 stock = 0 muestra producto vendido.
-available = false oculta el producto.
+available = false oculta el producto y bloquea clicks.
 ```
 
 ### `store_customers`
@@ -166,7 +166,7 @@ Estados usados:
 Reserva actual:
 
 ```txt
-10 minutos
+90 segundos (1.5 minutos)
 ```
 
 ### `store_customer_media`
@@ -364,7 +364,7 @@ https://ventas-live.vercel.app/tienda#producto/5
 4. Va a checkout
 5. Se identifica con WhatsApp + PIN
 6. Elige entrega/retiro, fecha y horario
-7. Se crea store_orders con reserva de 60 segundos (1 minuto)
+7. Se crea store_orders con reserva de 90 segundos
 8. Paga y se verifica el pago
 9. El pedido queda listo para preparación/seguimiento
 ```
@@ -522,7 +522,7 @@ Integración actual al confirmar un pedido de tienda:
 
 ```txt
 store_orders.status = paid
-products.stock = 0 para productos vendidos
+products.stock = 0, available = false para productos vendidos
 customers en ChehiAppAbril se crea/actualiza por WhatsApp si corresponde
 pedidos en ChehiAppAbril se crea con status procesar, label WEB y source WEB
 pagos en ChehiAppAbril se crea con method Tienda Online
@@ -544,6 +544,10 @@ Links de fotos viven en TiendaOnline.
 Fotos reales viven en PanelPedido.
 ```
 
+### Etiqueta WEB en Pagos
+
+Los pagos originados desde la tienda online muestran una etiqueta `WEB` en el historial de pagos de la app principal, permitiendo distinguir visualmente las compras online de los pagos presenciales.
+
 ## Estado Actual
 
 Funcionando:
@@ -552,16 +556,14 @@ Funcionando:
 Catálogo público
 Detalle de producto por link
 Carrito
-Checkout con entrega/retiro
-Reserva de 10 minutos
-Perfil de clienta
-Centro de clientas
-Confirmación de prendas por token
-Admin tienda con productos, pedidos, confirmaciones y configuración
-Referencias de fotos por clienta
-Deploy automático GitHub -> Vercel
-Migración TiendaOnline aplicada
-Bucket store_images creado
+Checkout con pago por QR de 90 segundos
+Reserva de 90 segundos
+Expiración automática de pedidos sin pago
+Productos vendidos no comprables (stock=0, available=false)
+Etiqueta WEB en historial de pagos
+Perfil de clienta con tab inicial en Pedidos
+Links de mensajes automáticos a perfil/orders
+Rellenar con IA robusto (limpia JSON de basura)
 ```
 
 Pendiente recomendado:

@@ -268,7 +268,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
               return (
                 <article key={p.id} className="mb-2.5 break-inside-avoid">
                   <div
-                    onClick={() => !reservedMap[String(p.id)] && onProductSelect(p)}
+                    onClick={() => p.stock > 0 && !reservedMap[String(p.id)] && onProductSelect(p)}
                     className={`relative ${shape} rounded-[28px] bg-gray-100 overflow-hidden cursor-pointer active:scale-[0.98] transition-transform`}
                     style={{ boxShadow: darkMode ? 'none' : '0 2px 10px rgba(0,0,0,0.06)' }}
                   >
