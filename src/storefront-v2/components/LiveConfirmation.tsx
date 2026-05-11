@@ -103,7 +103,7 @@ export function LiveConfirmation({ onBack }: Props) {
           <div className="w-20 h-20 bg-pink-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
             <span className="text-4xl">👗</span>
           </div>
-          <h1 className="text-2xl font-black text-gray-900 mb-2">Confirmar Live</h1>
+          <h1 className="text-2xl font-black text-gray-800 mb-2">Confirmar Live</h1>
           <p className="text-gray-400 text-sm">Ingresa con tu PIN para ver tus prendas del TikTok Live.</p>
         </div>
 
@@ -145,7 +145,7 @@ export function LiveConfirmation({ onBack }: Props) {
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <h2 className="text-2xl font-black text-gray-900 mb-2">¡Prendas Confirmadas!</h2>
+        <h2 className="text-2xl font-black text-gray-800 mb-2">¡Prendas Confirmadas!</h2>
         <p className="text-gray-500 text-sm mb-8">
           Hemos recibido tu selección. El operador procesará tu pedido en breve. ✨
         </p>
@@ -168,7 +168,7 @@ export function LiveConfirmation({ onBack }: Props) {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
           </button>
           <div>
-            <h2 className="text-[15px] font-black text-gray-900">Mis prendas (Live)</h2>
+            <h2 className="text-[15px] font-black text-gray-800">Mis prendas (Live)</h2>
             <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">TikTok Live</p>
           </div>
         </div>

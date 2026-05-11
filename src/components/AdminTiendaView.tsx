@@ -115,6 +115,8 @@ const EMPTY_FORM = {
 
 export function AdminTiendaView({ userId, authToken }: { userId: string; authToken: string }) {
   const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'clientes' | 'confirmaciones' | 'config'>('productos');
+  const [pickupDates, setPickupDates] = useState<Array<{ date: string; label: string; slots: string[] }>>([]);
+  const [pickupSaving, setPickupSaving] = useState(false);
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [selectionRequests, setSelectionRequests] = useState<any[]>([]);
@@ -134,7 +136,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [saveError, setSaveError] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [orderFilter, setOrderFilter] = useState<'all' | 'pending' | 'paid' | 'cancelled'>('all');
-  const [verifyingId, setVerifyingId] = useState<number | null>(null);
   const [storeProfiles, setStoreProfiles] = useState<any[]>([]);
   const formRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -270,7 +271,28 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         setSettings(data);
         setStoreChips(parseStoreChips(data.store_chips));
       }
+      try {
+        const pdRes = await fetch('/api/store/pickup-dates');
+        if (pdRes.ok) {
+          const pdData = await pdRes.json();
+          setPickupDates(pdData.dates ?? []);
+        }
+      } catch {}
     } catch (e) { console.error(e); }
+  };
+
+  const savePickupDates = async (dates: typeof pickupDates) => {
+    setPickupSaving(true);
+    try {
+      await fetch('/api/store/pickup-dates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dates }),
+      });
+      setPickupDates(dates);
+    } finally {
+      setPickupSaving(false);
+    }
   };
 
   const saveSetting = async (key: string, value: string) => {
@@ -320,19 +342,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     } finally {
       setLoading(false);
     }
-  };
-
-  const verifyOrderManual = async (orderId: number) => {
-    setVerifyingId(orderId);
-    try {
-      const res = await fetch(`/api/store/verify-order/${orderId}`, {
-        method: 'POST',
-        headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` }
-      });
-      if (res.ok) await loadOrders(true);
-      else { const e = await res.json(); alert(e.error || 'Error al verificar'); }
-    } catch (e) { console.error(e); }
-    finally { setVerifyingId(null); }
   };
 
   useEffect(() => { loadAll(); }, []);
@@ -879,13 +888,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                       {/* Acciones según estado */}
                       {order.status === 'pending' && (
                         <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            onClick={() => verifyOrderManual(order.id)}
-                            disabled={verifyingId === order.id}
-                            className="col-span-2 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[12px] text-white shadow-md disabled:opacity-60"
-                            style={{ background: '#10b981' }}>
-                            {verifyingId === order.id ? '...' : '✅ Verificar Pago Manualmente'}
-                          </button>
                           <button onClick={() => updateOrder(order.id, { status: 'confirmed', hideProducts: true })}
                             className="flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] text-white" style={{ background: BRAND }}>
                             <Check size={12} /> Vendido + Ocultar
@@ -893,6 +895,16 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                           <button onClick={() => updateOrder(order.id, { status: 'cancelled' })}
                             className="flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] bg-red-50 text-red-600">
                             <X size={12} /> Cancelar
+                          </button>
+                          <button
+                            onClick={() => {
+                              const storeLink = `https://leidydiaz.live/tienda#profile/confirmar`;
+                              const msg = encodeURIComponent(`Hola! Por favor revisa las prendas de tu pedido #${order.id} y confirma si todo está correcto: ${storeLink}\n\n(Necesitarás tu PIN de la tienda)`);
+                              window.open(`https://wa.me/591${order.customer_wa}?text=${msg}`, '_blank');
+                            }}
+                            className="col-span-2 flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] text-white"
+                            style={{ background: '#f59e0b' }}>
+                            📋 Pedir confirmación a la clienta
                           </button>
                         </div>
                       )}
@@ -1097,7 +1109,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                       });
                       setStoreChips(next);
                     }}
-                    onBlur={() => saveStoreChips(storeChips)}
                     className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] font-bold outline-none"
                   />
                   <select
@@ -1169,12 +1180,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
             </div>
             <div>
-              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">WhatsApp</label>
-              <input type="text" value={settings.store_phone || ''}
-                onChange={e => saveSetting('store_phone', e.target.value)}
-                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
-            </div>
-            <div>
               <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">QR de pago</label>
               <input type="text" value={settings.payment_qr_url || '/qr-yape.jpg'}
                 onChange={e => saveSetting('payment_qr_url', e.target.value)}
@@ -1196,18 +1201,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               <p className="mt-1 text-[10px] text-gray-400 font-medium">Puedes subir una imagen, pegar una URL o dejar /qr-yape.jpg.</p>
             </div>
             <div>
-              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Proximo Live (fecha)</label>
-              <input type="date" value={settings.next_live_date || ''}
-                onChange={e => saveSetting('next_live_date', e.target.value)}
-                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
-            </div>
-            <div>
-              <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Proximo Live (hora)</label>
-              <input type="time" value={settings.next_live_time || ''}
-                onChange={e => saveSetting('next_live_time', e.target.value)}
-                className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
-            </div>
-            <div>
               <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Direccion</label>
               <textarea value={settings.address || ''}
                 onChange={e => saveSetting('address', e.target.value)}
@@ -1221,6 +1214,68 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 rows={2}
                 className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400 resize-none" />
             </div>
+          </div>
+
+          {/* ─── Fechas de retiro disponibles ─── */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div>
+              <p className="text-sm font-black text-gray-800">Fechas de retiro disponibles</p>
+              <p className="text-[11px] text-gray-400 font-medium">Las clientas verán estas fechas en su perfil para elegir cuándo retirar.</p>
+            </div>
+
+            {pickupDates.length === 0 && (
+              <p className="text-[12px] text-gray-400 font-bold py-2 text-center">Sin fechas configuradas</p>
+            )}
+
+            {pickupDates.map((pd, idx) => (
+              <div key={idx} className="rounded-xl border border-gray-100 bg-gray-50 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={pd.date}
+                    onChange={e => {
+                      const d = new Date(e.target.value + 'T12:00:00');
+                      const label = d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+                      const next = pickupDates.map((x, i) => i === idx ? { ...x, date: e.target.value, label } : x);
+                      setPickupDates(next);
+                    }}
+                    className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] font-bold outline-none"
+                  />
+                  <button
+                    onClick={() => savePickupDates(pickupDates.filter((_, i) => i !== idx))}
+                    className="w-8 h-8 rounded-lg bg-red-50 text-red-500 text-[15px] font-black flex items-center justify-center"
+                  >×</button>
+                </div>
+                <div className="flex gap-2">
+                  {['Mañana', 'Tarde', 'Noche'].map(slot => (
+                    <button
+                      key={slot}
+                      onClick={() => {
+                        const slots = pd.slots.includes(slot) ? pd.slots.filter(s => s !== slot) : [...pd.slots, slot];
+                        const next = pickupDates.map((x, i) => i === idx ? { ...x, slots } : x);
+                        setPickupDates(next);
+                      }}
+                      className="flex-1 py-1.5 rounded-lg text-[11px] font-black transition-colors"
+                      style={{
+                        background: pd.slots.includes(slot) ? '#ff2d78' : '#f3f4f6',
+                        color: pd.slots.includes(slot) ? 'white' : '#6b7280',
+                      }}
+                    >{slot}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={() => setPickupDates(prev => [...prev, { date: '', label: 'Nueva fecha', slots: ['Tarde'] }])}
+              className="w-full h-10 rounded-xl border border-dashed border-pink-200 bg-pink-50 text-[12px] font-black text-[#ff2d78]"
+            >+ Agregar fecha</button>
+
+            <button
+              onClick={() => savePickupDates(pickupDates)}
+              disabled={pickupSaving}
+              className="w-full h-10 rounded-xl bg-[#ff2d78] text-[12px] font-black text-white shadow-sm disabled:opacity-50"
+            >{pickupSaving ? 'Guardando...' : 'Guardar fechas'}</button>
           </div>
         </div>
       )}

@@ -37,6 +37,7 @@ type View = 'welcome' | 'gallery' | 'detail' | 'checkout' | 'cart' | 'profile' |
 export default function StorefrontApp() {
   const [view, setViewInternal]             = useState<View>('welcome');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [profileInitialTab, setProfileInitialTab] = useState<string | undefined>(undefined);
   const [selectedSize, setSelectedSize]     = useState<string>('');
   const [cart, setCart]                     = useState<CartItem[]>([]);
   const [darkMode, setDarkMode]             = useState(() => localStorage.getItem('store_theme') === 'dark');
@@ -98,7 +99,15 @@ export default function StorefrontApp() {
         return;
       }
 
+      if (hash.startsWith('profile/')) {
+        const subTab = hash.split('/')[1];
+        setProfileInitialTab(subTab);
+        setViewInternal('profile');
+        return;
+      }
+
       if (['gallery', 'checkout', 'profile', 'live-confirmation', 'selection', 'customer-center'].includes(hash)) {
+        setProfileInitialTab(undefined);
         setViewInternal(hash as View);
         return;
       }
@@ -262,6 +271,7 @@ export default function StorefrontApp() {
                 onLogout={() => setView('welcome')}
                 onProductSelect={handleProductSelect}
                 onOpenCart={() => setView('cart')}
+                initialTab={profileInitialTab as any}
               />
             )}
             {view === 'live-confirmation' && (
@@ -321,7 +331,7 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
               <Rocket className="w-4 h-4 text-white" />
             </div>
             <div>
-              <p className="text-[12px] font-black text-gray-900 leading-tight">Instalar app</p>
+              <p className="text-[12px] font-black text-gray-800 leading-tight">Instalar app</p>
               <p className="text-[9px] font-medium text-gray-500">Más rápida, sin barras</p>
             </div>
           </div>
@@ -334,33 +344,6 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
         </div>
       )}
 
-      {/* Botón de Perfil */}
-      <button 
-        onClick={onOpenProfile}
-        className="absolute top-6 right-6 z-30 p-2.5 bg-white/30 backdrop-blur-md rounded-full shadow-sm hover:scale-105 active:scale-95 transition-all text-white border border-white/50"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
-          <circle cx="12" cy="7" r="4"></circle>
-        </svg>
-      </button>
-      <button
-        onClick={onToggleDarkMode}
-        className="absolute top-6 left-6 z-30 h-10 w-16 rounded-full border border-white/60 bg-white/45 backdrop-blur-md shadow-sm flex items-center px-1 transition-all"
-        aria-label="Cambiar modo visual"
-        title="Cambiar modo visual"
-      >
-        <span
-          className="h-8 w-8 rounded-full bg-white shadow flex items-center justify-center text-[13px] font-black transition-transform"
-          style={{ transform: darkMode ? 'translateX(24px)' : 'translateX(0)', color: darkMode ? '#111827' : '#ff2d78' }}
-        >
-          {darkMode ? (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-          ) : (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8z"/></svg>
-          )}
-        </span>
-      </button>
       {/* Fondo rosado original — sin fotos de collage que consuman recursos */}
       <div className="absolute inset-0 bg-gradient-to-b from-[#fff0f5] via-white to-white z-0" />
       <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-[#ff2d78]/8 blur-3xl z-0" />
@@ -374,7 +357,7 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
             </svg>
           </div>
-          <h1 className="text-[32px] font-black text-gray-900 tracking-tight leading-none">
+          <h1 className="text-[32px] font-black text-gray-800 tracking-tight leading-none">
             Leidy
           </h1>
           <h1 className="text-[32px] font-black tracking-tight leading-none" style={{ color: '#ff2d78' }}>

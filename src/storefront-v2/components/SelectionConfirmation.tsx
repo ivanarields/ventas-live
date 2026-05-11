@@ -121,7 +121,7 @@ export default function SelectionConfirmation() {
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <h1 className="text-2xl font-black text-gray-900 mb-2">Listo!</h1>
+        <h1 className="text-2xl font-black text-gray-800 mb-2">Listo!</h1>
         <p className="text-gray-500 text-sm">{success}</p>
       </div>
     );
@@ -130,7 +130,7 @@ export default function SelectionConfirmation() {
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-md mx-auto px-5 py-8">
-        <h1 className="text-xl font-black text-gray-900 mb-1">Confirma tus prendas</h1>
+        <h1 className="text-xl font-black text-gray-800 mb-1">Confirma tus prendas</h1>
         <p className="text-sm text-gray-400 mb-6">
           {customerName ? `Hola ${customerName},` : 'Hola,'} selecciona las prendas que correspondan a tu pedido.
         </p>

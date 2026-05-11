@@ -196,7 +196,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6"/></svg>
           </button>
           <div className="flex-1 min-w-0">
-            <p className="font-black text-[18px] text-gray-900 leading-none">Catalogo</p>
+            <p className="font-black text-[18px] text-gray-800 leading-none">Catalogo</p>
             <p className="text-[11px] font-black" style={{ color: '#ff2d78' }}>Leidy American</p>
           </div>
           <button onClick={onToggleDarkMode} className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-gray-50 transition-colors" title="Modo visual">
@@ -341,7 +341,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
           <svg width="19" height="19" viewBox="0 0 24 24" fill={favoriteCount ? '#ff2d78' : 'none'} stroke={favoriteCount ? '#ff2d78' : 'currentColor'} strokeWidth="2.4"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           {favoriteCount > 0 && <span className="absolute top-1 right-1 min-w-4 h-4 rounded-full bg-[#ff2d78] text-white text-[9px] font-black flex items-center justify-center">{favoriteCount}</span>}
         </button>
-        <button onClick={onOpenProfile} className="w-10 h-10 rounded-xl flex items-center justify-center text-gray-400" aria-label="Perfil">
+        <button onClick={onOpenProfile} className="w-10 h-10 rounded-xl flex items-center justify-center text-gray-400" aria-label="Mi perfil">
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </button>
       </nav>
@@ -350,7 +350,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
         <div className="fixed inset-x-0 bottom-0 z-[60] mx-auto max-w-[430px] rounded-t-[26px] bg-white/88 backdrop-blur-xl border border-white/70 shadow-2xl p-4 pb-20">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="text-[16px] font-black text-gray-900">Favoritos</p>
+              <p className="text-[16px] font-black text-gray-800">Favoritos</p>
               <p className="text-[11px] text-gray-400 font-bold">{favoriteCount} prendas guardadas</p>
             </div>
             <button onClick={() => setFavoritesOpen(false)} className="w-9 h-9 rounded-full bg-gray-50 flex items-center justify-center" aria-label="Cerrar favoritos">
@@ -365,7 +365,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
                 <button key={product.id} onClick={() => { setFavoritesOpen(false); onProductSelect(product); }} className="w-full flex items-center gap-3 rounded-2xl bg-white/70 border border-white/70 p-2 text-left active:scale-[0.98] transition-transform">
                   <img src={storeImageUrl(product.images[0], 'thumb')} alt="" className="w-14 h-16 object-cover rounded-xl bg-gray-100 flex-shrink-0" loading="lazy" decoding="async" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-black text-gray-900 truncate">{product.title}</p>
+                    <p className="text-[13px] font-black text-gray-800 truncate">{product.title}</p>
                     <p className="text-[11px] text-gray-400 font-bold mt-0.5">{product.category}</p>
                     <p className="text-[14px] font-black text-[#ff2d78] mt-1">{product.price} Bs</p>
                   </div>

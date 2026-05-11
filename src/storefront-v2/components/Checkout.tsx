@@ -40,6 +40,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
   const [waNudge, setWaNudge] = useState(false); // true después de 60 seg sin verificar
   const [elapsedSec, setElapsedSec] = useState(0);
   const [paymentQrUrl, setPaymentQrUrl] = useState('/qr-yape.jpg');
+  const [waNumber, setWaNumber] = useState(WA_NUMBER);
 
   // ── Al montar: detectar sesión y decidir pantalla ─────────────
   useEffect(() => {
@@ -48,6 +49,8 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
       .then(settings => {
         const qr = String(settings?.payment_qr_url || '').trim();
         if (qr) setPaymentQrUrl(qr);
+        const num = String(settings?.official_wa_number || settings?.store_phone || '').replace(/\D/g, '');
+        if (num) setWaNumber(num);
       })
       .catch(() => {});
 
@@ -224,7 +227,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
     return (
       <div className="flex flex-col min-h-screen bg-white items-center justify-center p-6 text-center">
         <div className="text-5xl mb-4">🛍️</div>
-        <h2 className="text-xl font-black text-gray-900 mb-2">Tu carrito está vacío</h2>
+        <h2 className="text-xl font-black text-gray-800 mb-2">Tu carrito está vacío</h2>
         <p className="text-sm text-gray-400 mb-6">Agrega prendas para poder pagar.</p>
         <button onClick={onBack} className="px-8 py-3 rounded-2xl font-black text-white"
           style={{ background: BRAND }}>
@@ -243,7 +246,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <h1 className="text-2xl font-black text-gray-900 mb-2">¡Pago Verificado!</h1>
+        <h1 className="text-2xl font-black text-gray-800 mb-2">¡Pago Verificado!</h1>
         <p className="text-gray-500 text-sm mb-1">Pedido <strong>#{orderId}</strong> confirmado.</p>
         <p className="text-gray-400 text-xs mb-8">Tus prendas están apartadas. ✨</p>
         <button onClick={onOrderComplete}
@@ -267,7 +270,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           ? `Hola! Pague el pedido #${orderId} por ${total.toFixed(2)} Bs. Adjunto comprobante.`
           : `Hola! Pague mi pedido por ${total.toFixed(2)} Bs. Adjunto comprobante.`
       );
-      window.open(`https://wa.me/${WA_NUMBER}?text=${msg}`, '_blank');
+      window.open(`https://wa.me/${waNumber}?text=${msg}`, '_blank');
     };
 
     return (
@@ -295,7 +298,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           {/* Monto y Resumen */}
           <div className="mb-3">
             <p className="text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Total a Pagar</p>
-            <p className="font-black leading-none text-gray-900 tracking-tight" style={{ fontSize: 'clamp(38px, 9dvh, 52px)' }}>
+            <p className="font-black leading-none text-gray-800 tracking-tight" style={{ fontSize: 'clamp(38px, 9dvh, 52px)' }}>
               {total.toFixed(2)} <span className="text-[20px] text-[#ff2d78]">Bs</span>
             </p>
             <p className="text-[12px] text-gray-400 font-medium mt-2">
@@ -303,63 +306,84 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
             </p>
           </div>
 
-          <div
-            className="w-full mb-3 rounded-3xl border shadow-sm p-2.5 flex items-center gap-3 text-left"
-            style={{
-              background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.78)',
-              borderColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.75)',
-            }}
-          >
-            <div className="w-14 h-14 rounded-2xl overflow-hidden bg-[#fff0f5] flex-shrink-0">
-              {primaryImage ? (
-                <img src={storeImageUrl(primaryImage, 'thumb')} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-[#ff2d78] font-black">LA</div>
-              )}
+          {itemCount > 1 ? (
+            <div
+              className="w-full mb-3 rounded-3xl border shadow-sm p-3"
+              style={{
+                background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.78)',
+                borderColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.75)',
+              }}
+            >
+              <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-2">Resumen · {itemCount} prendas</p>
+              <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                {items.flatMap(item =>
+                  Array.from({ length: item.quantity }, (_, qi) => ({ img: item.product.images?.[0], title: item.product.title, key: `${item.product.id}-${qi}` }))
+                ).map(({ img, title, key }) => (
+                  <div key={key} className="flex-shrink-0 w-16 h-20 rounded-2xl overflow-hidden bg-[#fff0f5]">
+                    {img ? (
+                      <img src={storeImageUrl(img, 'thumb')} alt={title} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-[#ff2d78] font-black text-[10px]">LA</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] font-bold text-gray-500 mt-1.5">Retiro coordinado</p>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Resumen</p>
-              <p className="text-[13px] font-black text-gray-900 truncate">
-                {itemCount > 1
-                  ? `${primaryItem?.product.title ?? 'Pedido'} + ${itemCount - 1} prenda${itemCount - 1 === 1 ? '' : 's'}`
-                  : (primaryItem ? primaryItem.product.title : 'Pedido Leidy American')}
-              </p>
-              <p className="text-[11px] font-bold text-gray-500">
-                {itemCount > 1 ? `${itemCount} prendas en total` : '1 prenda'} - Retiro coordinado
-              </p>
+          ) : (
+            <div
+              className="w-full mb-3 rounded-3xl border shadow-sm p-2.5 flex items-center gap-3 text-left"
+              style={{
+                background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.78)',
+                borderColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.75)',
+              }}
+            >
+              <div className="w-14 h-14 rounded-2xl overflow-hidden bg-[#fff0f5] flex-shrink-0">
+                {primaryImage ? (
+                  <img src={storeImageUrl(primaryImage, 'thumb')} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[#ff2d78] font-black">LA</div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Resumen</p>
+                <p className="text-[13px] font-black text-gray-800 truncate">
+                  {primaryItem ? primaryItem.product.title : 'Pedido Leidy American'}
+                </p>
+                <p className="text-[11px] font-bold text-gray-500">1 prenda - Retiro coordinado</p>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* QR */}
           <div className="relative mb-3">
-            <div className="rounded-3xl overflow-hidden bg-white shadow-[0_15px_40px_rgb(255,45,120,0.15)] border-4 border-white mx-auto" style={{ width: 'clamp(154px, 29dvh, 196px)', height: 'clamp(154px, 29dvh, 196px)' }}>
+            <div className="rounded-3xl overflow-hidden bg-white shadow-[0_15px_40px_rgb(255,45,120,0.15)] border-4 border-white mx-auto" style={{ width: 'clamp(200px, 40dvh, 260px)', height: 'clamp(200px, 40dvh, 260px)' }}>
               <img src={paymentQrUrl} alt="QR" className="w-full h-full object-cover mix-blend-multiply" />
             </div>
           </div>
 
           {/* Beneficiario */}
           <div className="mb-4">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Beneficiario (Yape)</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Beneficiario</p>
             <p className="text-[14px] font-black text-gray-800">Leidy Candy Diaz Sanchez</p>
           </div>
 
           {/* Acciones */}
-          <div className="w-full space-y-2">
+          <div className="w-full">
             {!expired ? (
-              <>
+              <div className="flex gap-2.5 justify-center">
                 <button
                   onClick={() => {
                     const link = document.createElement('a');
-                    link.href = paymentQrUrl;
-                    link.download = 'QR-Leidy-Candy.jpg';
+                    link.href = '/api/store/download-qr';
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
                   }}
-                  className="w-full h-12 rounded-2xl font-black text-white text-[14px] shadow-[0_8px_20px_rgb(255,45,120,0.3)] active:scale-95 transition-all flex items-center justify-center gap-2"
+                  className="h-11 px-5 rounded-2xl font-black text-white text-[13px] shadow-[0_6px_16px_rgb(255,45,120,0.28)] active:scale-95 transition-all flex items-center gap-1.5"
                   style={{ background: BRAND }}
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                     <polyline points="7 10 12 15 17 10"></polyline>
                     <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -369,12 +393,12 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
                 <button
                   onClick={sendWA}
-                  className="w-full h-12 rounded-2xl font-black text-[13px] text-gray-700 bg-white border border-gray-100 shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2"
+                  className="h-11 px-5 rounded-2xl font-black text-[13px] text-gray-700 bg-white border border-gray-100 shadow-sm active:scale-95 transition-all flex items-center gap-1.5"
                 >
-                  <span className="text-lg">💬</span>
-                  Ya pagué, enviar comprobante
+                  <span>💬</span>
+                  Ya pagué
                 </button>
-              </>
+              </div>
             ) : (
               <button onClick={onBack} className="w-full py-4 bg-gray-100 text-gray-500 font-black rounded-2xl active:scale-95 transition-all">
                 Volver al catálogo
@@ -397,7 +421,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           </svg>
         </button>
         <div>
-          <h2 className="text-[17px] font-black text-gray-900">Confirmar pedido</h2>
+          <h2 className="text-[17px] font-black text-gray-800">Confirmar pedido</h2>
           <p className="text-[11px] text-gray-400">Numero y PIN para apartar</p>
         </div>
       </div>

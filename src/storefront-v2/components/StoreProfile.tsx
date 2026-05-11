@@ -13,6 +13,7 @@ interface StoreOrder {
   payment_verified_at: string | null;
   created_at: string;
   customer_wa: string;
+  customer_selection: { confirmed?: boolean; confirmed_at?: string; confirmed_by?: string } | null;
 }
 
 interface Props {
@@ -20,9 +21,10 @@ interface Props {
   onLogout: () => void;
   onProductSelect?: (product: Product) => void;
   onOpenCart?: () => void;
+  initialTab?: Tab;
 }
 
-type Tab = 'saved' | 'orders' | 'delivery' | 'confirm' | 'settings';
+type Tab = 'saved' | 'orders' | 'entrega' | 'confirmar' | 'settings';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Esperando pago',
@@ -32,17 +34,25 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 };
 
-export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: Props) {
+export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, initialTab }: Props) {
   const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [favorites, setFavorites] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('saved');
-  const [deliveryDate, setDeliveryDate] = useState('');
-  const [deliveryNote, setDeliveryNote] = useState('');
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'saved');
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmDone, setConfirmDone] = useState(false);
+  const [pickupDates, setPickupDates] = useState<Array<{ date: string; label: string; slots: string[] }>>([]);
+  const [selectedPickup, setSelectedPickup] = useState<{ date: string; slot: string } | null>(null);
+  const [wantsOtherDate, setWantsOtherDate] = useState(false);
+  const [customDate, setCustomDate] = useState('');
+  const [customTime, setCustomTime] = useState('');
+  const [deliverySaving, setDeliverySaving] = useState(false);
+  const [deliverySaved, setDeliverySaved] = useState(false);
   const [phoneInput, setPhoneInput] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState('');
+  const [storePhone, setStorePhone] = useState('59160003230');
 
   useEffect(() => {
     const session = storeAuth.getCurrentUserSync();
@@ -54,6 +64,14 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
   const loadProfile = async (token: string) => {
     setLoading(true);
     try {
+      try {
+        const phoneRes = await fetch('/api/store/settings');
+        if (phoneRes.ok) {
+          const phoneData = await phoneRes.json();
+          const num = String(phoneData?.official_wa_number || phoneData?.store_phone || '').replace(/\D/g, '');
+          if (num) setStorePhone(num);
+        }
+      } catch { /* no crítico */ }
       await storeFavoritesApi.syncLocal();
       const res = await fetch('/api/store-auth/me', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
@@ -61,6 +79,11 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
         setOrders(data.orders ?? []);
         setFavorites(data.favorites ?? []);
         storeFavoritesApi.saveLocal(Object.fromEntries((data.favorites ?? []).map((p: Product) => [String(p.id), p])));
+      }
+      const pdRes = await fetch('/api/store/pickup-dates');
+      if (pdRes.ok) {
+        const pdData = await pdRes.json();
+        setPickupDates(pdData.dates ?? []);
       }
     } finally {
       setLoading(false);
@@ -117,6 +140,42 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
     }
   };
 
+  const handleSaveDelivery = async () => {
+    const session = storeAuth.getCurrentUserSync();
+    if (!session || !nextOrder) return;
+    if (!selectedPickup && !(customDate && customTime)) return;
+    setDeliverySaving(true);
+    try {
+      await fetch(`/api/store-orders/${nextOrder.id}/set-delivery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({
+          delivery_date: selectedPickup?.date ?? customDate,
+          delivery_slot: selectedPickup?.slot ?? customTime,
+        }),
+      });
+      setDeliverySaved(true);
+    } finally {
+      setDeliverySaving(false);
+    }
+  };
+
+  const handleCustomerConfirm = async (orderId: number) => {
+    const session = storeAuth.getCurrentUserSync();
+    if (!session) return;
+    setConfirmLoading(true);
+    try {
+      await fetch(`/api/store-orders/${orderId}/customer-confirm`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}` },
+      });
+      setConfirmDone(true);
+      await loadProfile(session.token);
+    } finally {
+      setConfirmLoading(false);
+    }
+  };
+
   const activeOrders = orders.filter(order => order.status !== 'cancelled');
   const totalSpent = activeOrders.reduce((sum, order) => sum + Number(order.total), 0);
   const nextOrder = activeOrders[0];
@@ -124,8 +183,8 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'saved', label: 'Favoritos' },
     { id: 'orders', label: 'Pedidos' },
-    { id: 'delivery', label: 'Entrega' },
-    { id: 'confirm', label: 'Confirmar' },
+    { id: 'entrega', label: 'Entrega' },
+    { id: 'confirmar', label: 'Confirmar' },
     { id: 'settings', label: 'Ajustes' },
   ];
 
@@ -137,7 +196,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
           </button>
           <div>
-            <h1 className="text-[18px] font-black text-gray-900">Mi perfil</h1>
+            <h1 className="text-[18px] font-black text-gray-800">Mi perfil</h1>
             <p className="text-[11px] text-gray-400 font-bold">WhatsApp y PIN para entrar</p>
           </div>
         </header>
@@ -183,7 +242,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
             LA
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-[18px] font-black text-gray-900 leading-tight">Mi perfil</h1>
+            <h1 className="text-[18px] font-black text-gray-800 leading-tight">Mi perfil</h1>
             <p className="text-[12px] text-gray-400 font-bold">+591 {user?.phone}</p>
           </div>
         </div>
@@ -226,7 +285,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
                   <img src={storeImageUrl(product.images[0], 'thumb')} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                 </button>
                 <div className="min-w-0 flex-1 py-1">
-                  <p className="text-[13px] font-black text-gray-900 leading-snug line-clamp-2">{product.title}</p>
+                  <p className="text-[13px] font-black text-gray-800 leading-snug line-clamp-2">{product.title}</p>
                   <p className="text-[11px] text-gray-400 font-bold mt-0.5">{product.category}</p>
                   <p className="text-[15px] font-black text-[#ff2d78] mt-2">{product.price.toFixed(2)} Bs</p>
                 </div>
@@ -247,7 +306,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
               <div key={order.id} className="rounded-3xl bg-white border border-gray-100 shadow-sm p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-[13px] font-black text-gray-900">Pedido #{order.id}</p>
+                    <p className="text-[13px] font-black text-gray-800">Pedido #{order.id}</p>
                     <p className="text-[11px] text-gray-400 font-bold">{new Date(order.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}</p>
                   </div>
                   <p className="text-[15px] font-black text-[#ff2d78]">{Number(order.total).toFixed(2)} Bs</p>
@@ -263,38 +322,170 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart }: 
               </div>
             ))}
           </section>
-        ) : tab === 'delivery' ? (
-          <section className="rounded-3xl bg-white border border-gray-100 shadow-sm p-4 space-y-4">
-            <div>
-              <p className="text-[15px] font-black text-gray-900">Fecha de entrega</p>
-              <p className="text-[12px] text-gray-400 font-bold">Calendario simple para preparar la coordinacion.</p>
-            </div>
-            <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className="w-full h-12 rounded-2xl border border-gray-200 px-4 text-[13px] font-black outline-none" />
-            <textarea value={deliveryNote} onChange={e => setDeliveryNote(e.target.value)} placeholder="Nota de entrega..." className="w-full min-h-24 rounded-2xl border border-gray-200 p-4 text-[13px] font-bold outline-none resize-none" />
-            <button className="w-full h-12 rounded-2xl bg-[#ff2d78] text-white text-[13px] font-black">Guardar fecha</button>
+        ) : tab === 'entrega' ? (
+          <section className="space-y-3">
+            {deliverySaved ? (
+              <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-5 text-center space-y-3">
+                <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-500 flex items-center justify-center mx-auto">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <p className="text-[15px] font-black text-gray-800">¡Fecha guardada!</p>
+                <p className="text-[12px] text-gray-400 font-bold">
+                  {selectedPickup
+                    ? `${pickupDates.find(d => d.date === selectedPickup.date)?.label ?? selectedPickup.date} — ${selectedPickup.slot}`
+                    : `${customDate} a las ${customTime}`}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-4 space-y-4">
+                <div>
+                  <p className="text-[15px] font-black text-gray-800">¿Cuándo retirás tu pedido?</p>
+                  <p className="text-[12px] text-gray-400 font-bold">Elegí una de las fechas disponibles o pedí otro día.</p>
+                </div>
+
+                {pickupDates.length === 0 ? (
+                  <p className="text-[12px] text-gray-400 font-bold py-2 text-center">Pronto habrá fechas disponibles.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {pickupDates.flatMap(pd =>
+                      pd.slots.map(slot => ({
+                        key: `${pd.date}-${slot}`,
+                        date: pd.date,
+                        label: pd.label,
+                        slot,
+                      }))
+                    ).map(option => {
+                      const isSelected = !wantsOtherDate && selectedPickup?.date === option.date && selectedPickup?.slot === option.slot;
+                      return (
+                        <button
+                          key={option.key}
+                          onClick={() => { setSelectedPickup({ date: option.date, slot: option.slot }); setWantsOtherDate(false); }}
+                          className="w-full flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors"
+                          style={{
+                            borderColor: isSelected ? '#ff2d78' : '#e5e7eb',
+                            background: isSelected ? '#fff0f5' : 'white',
+                          }}
+                        >
+                          <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                            style={{ borderColor: isSelected ? '#ff2d78' : '#d1d5db' }}>
+                            {isSelected && <div className="w-2.5 h-2.5 rounded-full bg-[#ff2d78]" />}
+                          </div>
+                          <div>
+                            <p className="text-[13px] font-black text-gray-800 capitalize">{option.label}</p>
+                            <p className="text-[11px] font-bold text-gray-400">{option.slot}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => { setWantsOtherDate(true); setSelectedPickup(null); }}
+                  className="w-full py-3 rounded-2xl border-2 text-[13px] font-black transition-colors"
+                  style={{
+                    borderColor: wantsOtherDate ? '#ff2d78' : '#e5e7eb',
+                    color: wantsOtherDate ? '#ff2d78' : '#6b7280',
+                    background: wantsOtherDate ? '#fff0f5' : 'white',
+                  }}
+                >
+                  📅 Quiero otro día
+                </button>
+
+                {wantsOtherDate && (
+                  <div className="space-y-3 rounded-2xl bg-gray-50 p-3">
+                    <div>
+                      <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Fecha</label>
+                      <input type="date" value={customDate} onChange={e => setCustomDate(e.target.value)}
+                        className="w-full mt-1 h-11 rounded-xl border border-gray-200 bg-white px-3 text-[13px] font-bold outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Hora aproximada</label>
+                      <input type="time" value={customTime} onChange={e => setCustomTime(e.target.value)}
+                        className="w-full mt-1 h-11 rounded-xl border border-gray-200 bg-white px-3 text-[13px] font-bold outline-none" />
+                    </div>
+                    {customDate && customTime && (
+                      <button
+                        onClick={() => {
+                          const dateLabel = new Date(customDate + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+                          const msg = encodeURIComponent(`Hola! Soy clienta de la tienda y quiero retirar mi pedido${nextOrder ? ` #${nextOrder.id}` : ''} el ${dateLabel} a las ${customTime}. ¿Está disponible esa fecha?`);
+                          window.open(`https://wa.me/${storePhone}?text=${msg}`, '_blank');
+                        }}
+                        className="w-full h-12 rounded-2xl font-black text-[13px] text-white flex items-center justify-center gap-2"
+                        style={{ background: '#25D366' }}
+                      >
+                        <span>💬</span> Avisarle a Leidy American
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {selectedPickup && !wantsOtherDate && (
+                  <button
+                    onClick={handleSaveDelivery}
+                    disabled={deliverySaving}
+                    className="w-full h-12 rounded-2xl text-white font-black text-[14px] disabled:opacity-50 active:scale-95 transition-all"
+                    style={{ background: 'linear-gradient(135deg, #ff2d78, #ff6fa3)' }}
+                  >
+                    {deliverySaving ? 'Guardando...' : 'Confirmar fecha de retiro'}
+                  </button>
+                )}
+              </div>
+            )}
           </section>
-        ) : tab === 'confirm' ? (
-          <section className="rounded-3xl bg-white border border-gray-100 shadow-sm p-4 space-y-4">
-            <div>
-              <p className="text-[15px] font-black text-gray-900">Confirmar pedido y fecha</p>
-              <p className="text-[12px] text-gray-400 font-bold">Este espacio queda listo para el link que enviaremos a la clienta.</p>
-            </div>
-            <div className="rounded-2xl bg-[#fff0f5] p-4">
-              <p className="text-[11px] font-black text-gray-400 uppercase">Ultimo pedido</p>
-              <p className="mt-1 text-[18px] font-black text-gray-900">{nextOrder ? `#${nextOrder.id}` : 'Sin pedido activo'}</p>
-              <p className="text-[13px] font-black text-[#ff2d78]">{nextOrder ? `${Number(nextOrder.total).toFixed(2)} Bs` : '0.00 Bs'}</p>
-            </div>
-            <button onClick={onOpenCart} className="w-full h-[52px] rounded-2xl text-white font-black text-[14px] shadow-lg" style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}>
-              Confirmar pedido
-            </button>
-            <button onClick={() => setTab('delivery')} className="w-full h-12 rounded-2xl border border-[#ff2d78]/25 text-[#ff2d78] font-black text-[13px]">
-              Elegir fecha de entrega
-            </button>
+        ) : tab === 'confirmar' ? (
+          <section className="space-y-3">
+            {!nextOrder ? (
+              <EmptyState title="Sin pedidos activos" text="Cuando tengas un pedido pendiente aparecerá aquí para que puedas confirmarlo." />
+            ) : nextOrder.customer_selection?.confirmed ? (
+              <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-5 text-center space-y-3">
+                <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-500 flex items-center justify-center mx-auto">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <p className="text-[16px] font-black text-gray-800">¡Prendas confirmadas!</p>
+                <p className="text-[12px] text-gray-400 font-bold">
+                  Confirmaste tu pedido #{nextOrder.id}. Ya estamos preparando todo para vos.
+                </p>
+                <span className="inline-block rounded-full bg-green-50 px-4 py-1.5 text-[11px] font-black text-green-600">
+                  ✓ Confirmado por ti
+                </span>
+              </div>
+            ) : (
+              <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-4 space-y-4">
+                <div>
+                  <p className="text-[15px] font-black text-gray-800">Confirmá tus prendas</p>
+                  <p className="text-[12px] text-gray-400 font-bold">Pedido #{nextOrder.id} · {Number(nextOrder.total).toFixed(2)} Bs</p>
+                </div>
+                <div className="space-y-2">
+                  {(nextOrder.items ?? []).map((item, idx) => (
+                    <div key={idx} className="flex items-center gap-3 rounded-2xl bg-[#fff0f5] p-3">
+                      <div className="w-8 h-8 rounded-xl bg-[#ff2d78]/10 flex items-center justify-center flex-shrink-0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-black text-gray-800 truncate">{item.productName}</p>
+                        {item.size && <p className="text-[11px] font-bold text-gray-400">Talla: {item.size}</p>}
+                      </div>
+                      <p className="text-[13px] font-black text-[#ff2d78] flex-shrink-0">{item.price.toFixed(2)} Bs</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-gray-400 font-bold text-center">¿Estas prendas son correctas?</p>
+                <button
+                  onClick={() => handleCustomerConfirm(nextOrder.id)}
+                  disabled={confirmLoading || confirmDone}
+                  className="w-full h-[52px] rounded-2xl text-white font-black text-[14px] shadow-lg disabled:opacity-50 transition-all active:scale-95"
+                  style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
+                >
+                  {confirmLoading ? 'Guardando...' : confirmDone ? '✓ Confirmado' : '✓ Confirmar mis prendas'}
+                </button>
+              </div>
+            )}
           </section>
         ) : (
           <section className="space-y-3">
             <div className="rounded-3xl bg-white border border-gray-100 shadow-sm p-4">
-              <p className="text-[13px] font-black text-gray-900">Numero de WhatsApp</p>
+              <p className="text-[13px] font-black text-gray-800">Numero de WhatsApp</p>
               <p className="text-[13px] text-gray-500 font-bold mt-1">+591 {user?.phone}</p>
             </div>
             <button onClick={handleLogout} className="w-full h-12 rounded-2xl bg-gray-100 text-gray-500 font-black text-[13px]">Cerrar sesion</button>

@@ -1,6 +1,6 @@
 # Tienda Online - Estado Actual
 
-Actualizado: 2026-05-06
+Actualizado: 2026-05-10
 
 ## Qué Es
 
@@ -234,19 +234,26 @@ cancelled
 
 ### `store_settings`
 
-Configuración editable de tienda.
+Tabla key-value: columnas `setting_key` (único) y `setting_value` (texto).
+Se lee con `GET /api/store/settings` y se guarda con `PATCH /api/store/settings`.
+
+Claves activas:
 
 ```txt
 store_name
-store_phone
+official_wa_number   número oficial de WhatsApp (reemplaza store_phone)
 reservation_minutes
 delivery_enabled
 pickup_enabled
-next_live_date
-next_live_time
 delivery_note
 address
+store_chips          categorías del catálogo (JSON serializado)
+payment_qr_url
+pickup_dates         fechas de retiro disponibles (JSON serializado)
 ```
+
+Nota: `next_live_date`, `next_live_time` y `store_phone` fueron eliminados de la UI.
+El número oficial se configura en la página de Configuraciones de la app principal.
 
 ### `store_delivery_slots`
 
@@ -326,7 +333,9 @@ Rutas por hash:
 /tienda#gallery                 catálogo
 /tienda#cart                    carrito
 /tienda#checkout                checkout
-/tienda#profile                 perfil de clienta
+/tienda#profile                 perfil de clienta (pestaña Favoritos)
+/tienda#profile/confirmar       perfil → pestaña Confirmar prendas
+/tienda#profile/entrega         perfil → pestaña Elegir fecha de retiro
 /tienda#customer-center         centro de clientas
 /tienda#live-confirmation       confirmación live
 /tienda#producto/{id}           detalle de producto

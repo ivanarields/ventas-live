@@ -65,6 +65,33 @@ function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = 
   key?: string;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>('sistema');
+  const [officialPhone, setOfficialPhone] = useState('');
+  const [phoneSaving, setPhoneSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/store/settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const num = String(data.official_wa_number || data.store_phone || '').replace(/\D/g, '');
+        if (num) setOfficialPhone(num);
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveOfficialPhone = async () => {
+    if (!officialPhone) return;
+    setPhoneSaving(true);
+    try {
+      await fetch('/api/store/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ official_wa_number: officialPhone }),
+      });
+    } finally {
+      setPhoneSaving(false);
+    }
+  };
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'sistema', label: 'Sistema', icon: <Package size={13} /> },
@@ -116,7 +143,14 @@ function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = 
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
         >
-          {activeTab === 'sistema' && <TabSistema />}
+          {activeTab === 'sistema' && (
+            <TabSistema
+              officialPhone={officialPhone}
+              setOfficialPhone={setOfficialPhone}
+              phoneSaving={phoneSaving}
+              saveOfficialPhone={saveOfficialPhone}
+            />
+          )}
 
           {activeTab === 'ia' && (
             userId
@@ -784,7 +818,17 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
 // ═══════════════════════════════════════════════════════════════════
 // TAB: SISTEMA — Casilleros + Versión
 // ═══════════════════════════════════════════════════════════════════
-function TabSistema() {
+function TabSistema({
+  officialPhone,
+  setOfficialPhone,
+  phoneSaving,
+  saveOfficialPhone,
+}: {
+  officialPhone: string;
+  setOfficialPhone: (value: string) => void;
+  phoneSaving: boolean;
+  saveOfficialPhone: () => void;
+}) {
   const [numericCapacity, setNumericCapacity] = useState(4);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -822,6 +866,29 @@ function TabSistema() {
     <div className="space-y-3 pt-2">
       {/* WhatsApp */}
       <WhatsappConnectionPanel />
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div>
+          <p className="text-sm font-black text-gray-800">Número oficial de WhatsApp</p>
+          <p className="text-[11px] text-gray-400 font-medium">
+            Número conectado al Bridge. Se usa en todos los botones de la aplicación.
+          </p>
+        </div>
+        <input
+          type="text"
+          value={officialPhone}
+          onChange={e => setOfficialPhone(e.target.value.replace(/\D/g, ''))}
+          placeholder="59160000000"
+          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-[13px] font-bold outline-none focus:border-pink-400"
+        />
+        <button
+          onClick={saveOfficialPhone}
+          disabled={phoneSaving}
+          className="w-full h-10 rounded-xl bg-[#ff2d78] text-[12px] font-black text-white shadow-sm disabled:opacity-50"
+        >
+          {phoneSaving ? 'Guardando...' : 'Guardar número'}
+        </button>
+      </div>
 
       {/* Etiquetas */}
       <div className="flex items-center justify-between py-1">

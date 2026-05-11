@@ -160,7 +160,7 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart, cartCount =
 
         {/* Nombre + Precio al estilo de la referencia 1 */}
         <div className="px-5 flex items-start justify-between gap-3">
-          <h1 className="text-[19px] font-extrabold text-gray-900 leading-[1.08] flex-1 truncate">
+          <h1 className="text-[19px] font-extrabold text-gray-800 leading-[1.08] flex-1 truncate">
             {product.title}
           </h1>
           <div className="flex-shrink-0 text-right">

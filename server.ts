@@ -1560,7 +1560,7 @@ const PORT = Number(process.env.PORT || 3001);
 
       const { data: orders } = await supabaseStore
         .from('store_orders')
-        .select('id, status, total, created_at, items, payment_verified_at, expires_at, customer_wa')
+        .select('id, status, total, created_at, items, payment_verified_at, expires_at, customer_wa, customer_selection, delivery_date, delivery_slot')
         .eq('customer_wa', cleanPhone)
         .order('created_at', { ascending: false })
         .limit(20);
@@ -2515,6 +2515,112 @@ const PORT = Number(process.env.PORT || 3001);
     }
   });
 
+  app.get('/api/store/download-qr', (_req, res) => {
+    const qrPath = path.join(process.cwd(), 'public', 'qr-yape.jpg');
+    res.setHeader('Content-Disposition', 'attachment; filename="QR-Yape.jpg"');
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.sendFile(qrPath);
+  });
+
+  // Clienta confirma sus prendas desde su perfil
+  app.post('/api/store-orders/:id/customer-confirm', async (req, res) => {
+    const orderId = Number(req.params.id);
+    const authHeader = req.headers.authorization ?? '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) return res.status(401).json({ error: 'No autenticado' });
+
+    const { data: authData, error: authError } = await supabaseStore.auth.getUser(token);
+    if (authError || !authData?.user) return res.status(401).json({ error: 'Sesión inválida' });
+
+    const phone = authData.user.email?.replace('@tiendaleydi.com', '') ?? '';
+
+    const { data: order, error: orderErr } = await supabaseStore
+      .from('store_orders')
+      .select('id, customer_wa, status, customer_selection')
+      .eq('id', orderId)
+      .single();
+
+    if (orderErr || !order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (order.customer_wa !== phone) return res.status(403).json({ error: 'No autorizado' });
+
+    const { error: updateErr } = await supabaseStore
+      .from('store_orders')
+      .update({
+        customer_selection: {
+          ...(typeof order.customer_selection === 'object' && order.customer_selection ? order.customer_selection : {}),
+          confirmed: true,
+          confirmed_at: new Date().toISOString(),
+          confirmed_by: 'customer',
+        },
+      })
+      .eq('id', orderId);
+
+    if (updateErr) return res.status(500).json({ error: 'No se pudo guardar' });
+    return res.json({ ok: true });
+  });
+
+  // Leer fechas de retiro disponibles (público)
+  app.get('/api/store/pickup-dates', async (_req, res) => {
+    try {
+      const { data } = await supabaseStore
+        .from('store_settings')
+        .select('setting_value')
+        .eq('setting_key', 'pickup_dates')
+        .maybeSingle();
+      const raw = data?.setting_value;
+      const dates = raw ? JSON.parse(raw) : [];
+      return res.json({ dates });
+    } catch {
+      return res.json({ dates: [] });
+    }
+  });
+
+  // Guardar fechas de retiro (solo admin)
+  app.patch('/api/store/pickup-dates', async (req, res) => {
+    const { dates } = req.body as { dates: Array<{ date: string; label: string; slots: string[] }> };
+    if (!Array.isArray(dates)) return res.status(400).json({ error: 'dates debe ser array' });
+    try {
+      const { error } = await supabaseStore
+        .from('store_settings')
+        .upsert({ setting_key: 'pickup_dates', setting_value: JSON.stringify(dates) }, { onConflict: 'setting_key' });
+      if (error) throw error;
+      return res.json({ ok: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Clienta guarda la fecha elegida en su pedido
+  app.post('/api/store-orders/:id/set-delivery', async (req, res) => {
+    const orderId = Number(req.params.id);
+    const { delivery_date, delivery_slot } = req.body as { delivery_date: string; delivery_slot: string };
+    const authHeader = req.headers.authorization ?? '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) return res.status(401).json({ error: 'No autenticado' });
+
+    const { data: authData, error: authError } = await supabaseStore.auth.getUser(token);
+    if (authError || !authData?.user) return res.status(401).json({ error: 'Sesión inválida' });
+
+    const phone = authData.user.email?.replace('@tiendaleydi.com', '') ?? '';
+
+    const { data: order, error: orderErr } = await supabaseStore
+      .from('store_orders')
+      .select('id, customer_wa')
+      .eq('id', orderId)
+      .single();
+
+    if (orderErr || !order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (order.customer_wa !== phone) return res.status(403).json({ error: 'No autorizado' });
+
+    const { error: updateErr } = await supabaseStore
+      .from('store_orders')
+      .update({ delivery_date, delivery_slot, delivery_type: 'retiro' })
+      .eq('id', orderId);
+
+    if (updateErr) return res.status(500).json({ error: 'No se pudo guardar' });
+    return res.json({ ok: true });
+  });
+
   // ── Endpoint 5: Pedidos de tienda esperando verificación manual ──
   app.get('/api/store/pending-manual', async (_req, res) => {
     try {
@@ -2545,6 +2651,53 @@ const PORT = Number(process.env.PORT || 3001);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? 'Error interno' });
     }
+  });
+
+  // ── Favoritos de clientes ────────────────────────────────────────
+  app.get('/api/store/favorites/:phone', async (req, res) => {
+    const phone = req.params.phone.replace(/\D/g, '');
+    const { data, error } = await supabaseStore
+      .from('store_favorites')
+      .select('product_id, created_at')
+      .eq('customer_wa', phone)
+      .order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  });
+
+  app.post('/api/store/favorites/toggle', async (req, res) => {
+    const { phone, productId } = req.body ?? {};
+    if (!phone || !productId) return res.status(400).json({ error: 'phone y productId requeridos' });
+    const cleanPhone = String(phone).replace(/\D/g, '');
+    const { data: existing } = await supabaseStore
+      .from('store_favorites')
+      .select('id')
+      .eq('customer_wa', cleanPhone)
+      .eq('product_id', String(productId))
+      .maybeSingle();
+    if (existing) {
+      await supabaseStore.from('store_favorites').delete()
+        .eq('customer_wa', cleanPhone).eq('product_id', String(productId));
+      return res.json({ liked: false });
+    }
+    await supabaseStore.from('store_favorites').insert({ customer_wa: cleanPhone, product_id: String(productId) });
+    res.json({ liked: true });
+  });
+
+  app.get('/api/store/favorites/:phone/products', async (req, res) => {
+    const phone = req.params.phone.replace(/\D/g, '');
+    const { data: favs } = await supabaseStore
+      .from('store_favorites')
+      .select('product_id')
+      .eq('customer_wa', phone);
+    if (!favs?.length) return res.json([]);
+    const ids = favs.map((f: any) => f.product_id);
+    const { data: products, error } = await supabaseStore
+      .from('products')
+      .select('id, title, price, images, sizes, available, stock')
+      .in('id', ids);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(products ?? []);
   });
 
   // ── Endpoint 7: Espejo de Fotos de WhatsApp para la Tienda ──────
@@ -2592,7 +2745,8 @@ const PORT = Number(process.env.PORT || 3001);
       if (!userId || !phone) return res.status(400).json({ error: 'userId y phone requeridos' });
 
       const cleanPhone = phone.replace(/\D/g, '');
-      const storeLink = `${process.env.STORE_URL || 'https://tienda.ventas-live.com'}/live-confirmation?phone=${cleanPhone}`;
+      const storeBase = process.env.STORE_URL || 'https://leidydiaz.live';
+      const storeLink = `${storeBase}/tienda#profile/confirmar`;
 
       const message = `¡Hola! 👗 Ya tenemos tus prendas del Live listas para confirmación. Ingresa aquí para seleccionar las tuyas: ${storeLink}\n\n(Necesitarás tu PIN de la tienda)`;
 
@@ -2709,11 +2863,8 @@ const PORT = Number(process.env.PORT || 3001);
           res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
         } catch (e) { next(e); }
       };
-      app.get(["/tienda", "/tienda/*", "/tienda-v2", "/tienda-v2/*"], (req, res, next) => {
-        renderViteHtml(req, res, next, "tienda-v2.html");
-      });
-      app.get(["/tienda-original", "/tienda-original/*"], (req, res, next) => {
-        renderViteHtml(req, res, next, "index.html");
+      app.get(["/tienda", "/tienda/*"], (req, res, next) => {
+        renderViteHtml(req, res, next, "tienda.html");
       });
       app.get("*", async (req, res, next) => {
         renderViteHtml(req, res, next, "index.html");
@@ -2724,11 +2875,8 @@ const PORT = Number(process.env.PORT || 3001);
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get(["/tienda", "/tienda/*", "/tienda-v2", "/tienda-v2/*"], (_req, res) => {
-      res.sendFile(path.join(distPath, "tienda-v2.html"));
-    });
-    app.get(["/tienda-original", "/tienda-original/*"], (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.get(["/tienda", "/tienda/*"], (_req, res) => {
+      res.sendFile(path.join(distPath, "tienda.html"));
     });
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

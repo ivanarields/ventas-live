@@ -31,7 +31,15 @@
 
 | Fecha | Cambio | Commit |
 |-------|--------|--------|
-| 2026-05-10 | Verificación manual de pedidos web desde pestaña Pagos (tarjetas moradas WEB) | pendiente commit |
+| 2026-05-10 | Tienda unificada: eliminar storefront antiguo, renombrar tienda-v2 a tienda | pendiente |
+| 2026-05-10 | Flujo CONFIRMAR: clienta confirma prendas desde perfil/confirmar | pendiente |
+| 2026-05-10 | Flujo ENTREGA: admin configura fechas de retiro, clienta elige desde perfil/entrega | pendiente |
+| 2026-05-10 | Número oficial de WA configurable en Configuraciones (official_wa_number) | pendiente |
+| 2026-05-10 | Bug fix: endpoints pickup-dates corregidos para tabla key-value | pendiente |
+| 2026-05-10 | Bug fix: categorías de tienda no pierden chips al editar (quitar onBlur) | pendiente |
+| 2026-05-10 | QR de pago más grande, sin texto Yape, colores sin negro puro | pendiente |
+| 2026-05-10 | Workflow Codex como orquestador (docs/workflow/) | pendiente |
+| 2026-05-10 | Verificación manual de pedidos web desde pestaña Pagos (tarjetas moradas WEB) | pendiente |
 | 2026-05-06 | Fix fecha local Bolivia en formulario de pagos | `3ae02b3` |
 | 2026-05-06 | Panel IA muestra modelo activo como badge, sin form de configuración | `3ae02b3` |
 | 2026-05-05 | Botón "Live" procesa todas las conversaciones WA del día | `f604f01` |

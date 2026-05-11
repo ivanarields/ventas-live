@@ -50,7 +50,7 @@ export const storeFavoritesApi = {
         Authorization: `Bearer ${session.token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ productId: product.id }),
+      body: JSON.stringify({ productId: Number(product.id) }),
     });
     if (!res.ok) return Object.values(local);
     const data = await res.json();
@@ -69,7 +69,7 @@ export const storeFavoritesApi = {
         Authorization: `Bearer ${session.token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ productIds: local.map(p => p.id) }),
+      body: JSON.stringify({ productIds: local.map(p => Number(p.id)) }),
     });
     if (!res.ok) return local;
     const data = await res.json();
