@@ -77,6 +77,58 @@ export function createAiRouter(supabase: SupabaseClient, supabasePanel?: Supabas
     return value;
   }
 
+  function extractFirstBalancedJson(text: string): string | null {
+    const cleaned = String(text ?? '').trim().replace(/```json|```/g, '');
+    const starts: number[] = [];
+    const objStart = cleaned.indexOf('{');
+    const arrStart = cleaned.indexOf('[');
+    if (objStart >= 0) starts.push(objStart);
+    if (arrStart >= 0) starts.push(arrStart);
+    starts.sort((a, b) => a - b);
+
+    for (const start of starts) {
+      const open = cleaned[start];
+      const close = open === '{' ? '}' : ']';
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+
+      for (let i = start; i < cleaned.length; i++) {
+        const ch = cleaned[i];
+
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (ch === '\\') {
+            escaped = true;
+            continue;
+          }
+          if (ch === '"') inString = false;
+          continue;
+        }
+
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+
+        if (ch === open) {
+          depth += 1;
+          continue;
+        }
+
+        if (ch === close) {
+          depth -= 1;
+          if (depth === 0) return cleaned.slice(start, i + 1);
+        }
+      }
+    }
+
+    return null;
+  }
+
   // ── Helpers internos ────────────────────────────────────────────────────────
 
   async function getOpenRouterKey(userId?: string): Promise<{ key: string; source: OpenRouterKeySource } | null> {
@@ -458,15 +510,13 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       const result = await callAi({ userId, feature: 'product_vision', prompt: buildProductCatalogPrompt(), imageParts, maxTokens: 400, temperature: 0.2, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta de la IA' });
 
-      const cleanText = String(result.text ?? '').trim().replace(/```json|```/g, '');
-      const firstBrace = cleanText.indexOf('{');
-      const lastBrace = cleanText.lastIndexOf('}');
-      if (firstBrace < 0 || lastBrace <= firstBrace) {
+      const jsonText = extractFirstBalancedJson(String(result.text ?? ''));
+      if (!jsonText) {
         return res.status(422).json({ ok: false, error: 'Respuesta no parseable' });
       }
 
       try {
-        const parsed = JSON.parse(cleanText.slice(firstBrace, lastBrace + 1));
+        const parsed = JSON.parse(jsonText);
         res.json({ ok: true, data: parsed });
       } catch (parseErr: any) {
         return res.status(422).json({ ok: false, error: parseErr?.message || 'Respuesta no parseable' });

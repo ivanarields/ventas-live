@@ -1062,6 +1062,19 @@ const PORT = Number(process.env.PORT || 3001);
       if (error) throw error;
       res.status(201).json({ success: true, id: data.id, data });
 
+      try {
+        const storeMatch = await tryMatchOrder({
+          amount: Number(pago),
+          senderPhone: rest.phone ?? rest.senderPhone ?? rest.sender_wa ?? '',
+          windowMinutes: 2,
+        });
+        if (storeMatch) {
+          await confirmStoreOrder(storeMatch.order.id, `pagos:${data.id}:${storeMatch.confidence}`);
+        }
+      } catch (storeMatchError: any) {
+        console.warn('[pagos] store match error:', storeMatchError?.message ?? storeMatchError);
+      }
+
       // Ingesta de identidad en background — nunca bloquea la respuesta al cliente
       ingestManualPayment(supabaseServer, userId, {
         id: String(data.id),
@@ -1984,7 +1997,7 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
-      const RESERVATION_MINUTES = 1.5;
+      const RESERVATION_MINUTES = 1;
       const { data, error } = await supabaseStore
         .from("store_orders")
         .insert({
@@ -2174,11 +2187,11 @@ const PORT = Number(process.env.PORT || 3001);
     const { amount, senderPhone, orderRef, windowMinutes = 2 } = params;
     const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
 
-    // Buscar TODOS los pedidos pendientes en la ventana de tiempo
+    // Buscar pedidos recientes en la ventana de tiempo
     let query = supabaseStore
       .from('store_orders')
       .select('*')
-      .eq('status', 'pending')
+      .in('status', ['pending', 'cancelled'])
       .gt('created_at', windowStart);
 
     // Filtrar por monto exacto si viene
@@ -2209,18 +2222,25 @@ const PORT = Number(process.env.PORT || 3001);
     // Intentar filtrar por número de WhatsApp si viene
     if (senderPhone) {
       const clean = senderPhone.replace(/\D/g, '');
-      const byPhone = candidates.filter((o: any) =>
-        o.customer_wa && o.customer_wa.includes(clean)
-      );
+      const byPhone = candidates.filter((o: any) => {
+        const orderPhones = phoneVariants(o.customer_wa, o.customer_phone);
+        return orderPhones.some((p: string) => p === clean || p.endsWith(clean) || clean.endsWith(p));
+      });
       if (byPhone.length === 1) {
         console.log(`[store-match] ALTA: pedido #${byPhone[0].id} — desempate por WA ${clean}`);
         return { order: byPhone[0], confidence: 'alta' };
       }
     }
 
-    // Múltiples candidatos, no se puede decidir → no verificar automáticamente
-    console.log(`[store-match] MEDIA: ${candidates.length} pedidos de ${amount} Bs — necesita WA con código`);
-    return null; // No verificar — esperar WA con código o verificación manual
+    // Último desempate: usar el pedido más reciente de ese monto.
+    // Evita que un pago real quede gris cuando el monto coincide y no hay un código único.
+    const newest = candidates[0];
+    if (newest) {
+      console.log(`[store-match] MEDIA: usando pedido #${newest.id} como desempate final (${amount} Bs)`);
+      return { order: newest, confidence: 'media' };
+    }
+
+    return null;
   }
 
   /**
@@ -2239,7 +2259,7 @@ const PORT = Number(process.env.PORT || 3001);
         payment_ref: source,
       } as any)
       .eq('id', orderId)
-      .eq('status', 'pending')   // idempotencia: solo si sigue pending
+      .in('status', ['pending', 'cancelled'])   // permitir rescate si expiró justo antes del webhook
       .select()
       .single();
 
@@ -2417,7 +2437,7 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
-      // Intentar cruzar con pedido pendiente (ventana de 5 min)
+      // Intentar cruzar con pedido pendiente (margen corto pero suficiente para el webhook del banco)
       const result = await tryMatchOrder({
         amount: parsedAmount,
         senderPhone: senderPhone ?? '',

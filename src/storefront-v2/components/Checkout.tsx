@@ -7,7 +7,7 @@ import { storeFavoritesApi } from '../services/storeFavoritesApi';
 
 const BRAND = '#ff2d78';
 const WA_NUMBER = (import.meta.env.VITE_STORE_WA_NUMBER as string | undefined) ?? '59160003230';
-const PAYMENT_SECONDS = 90; // 1 minuto y medio
+const PAYMENT_SECONDS = 60; // 1 minuto
 
 interface Props {
   items: CartItem[];
@@ -102,7 +102,9 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
         delivery_notes: null,
       };
       const order = await storeOrdersApi.create(payload);
-      setOrderId(order?.id ?? null);
+      if (!order?.id) throw new Error('No se pudo crear el pedido. Intenta de nuevo.');
+      setOrderId(order.id);
+      setScreen('payment');
     } catch (err: any) {
       if (err?.message?.includes('409') || err?.message?.includes('reservado') || err?.message?.includes('disponible')) {
         setAuthError('⏰ Este producto está reservado por otra persona. Intenta de nuevo en unos segundos.');
@@ -111,15 +113,16 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
       }
       console.error('Error al crear pedido:', err);
       setOrderId(null);
+      setAuthError(err?.message || 'No se pudo crear el pedido. Intenta de nuevo.');
+      setScreen('identify');
     } finally {
       setAuthLoading(false);
-      setScreen('payment');
     }
   };
 
   // ── Countdown ────────────────────────────────────────────────
   useEffect(() => {
-    if (screen !== 'payment') return;
+    if (screen !== 'payment' || !orderId) return;
     const t = setInterval(() => {
       setTimeLeft(s => {
         if (s <= 1) { setExpired(true); clearInterval(t); return 0; }
@@ -127,12 +130,12 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
       });
       setElapsedSec(e => {
         const next = e + 1;
-        if (next >= 90 && !waNudge) setWaNudge(true);
+        if (next >= 60 && !waNudge) setWaNudge(true);
         return next;
       });
     }, 1000);
     return () => clearInterval(t);
-  }, [screen, waNudge]);
+  }, [screen, waNudge, orderId]);
 
   // ── Polling de verificación (cada 3 s) ────────────────────────
   const checkPayment = useCallback(async () => {
@@ -259,6 +262,16 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
   }
 
   if (screen === 'payment') {
+    if (!orderId) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-white">
+          <div className="w-10 h-10 border-4 border-t-transparent rounded-full animate-spin"
+            style={{ borderColor: BRAND, borderTopColor: 'transparent' }} />
+          <p className="text-sm font-bold text-gray-400">Creando tu pedido...</p>
+        </div>
+      );
+    }
+
     const mins = String(Math.floor(timeLeft / 60)).padStart(2, '0');
     const secs = String(timeLeft % 60).padStart(2, '0');
     const pct = (timeLeft / PAYMENT_SECONDS) * 100;
@@ -266,9 +279,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
     const sendWA = () => {
       const msg = encodeURIComponent(
-        orderId
-          ? `Hola! Pague el pedido #${orderId} por ${total.toFixed(2)} Bs. Adjunto comprobante.`
-          : `Hola! Pague mi pedido por ${total.toFixed(2)} Bs. Adjunto comprobante.`
+        `Hola! Pague el pedido #${orderId} por ${total.toFixed(2)} Bs. Adjunto comprobante.`
       );
       window.open(`https://wa.me/${waNumber}?text=${msg}`, '_blank');
     };
