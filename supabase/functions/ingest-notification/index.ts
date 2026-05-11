@@ -924,7 +924,7 @@ Deno.serve(async (req) => {
             const { data: candidates } = await storeClient
               .from('store_orders')
               .select('id, total, customer_wa, items')
-              .eq('status', 'pending')
+              .in('status', ['pending', 'cancelled'])
               .eq('total', amount)
               .gt('created_at', windowStart)
               .order('created_at', { ascending: false });
@@ -939,7 +939,9 @@ Deno.serve(async (req) => {
             } else if (candidates && candidates.length > 1) {
               // MÚLTIPLES candidatos → NO verificar automáticamente
               // Esperar WA con código o verificación manual del admin
-              console.log(`[tienda-store] ⚠️ ${candidates.length} pedidos de ${amount} Bs — esperando WA/manual`);
+              matched = candidates[0];
+              confidence = 'media';
+              console.log(`[tienda-store] ${candidates.length} pedidos de ${amount} Bs - usando el mas reciente #${matched.id}`);
             }
 
             if (matched) {

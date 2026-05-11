@@ -64,7 +64,7 @@ Deno.serve(async (req: Request) => {
     let query = supabase
       .from('store_orders')
       .select('*')
-      .eq('status', 'pending')
+      .in('status', ['pending', 'cancelled'])
       .gt('created_at', windowStart)
       .eq('total', parsedAmount);
 

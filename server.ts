@@ -2872,6 +2872,37 @@ const PORT = Number(process.env.PORT || 3001);
     }
   });
 
+  app.post('/api/ingest-bank-store', async (req, res) => {
+    try {
+      const storeSupabaseUrl = process.env.VITE_STORE_SUPABASE_URL;
+
+      if (!storeSupabaseUrl) {
+        return res.status(500).json({ error: 'Tienda no configurada' });
+      }
+
+      const response = await fetch(
+        `${storeSupabaseUrl}/functions/v1/ingest-bank-store`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(req.body),
+        }
+      );
+
+      const text = await response.text();
+      const contentType = response.headers.get('content-type') ?? '';
+
+      if (contentType.includes('application/json')) {
+        return res.status(response.status).json(JSON.parse(text));
+      }
+
+      return res.status(response.status).send(text);
+    } catch (err: any) {
+      console.error('[ingest-bank-store bridge]', err?.message);
+      res.status(500).json({ error: 'Error enviando pago a tienda', detail: err?.message });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     try {
       const viteModule = await import("vite");
