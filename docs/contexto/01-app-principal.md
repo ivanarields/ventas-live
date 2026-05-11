@@ -87,6 +87,7 @@ Panel admin para gestionar la tienda online en `leidydiaz.live`. Muestra product
 ## Pestaña Config (settings)
 
 - Conexión WhatsApp
+- **Número oficial de WhatsApp** — número conectado al Bridge, se usa en todos los botones de la app. Se guarda en `store_settings` con key `official_wa_number`
 - **Capacidad de etiquetas** — ajusta bolsas máximas por etiqueta numérica
 - Versión de la app y base de datos
 

@@ -283,7 +283,7 @@ Campos clave de `pagos_venta_live`: `estado`, `main_pago_id`, `panel_mensaje_id`
 | `WEBHOOK_SECRET` | Valida peticiones del bridge WA (`ventas-live-bridge-2026`) |
 | `WHATSAPP_BRIDGE_URL` | URL del bridge en DigitalOcean (`http://134.122.123.253:3001`) |
 | `STORE_OWNER_USER_ID` | Si falta, los pedidos de tienda quedan invisibles (`13dcb065-6099-4776-982c-18e98ff2b27a`) |
-| `VITE_STORE_WA_NUMBER` | Número WA de la tienda para confirmaciones (default `59160003230`) |
+| `VITE_STORE_WA_NUMBER` | Fallback del número WA de la tienda. En producción se usa `official_wa_number` guardado en `store_settings` (configurable desde Configuraciones de la app) |
 
 ---
 

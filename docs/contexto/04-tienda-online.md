@@ -364,7 +364,7 @@ https://ventas-live.vercel.app/tienda#producto/5
 4. Va a checkout
 5. Se identifica con WhatsApp + PIN
 6. Elige entrega/retiro, fecha y horario
-7. Se crea store_orders con reserva de 10 minutos
+7. Se crea store_orders con reserva de 60 segundos (1 minuto)
 8. Paga y se verifica el pago
 9. El pedido queda listo para preparación/seguimiento
 ```
