@@ -1,4 +1,4 @@
-# Estado Actual y Pendientes — actualizado 2026-05-06
+# Estado Actual y Pendientes — actualizado 2026-05-12
 
 ## Qué está funcionando y probado ✅
 
@@ -31,6 +31,7 @@
 
 | Fecha | Cambio | Commit |
 |-------|--------|--------|
+| 2026-05-12 | Fix fusión logística QR tienda: maybeSingle, retry customer, cascade nombre → crea pedido WEB + pago Tienda Online | `4e05b13` |
 | 2026-05-10 | Tienda unificada: eliminar storefront antiguo, renombrar tienda-v2 a tienda | pendiente |
 | 2026-05-10 | Flujo CONFIRMAR: clienta confirma prendas desde perfil/confirmar | pendiente |
 | 2026-05-10 | Flujo ENTREGA: admin configura fechas de retiro, clienta elige desde perfil/entrega | pendiente |
