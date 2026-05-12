@@ -106,11 +106,11 @@ La tienda en `/tienda` tiene su propio flujo de pago automático separado del ca
 2. Cliente paga por Yape/transferencia
        ↓
 3A. MacroDroid captura notificación bancaria en el celular
-    → POST https://leidydiaz.live/api/ingest-bank-store (proxy en server.ts)
-    → Reenvía a Edge Function: ingest-bank-store (TiendaOnline)
-    → Ventana de búsqueda: 35 minutos (fija, siempre)
-    → Llama a tryMatchOrder({ windowMinutes: 35 })
-    → Si hay match → confirmStoreOrder()
+    → POST https://leidydiaz.live/api/ingest-notification (proxy en server.ts)
+    → Edge Function ingest-notification (ChehiAppAbril)
+    → Crea pago en pagos (method="Notificación bancaria")
+    → Bloque "REENVÍO A TIENDA ONLINE" busca store_orders pending en últimos 2 min
+    → Si hay match único → POST /api/store/match-payment → confirmStoreOrder()
 
 3B. Cliente manda comprobante por WhatsApp al número de la tienda
     → WhatsApp Bridge recibe el mensaje
@@ -147,9 +147,16 @@ El `windowMinutes` por defecto (si nadie lo especifica) es **2 minutos**. Los tr
 - `/api/store/ingest-bank` (server): **2 minutos**
 - `/api/store/ingest-wa` (server): **10 minutos**
 
-### `confirmStoreOrder()` — 7 pasos (`server.ts:2230–2394`)
+### `confirmStoreOrder()` — obtención del nombre real
 
-Cuando el match es exitoso, esta función ejecuta los 7 pasos en orden:
+El nombre del pagador se obtiene en cascada:
+1. Si `source` incluye `bank` o `macrodroid`: busca `payment_events` en ChehiAppAbril con `matched_order_id`
+2. Busca `payment_events` en TiendaOnline con `matched_order_id` (disponible para el camino `chehi`)
+3. Usa `store_orders.customer_name` como último recurso
+
+### `confirmStoreOrder()` — pasos de inyección (`server.ts:2250+`)
+
+Cuando el match es exitoso, esta función ejecuta los pasos en orden:
 
 1. Marca la store_order como pagada en TiendaOnline
 2. Pone el stock del producto en 0 (oculta de la tienda)
