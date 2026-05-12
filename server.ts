@@ -2296,17 +2296,30 @@ const PORT = Number(process.env.PORT || 3001);
            .from('payment_events')
            .select('sender_name')
            .eq('matched_order_id', orderId)
-           .single();
+           .maybeSingle();
          console.log(`[store-match] bankEvent: ${bankEvent ? 'encontrado' : 'null'}`);
          if (bankEvent?.sender_name) finalName = bankEvent.sender_name;
-      } else if (source.includes('chehi')) {
-        // chehi ingest ya tiene el nombre en store_orders.customer_name
-        finalName = data.customer_name || '';
-        console.log(`[store-match] Usando customer_name de store_orders: ${finalName}`);
+      }
+      // Para el camino chehi/ingest: buscar el nombre real en payment_events de TiendaOnline
+      if (!finalName) {
+        const { data: storeEvent } = await supabaseStore
+          .from('payment_events')
+          .select('sender_name')
+          .eq('matched_order_id', orderId)
+          .maybeSingle();
+        if (storeEvent?.sender_name) {
+          finalName = String(storeEvent.sender_name).trim();
+          console.log(`[store-match] Nombre desde TiendaOnline payment_events: ${finalName}`);
+        }
+      }
+      // Último recurso: customer_name del pedido de tienda
+      if (!finalName && data.customer_name) {
+        finalName = String(data.customer_name).trim();
+        console.log(`[store-match] Nombre desde store_orders.customer_name: ${finalName}`);
       }
 
-      const waNumber = data.customer_wa;
-      let globalCustomerId = null;
+      const waNumber = String(data.customer_wa || '').trim();
+      let globalCustomerId: number | null = null;
 
       console.log(`[store-match] waNumber: ${waNumber}`);
       console.log(`[store-match] finalName: ${finalName || '(vacío)'}`);
@@ -2331,7 +2344,7 @@ const PORT = Number(process.env.PORT || 3001);
           }
         } else {
           // Crear perfil unificado global con el user_id del operador
-          const name = finalName || 'Cliente Tienda Web';
+          const name = finalName || data.customer_name || 'Cliente Tienda Web';
           console.log(`[store-match] Creando nuevo cliente con name: ${name}, user_id: ${ownerUserId}`);
           const { data: newCust, error: custErr } = await supabaseServer.from('customers').insert({
             phone: waNumber,
@@ -2339,17 +2352,31 @@ const PORT = Number(process.env.PORT || 3001);
             normalized_name: name.toLowerCase().trim(),
             canonical_name: name.toUpperCase().trim(),
             user_id: ownerUserId,
-          } as any).select('id').single();
-          
+          } as any).select('id').maybeSingle();
+
           if (custErr) {
-            console.error(`[store-match] ERROR al crear cliente: ${custErr.message}`);
-            throw new Error(`No se pudo crear cliente: ${custErr.message}`);
+            console.error(`[store-match] Error al crear cliente (phone=${waNumber}): ${custErr.message}`);
+            // Puede que ya exista por carrera o unique constraint — reintentar búsqueda
+            const { data: retryCustomer } = await supabaseServer
+              .from('customers')
+              .select('id')
+              .eq('phone', waNumber)
+              .maybeSingle();
+            if (retryCustomer) {
+              globalCustomerId = retryCustomer.id;
+              console.log(`[store-match] Cliente encontrado en reintento: #${globalCustomerId}`);
+            }
+          } else {
+            globalCustomerId = newCust?.id ?? null;
+            console.log(`[store-match] Cliente creado, globalCustomerId: ${globalCustomerId}`);
           }
-          globalCustomerId = newCust?.id;
-          console.log(`[store-match] Cliente creado, globalCustomerId: ${globalCustomerId}`);
         }
       } else {
         console.log(`[store-match] waNumber es null/undefined, saltando creación de cliente`);
+      }
+
+      if (!globalCustomerId) {
+        console.warn(`[store-match] Sin customer_id para pedido #${orderId} (phone="${waNumber}") — no se inyecta`);
       }
 
       // Inyectar el pedido en la cola física
