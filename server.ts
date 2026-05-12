@@ -2282,20 +2282,34 @@ const PORT = Number(process.env.PORT || 3001);
 
     // 2. FUSIÓN DE IDENTIDAD GLOBAL Y ENVÍO A ALMACÉN
     try {
-      // Intentar obtener el nombre real desde el evento de pago si la fuente es el banco
+      console.log(`[store-match] Iniciando fusión logística para pedido #${orderId}`);
+      console.log(`[store-match] source: ${source}`);
+      console.log(`[store-match] ownerUserId: ${ownerUserId}`);
+      console.log(`[store-match] data.customer_wa: ${data.customer_wa}`);
+      console.log(`[store-match] data.customer_name: ${data.customer_name}`);
+      console.log(`[store-match] data.total: ${data.total}`);
+      
+      // Para source chehi, el nombre viene de store_orders (data.customer_name)
+      // Para source bank/macrodroid, buscar en payment_events del sistema principal
       if (source.includes('bank') || source.includes('macrodroid')) {
          const { data: bankEvent } = await supabaseServer
            .from('payment_events')
            .select('sender_name')
            .eq('matched_order_id', orderId)
            .single();
+         console.log(`[store-match] bankEvent: ${bankEvent ? 'encontrado' : 'null'}`);
          if (bankEvent?.sender_name) finalName = bankEvent.sender_name;
+      } else if (source.includes('chehi')) {
+        // chehi ingest ya tiene el nombre en store_orders.customer_name
+        finalName = data.customer_name || '';
+        console.log(`[store-match] Usando customer_name de store_orders: ${finalName}`);
       }
 
       const waNumber = data.customer_wa;
       let globalCustomerId = null;
 
-      // El user_id del operador dueño de la tienda (para que aparezca en su sistema principal)
+      console.log(`[store-match] waNumber: ${waNumber}`);
+      console.log(`[store-match] finalName: ${finalName || '(vacío)'}`);
 
       if (waNumber) {
         // Buscar si el cliente ya existe en el sistema físico (por teléfono, sin filtro de user_id)
@@ -2305,30 +2319,44 @@ const PORT = Number(process.env.PORT || 3001);
           .eq('phone', waNumber)
           .maybeSingle();
 
+        console.log(`[store-match] existingCustomer: ${existingCustomer ? `ID ${existingCustomer.id}` : 'null'}`);
+
         if (existingCustomer) {
           globalCustomerId = existingCustomer.id;
+          console.log(`[store-match] Cliente existente encontrado, globalCustomerId: ${globalCustomerId}`);
           // Actualizar nombre si antes no tenía o era muy corto, y ahora el banco nos dio uno real
           if (finalName && (!existingCustomer.full_name || existingCustomer.full_name.trim() === '')) {
             await supabaseServer.from('customers').update({ full_name: finalName }).eq('id', globalCustomerId);
+            console.log(`[store-match] Nombre actualizado para cliente ${globalCustomerId}`);
           }
         } else {
           // Crear perfil unificado global con el user_id del operador
           const name = finalName || 'Cliente Tienda Web';
-          const { data: newCust } = await supabaseServer.from('customers').insert({
+          console.log(`[store-match] Creando nuevo cliente con name: ${name}, user_id: ${ownerUserId}`);
+          const { data: newCust, error: custErr } = await supabaseServer.from('customers').insert({
             phone: waNumber,
             full_name: name,
             normalized_name: name.toLowerCase().trim(),
             canonical_name: name.toUpperCase().trim(),
             user_id: ownerUserId,
           } as any).select('id').single();
+          
+          if (custErr) {
+            console.error(`[store-match] ERROR al crear cliente: ${custErr.message}`);
+            throw new Error(`No se pudo crear cliente: ${custErr.message}`);
+          }
           globalCustomerId = newCust?.id;
+          console.log(`[store-match] Cliente creado, globalCustomerId: ${globalCustomerId}`);
         }
+      } else {
+        console.log(`[store-match] waNumber es null/undefined, saltando creación de cliente`);
       }
 
       // Inyectar el pedido en la cola física
       if (globalCustomerId) {
         const itemsList = data.items ?? [];
-        await supabaseServer.from('pedidos').insert({
+        console.log(`[store-match] Inyectando pedido en sistema principal, customer_id: ${globalCustomerId}`);
+        const { data: newPedido, error: pedidoErr } = await supabaseServer.from('pedidos').insert({
           customer_id: globalCustomerId,
           customer_name: finalName || 'Cliente Tienda',
           status: 'procesar',  // Va directo a la Mesa de Preparación
@@ -2341,14 +2369,21 @@ const PORT = Number(process.env.PORT || 3001);
           source: 'WEB',     // Campo nuevo (024_add_web_fields)
           web_items_list: itemsList, // Campo nuevo
           user_id: ownerUserId,
-        } as any);
+        } as any).select('id').single();
+        
+        if (pedidoErr) {
+          console.error(`[store-match] ERROR al inyectar pedido: ${pedidoErr.message}`);
+          throw new Error(`No se pudo inyectar pedido: ${pedidoErr.message}`);
+        }
+        console.log(`[store-match] Pedido inyectado, ID: ${newPedido?.id}`);
 
         // 3. Registrar el pago en ChehiAppAbril (página de pagos)
         try {
           const todayStart = new Date();
           todayStart.setHours(0, 0, 0, 0);
 
-          const { data: existingPago } = await supabaseServer
+          console.log(`[store-pago] Buscando pago existente para customer_id: ${globalCustomerId}, monto: ${data.total}`);
+          const { data: existingPago, error: existingPagoErr } = await supabaseServer
             .from('pagos')
             .select('id')
             .eq('customer_id', globalCustomerId)
@@ -2357,8 +2392,13 @@ const PORT = Number(process.env.PORT || 3001);
             .gte('created_at', todayStart.toISOString())
             .limit(1);
 
+          if (existingPagoErr) {
+            console.error(`[store-pago] ERROR buscando pago existente: ${existingPagoErr.message}`);
+          }
+
           if (!existingPago?.length) {
-            await supabaseServer.from('pagos').insert({
+            console.log(`[store-pago] Creando nuevo pago en Chehi`);
+            const { data: newPago, error: pagoErr } = await supabaseServer.from('pagos').insert({
               nombre: finalName || data.customer_name || 'Cliente Tienda',
               pago: data.total,
               method: 'Tienda Online',
@@ -2366,15 +2406,21 @@ const PORT = Number(process.env.PORT || 3001);
               date: now,
               customer_id: globalCustomerId,
               user_id: ownerUserId,
-            } as any);
+            } as any).select('id').single();
 
-            console.log(`[store-pago] 💰 Pago Tienda Online creado en Chehi para pedido #${orderId}`);
+            if (pagoErr) {
+              console.error(`[store-pago] ERROR al crear pago: ${pagoErr.message}`);
+            } else {
+              console.log(`[store-pago] 💰 Pago Tienda Online creado en Chehi, ID: ${newPago?.id}`);
+            }
           } else {
             console.log(`[store-pago] ⏭️ Pago ya existe para pedido #${orderId}, omitido`);
           }
         } catch (pagoErr) {
           console.error('[store-pago] Error al crear pago en Chehi:', pagoErr);
         }
+      } else {
+        console.log(`[store-match] globalCustomerId es null, saltando inyección de pedido y pago`);
       }
 
     } catch (e) {
