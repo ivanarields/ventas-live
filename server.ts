@@ -2020,7 +2020,7 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
-      const RESERVATION_MINUTES = 1;
+      const RESERVATION_MINUTES = 2;
       const { data, error } = await supabaseStore
         .from("store_orders")
         .insert({

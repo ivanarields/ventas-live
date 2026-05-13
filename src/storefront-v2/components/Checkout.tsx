@@ -7,7 +7,7 @@ import { storeFavoritesApi } from '../services/storeFavoritesApi';
 
 const BRAND = '#ff2d78';
 const WA_NUMBER = (import.meta.env.VITE_STORE_WA_NUMBER as string | undefined) ?? '59160003230';
-const PAYMENT_SECONDS = 60; // 1 minuto
+const PAYMENT_SECONDS = 120; // 2 minutos
 
 interface Props {
   items: CartItem[];
