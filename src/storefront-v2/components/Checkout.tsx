@@ -37,6 +37,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
   const [timeLeft, setTimeLeft] = useState(PAYMENT_SECONDS);
   const [expired, setExpired] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [bankDetected, setBankDetected] = useState(false);
   const [waNudge, setWaNudge] = useState(false); // true después de 60 seg sin verificar
   const [elapsedSec, setElapsedSec] = useState(0);
   const [paymentQrUrl, setPaymentQrUrl] = useState('/qr-yape.jpg');
@@ -143,7 +144,8 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
     try {
       const res = await fetch(`/api/store-orders/${orderId}/status`);
       if (res.ok) {
-        const { status } = await res.json();
+        const { status, bankDetected: detected } = await res.json();
+        setBankDetected(!!detected);
         if (status === 'paid' || status === 'confirmed') {
           setVerified(true);
           setScreen('verified');
@@ -379,9 +381,18 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
             <p className="text-[14px] font-black text-gray-800">Leidy Candy Diaz Sanchez</p>
           </div>
 
+          {bankDetected && !verified && (
+            <div className="w-full mb-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-left">
+              <p className="text-[11px] font-black text-amber-700 uppercase tracking-wider">Pago detectado</p>
+              <p className="text-[12px] font-bold text-amber-700 mt-1">
+                Envia el mensaje de WhatsApp y adjunta tu comprobante para confirmar el pedido.
+              </p>
+            </div>
+          )}
+
           {/* Acciones */}
           <div className="w-full">
-            {!expired ? (
+            {(!expired || bankDetected) ? (
               <div className="flex gap-2.5 justify-center">
                 <button
                   onClick={() => {

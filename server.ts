@@ -1079,7 +1079,12 @@ const PORT = Number(process.env.PORT || 3001);
           windowMinutes: 2,
         });
         if (storeMatch) {
-          await confirmStoreOrder(storeMatch.order.id, `pagos:${data.id}:${storeMatch.confidence}`, data);
+          const canAutoConfirm = storeMatch.confidence === 'alta' && await isStoreCustomerVerifiedForAuto(storeMatch.order);
+          if (canAutoConfirm) {
+            await confirmStoreOrder(storeMatch.order.id, `pagos:${data.id}:${storeMatch.confidence}`, data);
+          } else {
+            await markStoreOrderBankDetected(storeMatch.order, `pagos:${data.id}:${storeMatch.confidence}`);
+          }
         }
       } catch (storeMatchError: any) {
         console.warn('[pagos] store match error:', storeMatchError?.message ?? storeMatchError);
@@ -1920,11 +1925,19 @@ const PORT = Number(process.env.PORT || 3001);
     try {
       const { data, error } = await supabaseStore
         .from("store_orders")
-        .select("id, status, payment_verified_at")
+        .select("id, status, payment_verified_at, payment_ref, wa_proof_received")
         .eq("id", Number(req.params.id))
         .single();
       if (error) throw error;
-      res.json({ id: data.id, status: data.status, verifiedAt: data.payment_verified_at });
+      const paymentRef = String((data as any).payment_ref ?? '');
+      res.json({
+        id: data.id,
+        status: data.status,
+        verifiedAt: data.payment_verified_at,
+        bankDetected: paymentRef.includes('bank-detected'),
+        proofReceived: !!(data as any).wa_proof_received,
+        requiresProof: data.status !== 'paid' && data.status !== 'confirmed' && paymentRef.includes('bank-detected'),
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
@@ -2278,13 +2291,50 @@ const PORT = Number(process.env.PORT || 3001);
 
     // Último desempate: usar el pedido más reciente de ese monto.
     // Evita que un pago real quede gris cuando el monto coincide y no hay un código único.
-    const newest = candidates[0];
-    if (newest) {
-      console.log(`[store-match] MEDIA: usando pedido #${newest.id} como desempate final (${amount} Bs)`);
-      return { order: newest, confidence: 'media' };
-    }
-
+    console.log(`[store-match] SIN MATCH AUTOMATICO: ${candidates.length} pedidos con ${amount} Bs; se requiere #pedido por WhatsApp`);
     return null;
+  }
+
+  function isUsableStoreName(name: unknown) {
+    const value = String(name ?? '').trim().toLowerCase();
+    return value.length >= 6 && !value.startsWith('cliente tienda') && value !== 'cliente';
+  }
+
+  async function isStoreCustomerVerifiedForAuto(order: any) {
+    const waNumber = String(order?.customer_wa ?? '').replace(/\D/g, '');
+    if (!waNumber) return false;
+
+    const { data: customer } = await supabaseStore
+      .from('store_customers')
+      .select('display_name,total_orders,total_spent')
+      .eq('whatsapp', waNumber)
+      .maybeSingle();
+
+    const hasRealName = isUsableStoreName(customer?.display_name) || isUsableStoreName(order?.customer_name);
+    if (!hasRealName) return false;
+
+    const { data: previousPaid } = await supabaseStore
+      .from('store_orders')
+      .select('id')
+      .eq('customer_wa', waNumber)
+      .eq('status', 'paid')
+      .neq('id', Number(order.id))
+      .limit(1);
+
+    return !!previousPaid?.length || Number(customer?.total_orders ?? 0) > 0 || Number(customer?.total_spent ?? 0) > 0;
+  }
+
+  async function markStoreOrderBankDetected(order: any, source: string) {
+    const currentRef = String(order?.payment_ref ?? '');
+    const nextRef = currentRef.includes('bank-detected') ? currentRef : `bank-detected:${source}`;
+    await supabaseStore
+      .from('store_orders')
+      .update({
+        payment_method: 'qr',
+        payment_ref: nextRef,
+      } as any)
+      .eq('id', Number(order.id))
+      .in('status', ['pending', 'cancelled']);
   }
 
   /**
@@ -2402,8 +2452,8 @@ const PORT = Number(process.env.PORT || 3001);
         // Buscar si el cliente ya existe en el sistema físico (por teléfono, sin filtro de user_id)
         const { data: existingCustomer } = await supabaseServer
           .from('customers')
-          .select('id, full_name')
-          .eq('phone', waNumber)
+          .select('id, full_name, phone')
+          .or(`phone.eq.${waNumber},canonical_name.eq.${String(finalName || '').toUpperCase().trim()}`)
           .maybeSingle();
 
         console.log(`[store-match] existingCustomer: ${existingCustomer ? `ID ${existingCustomer.id}` : 'null'}`);
@@ -2413,7 +2463,7 @@ const PORT = Number(process.env.PORT || 3001);
           console.log(`[store-match] Cliente existente encontrado, globalCustomerId: ${globalCustomerId}`);
           // Actualizar nombre si antes no tenía o era muy corto, y ahora el banco nos dio uno real
           const currentName = String(existingCustomer.full_name || '').trim();
-          await supabaseServer.from('customers').update({ user_id: ownerUserId } as any).eq('id', globalCustomerId);
+          await supabaseServer.from('customers').update({ user_id: ownerUserId, phone: existingCustomer.phone || waNumber } as any).eq('id', globalCustomerId);
           if (finalName && (!currentName || currentName.toLowerCase().startsWith('cliente tienda'))) {
             await supabaseServer.from('customers').update({
               full_name: finalName,
@@ -2439,12 +2489,18 @@ const PORT = Number(process.env.PORT || 3001);
             // Puede que ya exista por carrera o unique constraint — reintentar búsqueda
             const { data: retryCustomer } = await supabaseServer
               .from('customers')
-              .select('id')
-              .eq('phone', waNumber)
+              .select('id, phone')
+              .or(`phone.eq.${waNumber},canonical_name.eq.${name.toUpperCase().trim()}`)
               .maybeSingle();
             if (retryCustomer) {
               globalCustomerId = retryCustomer.id;
               console.log(`[store-match] Cliente encontrado en reintento: #${globalCustomerId}`);
+              if (!retryCustomer.phone && waNumber) {
+                await supabaseServer
+                  .from('customers')
+                  .update({ phone: waNumber, user_id: ownerUserId } as any)
+                  .eq('id', globalCustomerId);
+              }
             }
           } else {
             globalCustomerId = newCust?.id ?? null;
@@ -2631,8 +2687,15 @@ const PORT = Number(process.env.PORT || 3001);
       };
 
       if (result) {
-        const ok = await confirmStoreOrder(result.order.id, `bank:${hash ?? 'manual'}:${result.confidence}`);
-        if (ok) eventData.matched_order_id = result.order.id;
+        eventData.matched_order_id = result.order.id;
+        const canAutoConfirm = result.confidence === 'alta' && await isStoreCustomerVerifiedForAuto(result.order);
+        if (canAutoConfirm) {
+          await confirmStoreOrder(result.order.id, `bank:${hash ?? 'manual'}:${result.confidence}`);
+          eventData.processed = true;
+        } else {
+          await markStoreOrderBankDetected(result.order, `bank:${hash ?? 'manual'}:${result.confidence}`);
+          eventData.processed = false;
+        }
       }
 
       await supabaseServer.from('payment_events').insert(eventData as any);
@@ -2815,7 +2878,21 @@ Responde solo JSON:
 
         const receiptAmount = parseStoreReceiptAmount(receipt?.monto);
         const orderTotal = Number(result.order.total);
+        const proofReceived = !!mediaUrl || !!hasProof;
         const amountMatches = receiptAmount == null || Math.abs(receiptAmount - orderTotal) < 0.01;
+        if (!proofReceived) {
+          waEvent.summary += '\nproof_required=true';
+          await supabaseStore.from('wa_messages').insert(waEvent as any);
+          return res.json({
+            ok: true,
+            matched: true,
+            confirmed: false,
+            requiresProof: true,
+            orderId: result.order.id,
+            reason: 'proof_required',
+            receipt,
+          });
+        }
         if (!amountMatches) {
           waEvent.summary += `\nproof_amount_mismatch=${receiptAmount}!=${orderTotal}`;
           await supabaseStore.from('wa_messages').insert(waEvent as any);
@@ -2869,18 +2946,34 @@ Responde solo JSON:
           .maybeSingle();
 
         let mainBankPago: any = null;
-        if (!bankEvent) {
-          const orderCreatedAt = result.order.created_at
-            ? new Date(new Date(result.order.created_at).getTime() - 2 * 60 * 1000).toISOString()
-            : new Date(Date.now() - 30 * 60 * 1000).toISOString();
-          const { data: pagos } = await supabaseServer
-            .from('pagos')
-            .select('id,nombre,pago,created_at,date,method,status')
-            .eq('pago', Number(result.order.total))
-            .gte('created_at', orderCreatedAt)
-            .order('created_at', { ascending: false })
-            .limit(1);
-          mainBankPago = pagos?.[0] ?? null;
+        const orderCreatedAt = result.order.created_at
+          ? new Date(new Date(result.order.created_at).getTime() - 2 * 60 * 1000).toISOString()
+          : new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data: pagos } = await supabaseServer
+          .from('pagos')
+          .select('id,nombre,pago,created_at,date,method,status')
+          .eq('pago', Number(result.order.total))
+          .gte('created_at', orderCreatedAt)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        const candidates = (pagos ?? []).filter((p: any) => !String(p.method ?? '').toLowerCase().includes('tienda online'));
+        const receiptName = cleanName(receipt?.cliente ?? '');
+        const nameMatches = receiptName
+          ? candidates.filter((p: any) => {
+              const bankName = cleanName(p.nombre ?? '');
+              return bankName === receiptName || bankName.includes(receiptName) || receiptName.includes(bankName);
+            })
+          : [];
+
+        if (nameMatches.length === 1) {
+          mainBankPago = nameMatches[0];
+        } else if (!receiptName && candidates.length === 1) {
+          mainBankPago = candidates[0];
+        } else if (receiptName && candidates.length === 1) {
+          mainBankPago = candidates[0];
+        } else if (candidates.length > 1) {
+          console.warn(`[store-wa] ${candidates.length} pagos bancarios de ${result.order.total} Bs; no se confirma sin nombre unico`);
         }
 
         if (bankEvent || mainBankPago) {
@@ -2897,7 +2990,10 @@ Responde solo JSON:
               matched_order_id: result.order.id,
             } as any);
           }
-          await confirmStoreOrder(result.order.id, `wa+bank:${fromWa}:maxima`);
+          const linkedPagoForConfirm = mainBankPago
+            ? { ...mainBankPago, nombre: receipt?.cliente || mainBankPago.nombre }
+            : null;
+          await confirmStoreOrder(result.order.id, `wa+bank:${fromWa}:maxima`, linkedPagoForConfirm);
         } else {
           // WA llegó primero que el banco → marcar como esperando banco
           console.log(`[store-wa] Pedido #${result.order.id} — WA recibido, esperando banco`);
@@ -3222,12 +3318,30 @@ Responde solo JSON:
         }
       }
 
-      const ok = await confirmStoreOrder(order.id, source ?? 'manual', linkedPago);
+      const sourceText = String(source ?? 'manual');
+      const autoCandidate = sourceText.startsWith('chehi:') || sourceText.startsWith('bank:') || sourceText.startsWith('pagos:');
+      const sourceConfidence = sourceText.split(':').pop();
+      const canAutoConfirm = !autoCandidate || (sourceConfidence === 'alta' && await isStoreCustomerVerifiedForAuto(order));
+
+      if (!canAutoConfirm) {
+        await markStoreOrderBankDetected(order, sourceText);
+        return res.json({
+          ok: true,
+          matched: true,
+          confirmed: false,
+          requiresProof: true,
+          orderId: order.id,
+          total: order.total,
+          customerWa: order.customer_wa,
+        });
+      }
+
+      const ok = await confirmStoreOrder(order.id, sourceText, linkedPago);
       if (!ok) {
         return res.status(409).json({ ok: false, error: 'El pedido ya fue procesado o no está pendiente' });
       }
 
-      res.json({ ok: true, orderId: order.id, total: order.total, customerWa: order.customer_wa });
+      res.json({ ok: true, confirmed: true, orderId: order.id, total: order.total, customerWa: order.customer_wa });
 
     } catch (err: any) {
       console.error('[store/match-payment]', err);

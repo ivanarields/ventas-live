@@ -939,9 +939,9 @@ Deno.serve(async (req) => {
             } else if (candidates && candidates.length > 1) {
               // MÚLTIPLES candidatos → NO verificar automáticamente
               // Esperar WA con código o verificación manual del admin
-              matched = candidates[0];
-              confidence = 'media';
-              console.log(`[tienda-store] ${candidates.length} pedidos de ${amount} Bs - usando el mas reciente #${matched.id}`);
+              matched = null;
+              confidence = 'none';
+              console.log(`[tienda-store] ${candidates.length} pedidos de ${amount} Bs - se requiere #pedido por WhatsApp`);
             }
 
             if (matched) {
