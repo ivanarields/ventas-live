@@ -279,7 +279,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
     const sendWA = () => {
       const msg = encodeURIComponent(
-        `Hola! Pague el pedido #${orderId} por ${total.toFixed(2)} Bs. Adjunto comprobante.`
+        `Hola! Ya pague mi pedido de tienda #${orderId} por ${total.toFixed(2)} Bs. Mi numero es ${phone}. Adjunto comprobante.`
       );
       window.open(`https://wa.me/${waNumber}?text=${msg}`, '_blank');
     };

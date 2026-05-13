@@ -6,6 +6,7 @@ const SUPABASE_SERVICE_KEY = Deno.env.get('PANEL_SUPABASE_SERVICE_KEY')!;
 const MAIN_URL = Deno.env.get('SUPABASE_URL') || '';
 const MAIN_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const INGEST_USER_ID = Deno.env.get('INGEST_USER_ID') || '';;
+const SERVER_URL = Deno.env.get('SERVER_URL') || Deno.env.get('APP_SERVER_URL') || '';
 
 function normalizePhone(raw: string): string | null {
   if (!raw) return null;
@@ -145,7 +146,7 @@ async function processMessage(req: Request) {
     }
 
     // Insertar mensaje (media_url ya tiene la URL pública o null)
-    const { error: mensajeError } = await supabase.from('panel_mensajes').insert({
+    const { data: mensajeData, error: mensajeError } = await supabase.from('panel_mensajes').insert({
       cliente_id: clienteData.id,
       direction,
       content,
@@ -153,12 +154,40 @@ async function processMessage(req: Request) {
       media_url: mediaUrl,
       media_type: mediaMimetype,
       whatsapp_message_id: messageId,
-    });
+    }).select('id, created_at').single();
 
     if (mensajeError) {
       console.error('Error insert mensaje:', mensajeError);
     } else {
       console.log(`✅ Mensaje guardado correctamente.`);
+    }
+
+    if (!mensajeError && SERVER_URL && direction === 'in' && content && /#\d+/.test(content)) {
+      EdgeRuntime.waitUntil((async () => {
+        try {
+          const response = await fetch(`${SERVER_URL.replace(/\/$/, '')}/api/store/ingest-wa`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fromWa: clientPhone,
+              messageText: content,
+              hasProof: hasUsableMedia,
+              mediaUrl,
+              mediaType: mediaMimetype,
+              panelMessageId: mensajeData?.id ?? messageId,
+              messageCreatedAt: mensajeData?.created_at ?? new Date().toISOString(),
+            }),
+          });
+          if (!response.ok) {
+            const detail = await response.text().catch(() => '');
+            console.error(`[store-wa-auto] Error procesando tienda: ${response.status} ${detail}`);
+          } else {
+            console.log('[store-wa-auto] Mensaje de tienda procesado');
+          }
+        } catch (error) {
+          console.error('[store-wa-auto] No se pudo avisar al servidor:', error);
+        }
+      })());
     }
 
     // Depositar evidencia de identidad en DB principal (fire-and-forget)

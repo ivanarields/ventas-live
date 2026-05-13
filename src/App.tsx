@@ -612,6 +612,8 @@ interface Pedido {
   totalAmount: number;
   status: string;
   paymentIds?: string[];
+  source?: string;
+  webItemsList?: any[];
 }
 
 interface Idea {
@@ -1121,6 +1123,8 @@ export default function App() {
         totalAmount: Number(p.total_amount ?? 0),
         date: p.date,
         labelVersion: p.label_version ?? 1,
+        source: p.source ?? '',
+        webItemsList: p.web_items_list ?? [],
       })));
 
       // Transacciones
@@ -2123,6 +2127,9 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                         className="w-full rounded-xl px-2.5 py-2 text-left bg-blue-500 text-white active:scale-95 transition-all"
                       >
                         <span className="text-[11px] font-bold block leading-tight">{p.customerName}</span>
+                        <span className="text-[8px] font-black uppercase tracking-widest opacity-80">
+                          {p.source === 'WEB' || p.labelType === 'WEB' ? `WEB ${p.label || ''}` : 'LIVE'}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -2158,7 +2165,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                         onClick={() => setSelectedPedido(p)}
                         className="rounded-xl px-2.5 py-1.5 bg-brand/10 text-brand text-[11px] font-bold active:scale-95 transition-all"
                       >
-                        {p.itemCount ?? 0} prendas · {p.bagCount} bolsa{p.bagCount !== 1 ? 's' : ''}
+                        {(p.source === 'WEB' || p.labelType === 'WEB') ? 'WEB' : 'LIVE'} · {p.itemCount ?? 0} prendas · {p.bagCount} bolsa{p.bagCount !== 1 ? 's' : ''}
                       </button>
                     ))}
                   </div>
@@ -2207,6 +2214,14 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               </div>
               <div>
                 <p className="font-black text-xl text-gray-900">{selectedPedido.customerName}</p>
+                <span className={cn(
+                  "inline-flex mt-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest",
+                  selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB'
+                    ? "bg-emerald-100 text-emerald-600"
+                    : "bg-violet-100 text-violet-600"
+                )}>
+                  {selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB' ? 'Compra web' : 'Pedido live'}
+                </span>
                 <p className="text-[12px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">
                   Etiqueta {selectedPedido.labelType === 'letter' ? 'exclusiva' : 'compartida'}
                 </p>
@@ -2566,8 +2581,10 @@ function PaymentsView({
   const [verifyingLivePaymentId, setVerifyingLivePaymentId] = useState<string | null>(null);
   const [verifyingWebOrderId, setVerifyingWebOrderId] = useState<number | null>(null);
   const [pendingWebOrders, setPendingWebOrders] = useState<any[]>([]);
+  const [webProfiles, setWebProfiles] = useState<any[]>([]);
   const [procesandoLive, setProcesandoLive] = useState(false);
   const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
+  const [paymentChannel, setPaymentChannel] = useState<'normal' | 'web'>('normal');
 
   const procesarLive = async () => {
     if (procesandoLive) return;
@@ -2609,6 +2626,9 @@ function PaymentsView({
     if (origin === 'manual' || origin === 'whatsapp_pending') return { bg: '#faf5ff', fg: '#a855f7' };
     return { bg: '#f8fafc', fg: '#94a3b8' };
   };
+
+  const isStorePayment = (payment: any) =>
+    String(payment?.method ?? '').trim().toLowerCase() === 'tienda online';
 
   const onSelectPerson = (id: string) => {
     onSelectPersonProp(id);
@@ -2654,6 +2674,13 @@ function PaymentsView({
       .then((data: any) => setPendingWebOrders(Array.isArray(data) ? data : []))
       .catch(() => setPendingWebOrders([]));
   }, [payments]);
+
+  useEffect(() => {
+    if (paymentChannel !== 'web') return;
+    adminApi.storeProfiles()
+      .then((data: any) => setWebProfiles(Array.isArray(data) ? data : []))
+      .catch(() => setWebProfiles([]));
+  }, [paymentChannel, payments]);
 
   const verifyWebStoreOrder = async (storeOrderId: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -2708,22 +2735,56 @@ function PaymentsView({
     });
   }, [payments, selectedDates, selectedTime]);
 
+  const webProfilesForDate = useMemo(() => {
+    return webProfiles
+      .map((profile: any) => {
+        const ordersForDate = (profile.orders ?? []).filter((order: any) => {
+          const orderDate = parseAppDate(order.created_at);
+          if (!orderDate) return false;
+          const matchesDate = selectedDates.some(d => d.toDateString() === orderDate.toDateString());
+          if (!matchesDate) return false;
+          if (selectedTime) {
+            const [h, m] = selectedTime.split(':').map(Number);
+            const orderTime = orderDate.getHours() * 60 + orderDate.getMinutes();
+            return orderTime >= h * 60 + m;
+          }
+          return true;
+        });
+        return {
+          ...profile,
+          orders: ordersForDate,
+          total: ordersForDate.reduce((acc: number, order: any) => acc + cleanAmount(order.total), 0),
+        };
+      })
+      .filter((profile: any) => profile.orders.length > 0);
+  }, [webProfiles, selectedDates, selectedTime]);
+
   const stats = useMemo(() => {
-    const totalSelected = filteredPayments.reduce((acc, p) => acc + cleanAmount(p.pago), 0);
-    const uniquePeople = new Set(filteredPayments.map(p => cleanName(p.nombre).toLowerCase())).size;
+    if (paymentChannel === 'web') {
+      const webOrders = webProfilesForDate.flatMap((profile: any) => profile.orders ?? []);
+      return {
+        totalSelected: webOrders.reduce((acc: number, order: any) => acc + cleanAmount(order.total), 0),
+        count: webOrders.length,
+        people: webProfilesForDate.length,
+      };
+    }
+    const visiblePayments = filteredPayments.filter(p => paymentChannel === 'web' ? isStorePayment(p) : !isStorePayment(p));
+    const totalSelected = visiblePayments.reduce((acc, p) => acc + cleanAmount(p.pago), 0);
+    const uniquePeople = new Set(visiblePayments.map(p => cleanName(p.nombre).toLowerCase())).size;
 
     return {
       totalSelected,
-      count: filteredPayments.length,
+      count: visiblePayments.length,
       people: uniquePeople
     };
-  }, [filteredPayments]);
+  }, [filteredPayments, paymentChannel, webProfilesForDate]);
 
   const groupedPayments = useMemo(() => {
     const groups: { [key: string]: any } = {};
     
     // Ordenamos por fecha descendente antes de agrupar
-    const sortedPayments = [...filteredPayments].sort((a, b) => getTS(b.date) - getTS(a.date));
+    const visiblePayments = filteredPayments.filter(p => paymentChannel === 'web' ? isStorePayment(p) : !isStorePayment(p));
+    const sortedPayments = [...visiblePayments].sort((a, b) => getTS(b.date) - getTS(a.date));
 
     sortedPayments.forEach(p => {
       const rawName = p.nombre || 'Desconocido';
@@ -2756,6 +2817,7 @@ function PaymentsView({
 
     Object.values(groups).forEach((group: any) => {
       const origins = group.history.map((p: any) => p.verificationOrigin) as VerificationOrigin[];
+      const onlyStorePayments = group.history.length > 0 && group.history.every((p: any) => isStorePayment(p));
       const hasAutomatic = origins.includes('automatic');
       const hasUnmatched = origins.some((o: string) => o === 'macrodroid_only' || o === 'other');
       const hasWhatsappPending = group.history.some((p: any) =>
@@ -2772,7 +2834,9 @@ function PaymentsView({
           p.livePaymentStatus === 'revision_manual'
         )
       )?.livePaymentId ?? null;
-      group.verificationOrigin = hasWhatsappPending
+      group.verificationOrigin = onlyStorePayments
+        ? 'automatic'
+        : hasWhatsappPending
         ? 'whatsapp_pending'
         : origins.includes('manual')
           ? 'manual'
@@ -2824,7 +2888,7 @@ function PaymentsView({
     }
 
     return result.sort((a: any, b: any) => b.lastTimestamp - a.lastTimestamp);
-  }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders]);
+  }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders, paymentChannel]);
 
   return (
     <motion.div 
@@ -2906,6 +2970,27 @@ function PaymentsView({
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-2xl">
+        <button
+          onClick={() => setPaymentChannel('normal')}
+          className={cn(
+            "h-10 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all",
+            paymentChannel === 'normal' ? "bg-white text-brand shadow-sm" : "text-gray-400"
+          )}
+        >
+          Pagos Live
+        </button>
+        <button
+          onClick={() => setPaymentChannel('web')}
+          className={cn(
+            "h-10 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all",
+            paymentChannel === 'web' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400"
+          )}
+        >
+          Pagos Web
+        </button>
+      </div>
+
       {/* Stats Panel */}
       <div className="grid grid-cols-3 gap-2">
         <button 
@@ -2934,7 +3019,7 @@ function PaymentsView({
 
       <div className="space-y-3">
         {/* Pedidos de tienda con comprobante WA pendiente de verificación manual */}
-        {pendingWebOrders.map((order: any) => (
+        {paymentChannel === 'web' && pendingWebOrders.map((order: any) => (
           <div key={`web-pending-${order.id}`} className="card-modern p-0 overflow-hidden">
             <div className="w-full pl-2 pr-4 py-4 flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -2965,7 +3050,61 @@ function PaymentsView({
           </div>
         ))}
 
-        {groupedPayments.length === 0 && pendingWebOrders.length === 0 ? (
+        {paymentChannel === 'web' && webProfilesForDate.map((profile: any) => (
+          <div key={`web-profile-${profile.key}`} className="card-modern p-0 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[9px] font-black bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-md uppercase tracking-wider">WEB</span>
+                    <span className="font-black text-sm text-base-text uppercase truncate">{profile.name || 'Cliente tienda'}</span>
+                  </div>
+                  <p className="text-[10px] text-base-text-muted font-bold">
+                    {profile.phone || 'Sin número'} · {profile.orders.length} pedido{profile.orders.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <span className="font-extrabold text-brand text-base">Bs {profile.total}</span>
+              </div>
+            </div>
+            <div className="p-3 space-y-2">
+              {profile.orders.map((order: any) => (
+                <div key={`web-order-${order.id}`} className="rounded-2xl bg-gray-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div>
+                      <p className="text-[11px] font-black text-gray-800">Pedido #{order.id}</p>
+                      <p className={cn(
+                        "text-[9px] font-black uppercase tracking-wider",
+                        order.status === 'paid' ? "text-emerald-600" : order.status === 'cancelled' ? "text-gray-400" : "text-amber-500"
+                      )}>
+                        {order.status === 'paid' ? 'Pago verificado' : order.status}
+                      </p>
+                    </div>
+                    <span className="font-black text-brand text-sm">Bs {order.total}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {(order.items ?? []).map((item: any, idx: number) => (
+                      <div key={`${order.id}-${idx}`} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-bold text-gray-700 truncate">{item.productName || item.name || 'Producto tienda'}</span>
+                        <span className="text-gray-400 font-black">x{item.quantity || 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {paymentChannel === 'web' && webProfilesForDate.length === 0 && pendingWebOrders.length === 0 && (
+          <div className="text-center py-24 opacity-20">
+            <Wallet className="w-16 h-16 mx-auto mb-4" />
+            <p className="text-sm font-bold uppercase tracking-[0.2em]">
+              Sin pagos web para esta fecha
+            </p>
+          </div>
+        )}
+
+        {paymentChannel === 'normal' && (groupedPayments.length === 0 ? (
           <div className="text-center py-24 opacity-20">
             <Wallet className="w-16 h-16 mx-auto mb-4" />
             <p className="text-sm font-bold uppercase tracking-[0.2em]">
@@ -3024,7 +3163,7 @@ function PaymentsView({
             </div>
             );
           })
-        )}
+        ))}
       </div>
 
       <ConfirmModal 
