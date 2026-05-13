@@ -3016,11 +3016,43 @@ Responde solo JSON:
     }
   });
 
-  app.get('/api/store/download-qr', (_req, res) => {
-    const qrPath = path.join(process.cwd(), 'public', 'qr-yape.jpg');
-    res.setHeader('Content-Disposition', 'attachment; filename="QR-Yape.jpg"');
-    res.setHeader('Content-Type', 'image/jpeg');
-    res.sendFile(qrPath);
+  app.get('/api/store/download-qr', async (_req, res) => {
+    try {
+      const { data } = await supabaseStore
+        .from('store_settings')
+        .select('setting_value')
+        .eq('setting_key', 'payment_qr_url')
+        .maybeSingle();
+
+      const qrUrl = String(data?.setting_value || '').trim();
+      if (qrUrl && /^https?:\/\//i.test(qrUrl)) {
+        const response = await fetch(qrUrl);
+        if (!response.ok) throw new Error(`No se pudo descargar QR configurado: ${response.status}`);
+        const contentType = response.headers.get('content-type') || 'image/jpeg';
+        const extension = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+        const buffer = Buffer.from(await response.arrayBuffer());
+        res.setHeader('Content-Disposition', `attachment; filename="Leidy-American-QR.${extension}"`);
+        res.setHeader('Content-Type', contentType);
+        res.send(buffer);
+        return;
+      }
+
+      if (qrUrl && qrUrl.startsWith('/')) {
+        const fileName = qrUrl.replace(/^\/+/, '');
+        const qrPath = path.join(process.cwd(), 'public', fileName);
+        res.setHeader('Content-Disposition', `attachment; filename="Leidy-American-QR${path.extname(fileName) || '.jpg'}"`);
+        res.sendFile(qrPath);
+        return;
+      }
+
+      const qrPath = path.join(process.cwd(), 'public', 'qr-yape.jpg');
+      res.setHeader('Content-Disposition', 'attachment; filename="Leidy-American-QR.jpg"');
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.sendFile(qrPath);
+    } catch (err: any) {
+      console.error('[store/download-qr]', err?.message ?? err);
+      res.status(500).json({ error: 'No se pudo descargar el QR configurado' });
+    }
   });
 
   // Clienta confirma sus prendas desde su perfil
