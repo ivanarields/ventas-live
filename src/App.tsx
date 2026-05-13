@@ -5262,10 +5262,17 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
 
   const dailyOrders = useMemo(() => {
     const groups: { [key: string]: any } = {};
+
+    const isWebPedido = (ped: any) =>
+      String(ped?.source ?? '').toUpperCase() === 'WEB' ||
+      String(ped?.labelType ?? '').toUpperCase() === 'WEB' ||
+      String(ped?.label ?? '').toUpperCase().startsWith('WEB');
+    const isWebPayment = (payment: any) =>
+      String(payment?.method ?? '').trim().toLowerCase() === 'tienda online';
     
-    const pedidos = person.pedidos || [];
-    const legacyOrders = person.orders || [];
-    const payments = person.payments || [];
+    const pedidos = (person.pedidos || []).filter((ped: any) => !isWebPedido(ped));
+    const legacyOrders = (person.orders || []).filter((ped: any) => !isWebPedido(ped));
+    const payments = (person.payments || []).filter((payment: any) => !isWebPayment(payment));
 
     const allWork = [...pedidos, ...legacyOrders];
 
@@ -5396,6 +5403,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     const dateKey = pDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase();
     
     return (person.payments || [])
+      .filter((p: any) => String(p?.method ?? '').trim().toLowerCase() !== 'tienda online')
       .filter((p: any) => {
         const pd = parseAppDate(p.date);
         return pd && pd.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase() === dateKey;
@@ -5421,11 +5429,17 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   }, [dayPayments]);
 
   const stats = useMemo(() => {
-    const payments = person.payments || [];
+    const payments = (person.payments || [])
+      .filter((p: any) => String(p?.method ?? '').trim().toLowerCase() !== 'tienda online');
     const totalPayments = payments.reduce((acc: number, p: any) => acc + cleanAmount(p.pago), 0);
-    const totalOrders = (person.pedidos || []).reduce((acc: number, p: any) => acc + cleanAmount(p.totalAmount), 0);
+    const livePedidos = (person.pedidos || []).filter((p: any) =>
+      String(p?.source ?? '').toUpperCase() !== 'WEB' &&
+      String(p?.labelType ?? '').toUpperCase() !== 'WEB' &&
+      !String(p?.label ?? '').toUpperCase().startsWith('WEB')
+    );
+    const totalOrders = livePedidos.reduce((acc: number, p: any) => acc + cleanAmount(p.totalAmount), 0);
     const paymentCount = payments.length;
-    const orderCount = (person.pedidos || []).length; // Count only real orders
+    const orderCount = livePedidos.length;
     return { totalPayments, totalOrders, paymentCount, orderCount };
   }, [person.payments, person.pedidos, dailyOrders]);
 
