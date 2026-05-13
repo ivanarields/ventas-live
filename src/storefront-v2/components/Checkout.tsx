@@ -286,6 +286,27 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
       window.open(`https://wa.me/${waNumber}?text=${msg}`, '_blank');
     };
 
+    const downloadVisibleQr = async () => {
+      try {
+        const response = await fetch(paymentQrUrl, { cache: 'no-store' });
+        if (!response.ok) throw new Error('No se pudo descargar el QR');
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const extension = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = `QR-Leidy-American.${extension}`;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      } catch (error) {
+        console.error('Error descargando QR:', error);
+        window.location.href = paymentQrUrl;
+      }
+    };
+
     return (
       <div className="flex flex-col bg-gradient-to-b from-[#ffe6ef] via-[#fffbfd] to-white relative overflow-y-auto" style={{ height: '100dvh', maxHeight: '100dvh' }}>
         {/* Header minimalista */}
@@ -395,13 +416,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
             {(!expired || bankDetected) ? (
               <div className="flex gap-2.5 justify-center">
                 <button
-                  onClick={() => {
-                    const link = document.createElement('a');
-                    link.href = '/api/store/download-qr';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                  }}
+                  onClick={downloadVisibleQr}
                   className="h-11 px-5 rounded-2xl font-black text-white text-[13px] shadow-[0_6px_16px_rgb(255,45,120,0.28)] active:scale-95 transition-all flex items-center gap-1.5"
                   style={{ background: BRAND }}
                 >
