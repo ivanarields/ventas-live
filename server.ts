@@ -2728,6 +2728,14 @@ const PORT = Number(process.env.PORT || 3001);
     return Number.isFinite(value) && value > 0 ? value : null;
   }
 
+  function extractStoreDeclaredPhone(text: unknown): string {
+    const value = String(text ?? '');
+    const explicit = value.match(/(?:mi\s*n[uú]mero\s*(?:es)?|numero\s*(?:es)?|tel[eé]fono\s*(?:es)?|whats?app\s*(?:es)?)\D*(591)?\s*([67]\d{7})/i);
+    if (explicit?.[2]) return explicit[2];
+    const anyPhone = value.match(/\b(?:591)?([67]\d{7})\b/);
+    return anyPhone?.[1] ?? '';
+  }
+
   function firstJsonObject(text: string): string | null {
     const cleaned = String(text ?? '').trim().replace(/```json|```/g, '');
     const start = cleaned.indexOf('{');
@@ -2842,8 +2850,29 @@ Responde solo JSON:
 
       // Extraer código de pedido del texto (#1042 → "1042")
       const refMatch = messageText?.match(/#(\d+)/);
-      const orderRef = refMatch?.[1] ?? null;
+      let orderRef = refMatch?.[1] ?? null;
       const cleanFrom = fromWa.replace(/\D/g, '');
+      let declaredPhone = extractStoreDeclaredPhone(messageText);
+
+      if (!orderRef && mediaUrl) {
+        const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+        const { data: previousMessage } = await supabaseStore
+          .from('wa_messages')
+          .select('order_ref, summary, matched_order_id')
+          .eq('from_wa', cleanFrom)
+          .not('order_ref', 'is', null)
+          .gte('received_at', since)
+          .order('received_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (previousMessage?.order_ref) {
+          orderRef = String(previousMessage.order_ref);
+          declaredPhone = declaredPhone || extractStoreDeclaredPhone(previousMessage.summary);
+        }
+      }
+
+      const matchPhone = declaredPhone || cleanFrom;
       const receipt = mediaUrl ? await analyzeStoreReceipt(mediaUrl) : null;
 
       // Guardar mensaje
@@ -2868,7 +2897,7 @@ Responde solo JSON:
 
       // Intentar cruzar con pedido solo cuando el comprobante trae codigo
       const result = await tryMatchOrder({
-        senderPhone: fromWa,
+        senderPhone: matchPhone,
         orderRef,
         windowMinutes: 10,
       });

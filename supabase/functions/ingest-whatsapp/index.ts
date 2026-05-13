@@ -162,7 +162,7 @@ async function processMessage(req: Request) {
       console.log(`✅ Mensaje guardado correctamente.`);
     }
 
-    if (!mensajeError && SERVER_URL && direction === 'in' && content && /#\d+/.test(content)) {
+    if (!mensajeError && SERVER_URL && direction === 'in' && ((content && /#\d+/.test(content)) || hasUsableMedia)) {
       EdgeRuntime.waitUntil((async () => {
         try {
           const response = await fetch(`${SERVER_URL.replace(/\/$/, '')}/api/store/ingest-wa`, {
