@@ -451,13 +451,17 @@ async function ensureDailyPedidoFromPayment(input: {
     .gte('date', range.start)
     .lt('date', range.end)
     .order('created_at', { ascending: true })
-    .limit(1);
+    .limit(20);
   if (existingError) {
     console.error('[daily pedido select]', existingError);
     return null;
   }
 
-  const current = existing?.[0] ?? null;
+  const current = (existing ?? []).find((pedido: any) => (
+    String(pedido.source ?? '').toUpperCase() !== 'WEB' &&
+    String(pedido.label_type ?? '').toUpperCase() !== 'WEB' &&
+    !String(pedido.label ?? '').toUpperCase().startsWith('WEB-')
+  )) ?? null;
   if (current) {
     const status = String(current.status ?? '').toLowerCase();
     const keepStatus = ['listo', 'preparado', 'ready', 'entregado'].includes(status);
@@ -466,6 +470,7 @@ async function ensureDailyPedidoFromPayment(input: {
       .select('pago')
       .eq('user_id', INGEST_USER_ID)
       .eq('customer_id', input.customerId)
+      .neq('method', 'Tienda Online')
       .gte('date', range.start)
       .lt('date', range.end);
     const totalPagado = (pagosDelDia ?? []).reduce((sum: number, pago: any) => sum + (Number(pago.pago) || 0), 0);

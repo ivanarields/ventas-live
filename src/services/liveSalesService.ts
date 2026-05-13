@@ -247,10 +247,14 @@ export async function ensureMainDailyPedido(
     .gte('date', range.start)
     .lt('date', range.end)
     .order('created_at', { ascending: true })
-    .limit(1);
+    .limit(20);
   if (existingError) throw existingError;
 
-  const current = existing?.[0] ?? null;
+  const current = (existing ?? []).find((pedido: any) => (
+    String(pedido.source ?? '').toUpperCase() !== 'WEB' &&
+    String(pedido.label_type ?? '').toUpperCase() !== 'WEB' &&
+    !String(pedido.label ?? '').toUpperCase().startsWith('WEB-')
+  )) ?? null;
   if (current) {
     const status = String(current.status ?? '').toLowerCase();
     const keepStatus = ['listo', 'preparado', 'ready', 'entregado'].includes(status);

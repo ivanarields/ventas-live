@@ -922,6 +922,24 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         return [...value.matchAll(/media=(https?:\/\/[^\s]+)/g)].map(match => match[1]).filter(Boolean);
       }
 
+      function isValidStoreProofSummary(text: unknown) {
+        const value = String(text ?? '');
+        if (!value.includes('media=')) return false;
+        if (/proof_amount_mismatch=/i.test(value)) return false;
+
+        const receiptMatch = value.match(/receipt=(\{[^\n]+\})/);
+        if (!receiptMatch) return false;
+
+        try {
+          const receipt = JSON.parse(receiptMatch[1]);
+          const amount = Number(String(receipt?.monto ?? '').replace(',', '.'));
+          const name = String(receipt?.cliente ?? '').trim().toLowerCase();
+          return Number.isFinite(amount) && amount > 0 && name !== '' && name !== 'null';
+        } catch {
+          return false;
+        }
+      }
+
       let mensajesLive = mensajes;
       if (storeSupabase) {
         try {
@@ -947,8 +965,14 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
               .in('from_wa', phones)
               .limit(200);
             for (const event of storeWaMessages ?? []) {
-              for (const id of extractPanelMessageIds(event.summary)) storePanelMessageIds.add(id);
-              for (const url of extractMediaUrls(event.summary)) storeMediaUrls.add(url);
+              const hasMedia = String(event.summary ?? '').includes('media=');
+              const validStoreProof = isValidStoreProofSummary(event.summary);
+              if (!hasMedia || validStoreProof) {
+                for (const id of extractPanelMessageIds(event.summary)) storePanelMessageIds.add(id);
+              }
+              if (validStoreProof) {
+                for (const url of extractMediaUrls(event.summary)) storeMediaUrls.add(url);
+              }
             }
 
             const { data: storePaymentEvents } = await storeSupabase
@@ -958,8 +982,14 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
               .gte('created_at', since)
               .limit(200);
             for (const event of storePaymentEvents ?? []) {
-              for (const id of extractPanelMessageIds(event.raw_text)) storePanelMessageIds.add(id);
-              for (const url of extractMediaUrls(event.raw_text)) storeMediaUrls.add(url);
+              const hasMedia = String(event.raw_text ?? '').includes('media=');
+              const validStoreProof = isValidStoreProofSummary(event.raw_text);
+              if (!hasMedia || validStoreProof) {
+                for (const id of extractPanelMessageIds(event.raw_text)) storePanelMessageIds.add(id);
+              }
+              if (validStoreProof) {
+                for (const url of extractMediaUrls(event.raw_text)) storeMediaUrls.add(url);
+              }
             }
           }
 

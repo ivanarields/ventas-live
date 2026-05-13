@@ -2877,7 +2877,7 @@ Responde solo JSON:
         const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
         const { data: previousMessage } = await supabaseStore
           .from('wa_messages')
-          .select('order_ref, summary, matched_order_id')
+          .select('order_ref, summary, matched_order_id, received_at')
           .eq('from_wa', cleanFrom)
           .not('order_ref', 'is', null)
           .gte('received_at', since)
@@ -2886,8 +2886,23 @@ Responde solo JSON:
           .maybeSingle();
 
         if (previousMessage?.order_ref) {
-          orderRef = String(previousMessage.order_ref);
-          declaredPhone = declaredPhone || extractStoreDeclaredPhone(previousMessage.summary);
+          const previousOrderId = Number(previousMessage.matched_order_id ?? previousMessage.order_ref);
+          const { data: previousOrder } = Number.isFinite(previousOrderId)
+            ? await supabaseStore
+                .from('store_orders')
+                .select('status, wa_proof_received, payment_verified_at')
+                .eq('id', previousOrderId)
+                .maybeSingle()
+            : { data: null } as any;
+
+          const stillNeedsProof =
+            !previousOrder ||
+            (!previousOrder.wa_proof_received && !previousOrder.payment_verified_at && !['paid', 'confirmed'].includes(String(previousOrder.status ?? '').toLowerCase()));
+
+          if (stillNeedsProof) {
+            orderRef = String(previousMessage.order_ref);
+            declaredPhone = declaredPhone || extractStoreDeclaredPhone(previousMessage.summary);
+          }
         }
       }
 
