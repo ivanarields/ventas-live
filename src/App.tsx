@@ -5845,13 +5845,13 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                 <p className="unit-label text-gray-400">
                   <AnimatePresence mode="popLayout" initial={false}>
                     <motion.span
-                      key={selectedPedido.label || 'A'}
+                      key={(selectedPedido.label || '').toUpperCase().startsWith('WEB') ? 'sin-web-label' : (selectedPedido.label || 'A')}
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -5 }}
                       transition={{ duration: 0.1 }}
                     >
-                      {selectedPedido.label || 'A'}
+                      {(selectedPedido.label || '').toUpperCase().startsWith('WEB') ? '' : (selectedPedido.label || 'A')}
                     </motion.span>
                   </AnimatePresence>
                 </p>
