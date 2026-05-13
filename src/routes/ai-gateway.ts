@@ -36,6 +36,12 @@ export function createAiRouter(supabase: SupabaseClient, supabasePanel?: Supabas
     if (!url || !key) return null;
     return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   })();
+  const storeSupabase = (() => {
+    const url = process.env.VITE_STORE_SUPABASE_URL;
+    const key = process.env.STORE_SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) return null;
+    return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  })();
 
   type AiCallResult = { text: string; model: string; latencyMs: number };
   type OpenRouterKeySource = 'env' | 'db';
@@ -886,6 +892,99 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       if (dbErr) return res.status(500).json({ error: dbErr.message });
       if (!mensajes?.length) return res.status(404).json({ error: 'Sin mensajes' });
 
+      function phoneDigits(value: unknown) {
+        return String(value ?? '').replace(/\D/g, '');
+      }
+
+      function phoneVariants(value: unknown) {
+        const digits = phoneDigits(value);
+        const variants = new Set<string>();
+        if (!digits) return [];
+        variants.add(digits);
+        variants.add(`+${digits}`);
+        if (digits.startsWith('591')) variants.add(digits.slice(3));
+        else variants.add(`591${digits}`);
+        return [...variants].filter(Boolean);
+      }
+
+      function extractStoreRefs(text: unknown) {
+        const value = String(text ?? '');
+        return [...value.matchAll(/#(\d{1,8})/g)].map(match => Number(match[1])).filter(Number.isFinite);
+      }
+
+      function extractPanelMessageIds(text: unknown) {
+        const value = String(text ?? '');
+        return [...value.matchAll(/panel_message_id=([^\s]+)/g)].map(match => match[1]).filter(Boolean);
+      }
+
+      function extractMediaUrls(text: unknown) {
+        const value = String(text ?? '');
+        return [...value.matchAll(/media=(https?:\/\/[^\s]+)/g)].map(match => match[1]).filter(Boolean);
+      }
+
+      let mensajesLive = mensajes;
+      if (storeSupabase) {
+        try {
+          const refs = [...new Set(mensajes.flatMap((m: any) => extractStoreRefs(m.content)))];
+          const validStoreRefs = new Set<number>();
+          if (refs.length > 0) {
+            const { data: storeOrders } = await storeSupabase
+              .from('store_orders')
+              .select('id')
+              .in('id', refs);
+            for (const order of storeOrders ?? []) validStoreRefs.add(Number(order.id));
+          }
+
+          const phones = phoneVariants(panelPhone);
+          const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          const storePanelMessageIds = new Set<string>();
+          const storeMediaUrls = new Set<string>();
+
+          if (phones.length > 0) {
+            const { data: storeWaMessages } = await storeSupabase
+              .from('wa_messages')
+              .select('summary')
+              .in('from_wa', phones)
+              .limit(200);
+            for (const event of storeWaMessages ?? []) {
+              for (const id of extractPanelMessageIds(event.summary)) storePanelMessageIds.add(id);
+              for (const url of extractMediaUrls(event.summary)) storeMediaUrls.add(url);
+            }
+
+            const { data: storePaymentEvents } = await storeSupabase
+              .from('payment_events')
+              .select('raw_text, created_at')
+              .in('sender_wa', phones)
+              .gte('created_at', since)
+              .limit(200);
+            for (const event of storePaymentEvents ?? []) {
+              for (const id of extractPanelMessageIds(event.raw_text)) storePanelMessageIds.add(id);
+              for (const url of extractMediaUrls(event.raw_text)) storeMediaUrls.add(url);
+            }
+          }
+
+          mensajesLive = mensajes.filter((m: any) => {
+            const id = String(m.id ?? '');
+            const contentRefs = extractStoreRefs(m.content);
+            if (contentRefs.some(ref => validStoreRefs.has(ref))) return false;
+            if (id && storePanelMessageIds.has(id)) return false;
+            if (m.media_url && storeMediaUrls.has(m.media_url)) return false;
+            return true;
+          });
+
+          if (mensajesLive.length !== mensajes.length) {
+            console.log(`[summarize] ${mensajes.length - mensajesLive.length} mensaje(s) de tienda ignorados para Live`);
+          }
+        } catch (filterError: any) {
+          console.warn('[summarize] filtro tienda/live no aplicado:', filterError?.message ?? filterError);
+        }
+      }
+
+      if (!mensajesLive.length) {
+        await panelDb.from('panel_clientes').update({ resumen_at: new Date().toISOString() }).eq('id', clienteId);
+        return res.json({ ok: true, skipped: true, reason: 'solo_mensajes_tienda' });
+      }
+
       const textos: string[]    = [];
       const fotoItems: Array<{ id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null }> = [];
       const audioUrls: string[] = [];
@@ -902,7 +1001,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         }
       }
 
-      for (const m of mensajes) {
+      for (const m of mensajesLive) {
         if (m.content?.trim()) textos.push(m.content.trim());
         if (m.media_url) {
           const mt: string = m.media_type || '';
