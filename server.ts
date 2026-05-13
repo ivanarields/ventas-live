@@ -78,6 +78,11 @@ const phoneVariants = (...values: unknown[]) => {
   return [...set];
 };
 
+const publicStoreBaseUrl = (value?: string | null) => {
+  const base = String(value || 'https://leidydiaz.live').replace(/\s+/g, '').replace(/\/+$/, '');
+  return base || 'https://leidydiaz.live';
+};
+
 const isMissingDbObject = (error: any) => {
   const code = error?.code;
   const message = String(error?.message ?? '').toLowerCase();
@@ -1216,8 +1221,7 @@ const PORT = Number(process.env.PORT || 3001);
           );
 
           // 3. Construir link al perfil de tienda
-          const storeBase = process.env.STORE_PUBLIC_URL ||
-            `${req.protocol}://${req.get('host')}`;
+          const storeBase = publicStoreBaseUrl(process.env.STORE_PUBLIC_URL || `${req.protocol}://${req.get('host')}`);
           const profileLink = `${storeBase}/tienda#profile/orders`;
 
           // 4. Mensaje personalizado (Live / pedidos manuales)
@@ -2618,7 +2622,7 @@ const PORT = Number(process.env.PORT || 3001);
     //    los pedidos WEB se filtran en PATCH /api/pedidos/:id.
     if (data.customer_wa) {
       try {
-        const storeBase = process.env.STORE_PUBLIC_URL || 'https://leidydiaz.live';
+        const storeBase = publicStoreBaseUrl(process.env.STORE_PUBLIC_URL);
         const profileLink = `${storeBase}/tienda#profile/orders`;
         const nameForGreeting = (finalName || data.customer_name || '').trim();
         const firstName = nameForGreeting.split(' ')[0] || '';
@@ -2810,7 +2814,7 @@ Responde solo JSON:
           headers: {
             Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': process.env.STORE_PUBLIC_URL || 'https://leidydiaz.live',
+            'HTTP-Referer': publicStoreBaseUrl(process.env.STORE_PUBLIC_URL),
             'X-Title': 'Ventas Live Store Receipt',
           },
           body: JSON.stringify({
@@ -3341,7 +3345,7 @@ Responde solo JSON:
       if (!userId || !phone) return res.status(400).json({ error: 'userId y phone requeridos' });
 
       const cleanPhone = phone.replace(/\D/g, '');
-      const storeBase = process.env.STORE_URL || 'https://leidydiaz.live';
+      const storeBase = publicStoreBaseUrl(process.env.STORE_URL);
       const storeLink = `${storeBase}/tienda#profile/confirmar`;
 
       const message = `¡Hola! 👗 Ya tenemos tus prendas del Live listas para confirmación. Ingresa aquí para seleccionar las tuyas: ${storeLink}\n\n(Necesitarás tu PIN de la tienda)`;

@@ -339,6 +339,18 @@ export async function processNextWhatsappQueueMessage(
   userId?: string,
   options: { storeOnly?: boolean } = {},
 ) {
+  const staleSendingCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  let staleQuery = supabase
+    .from('whatsapp_message_queue')
+    .update({ status: 'failed', error_detail: 'sending_timeout_revisar_si_llego' })
+    .eq('status', 'sending')
+    .lt('updated_at', staleSendingCutoff);
+
+  if (userId) staleQuery = staleQuery.eq('user_id', userId);
+  if (options.storeOnly) staleQuery = staleQuery.eq('reference_type', 'store_order');
+
+  await staleQuery;
+
   let message: QueuedMessage | null = null;
 
   if (userId) {

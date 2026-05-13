@@ -292,6 +292,7 @@ Campos clave de `pagos_venta_live`: `estado`, `main_pago_id`, `panel_mensaje_id`
 | `WEBHOOK_SECRET` | Valida peticiones del bridge WA (`ventas-live-bridge-2026`) |
 | `WHATSAPP_BRIDGE_URL` | URL del bridge en DigitalOcean (`http://134.122.123.253:3001`) |
 | `MACRODROID_RECEIVER_URL` | URL operativa del receiver 24/7 (`http://134.122.123.253:3002/api/ingest-notification`) |
+| `STORE_PUBLIC_URL` / `STORE_URL` | Base publica usada en links de perfil enviados por WhatsApp; el servidor limpia espacios y saltos de linea antes de armar `/tienda#profile/orders` o `/tienda#profile/confirmar` |
 | `STORE_OWNER_USER_ID` | Si falta, los pedidos de tienda quedan invisibles (`13dcb065-6099-4776-982c-18e98ff2b27a`) |
 | `VITE_STORE_WA_NUMBER` | Fallback del número WA de la tienda. En producción se usa `official_wa_number` guardado en `store_settings` (configurable desde Configuraciones de la app) |
 
@@ -304,3 +305,4 @@ Campos clave de `pagos_venta_live`: `estado`, `main_pago_id`, `panel_mensaje_id`
 3. **Los pedidos web (`source='WEB'`) no disparan el mensaje "PEDIDO LISTO"** que sí reciben los clientes del Live.
 4. **Las fotos de comprobante WhatsApp viven solo en PanelPedido** — nunca se copian a TiendaOnline ni a ChehiAppAbril.
 5. **`revision_manual` ≠ `pendiente_whatsapp`**: aunque ambos son ámbar, tienen causas distintas y se tratan diferente.
+6. **La cola WhatsApp marca como fallido un `sending` viejo**: si un envio queda mas de 10 minutos en `sending`, pasa a `failed` con `sending_timeout_revisar_si_llego` para revision/reintento manual.
