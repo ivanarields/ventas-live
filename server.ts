@@ -3469,12 +3469,14 @@ Responde solo JSON:
       const deviceSecret = req.headers['x-device-secret'] as string ?? '';
 
       const supabaseUrl = process.env.SUPABASE_URL!;
+      const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
       const response = await fetch(
         `${supabaseUrl}/functions/v1/ingest-notification`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(supabaseAnonKey ? { apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` } : {}),
             'x-device-id': deviceId,
             'x-device-secret': deviceSecret,
           },
