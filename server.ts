@@ -2794,31 +2794,50 @@ Extrae SOLO estos datos:
 Responde solo JSON:
 {"cliente":"NOMBRE o null","monto":numero_o_null,"hora":"HH:MM o null"}`;
 
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': process.env.STORE_PUBLIC_URL || 'https://leidydiaz.live',
-          'X-Title': 'Ventas Live Store Receipt',
-        },
-        body: JSON.stringify({
-          model: process.env.OPENROUTER_VISION_MODEL || process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
-          response_format: { type: 'json_object' },
-          temperature: 0,
-          max_tokens: 250,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: dataUrl } },
-            ],
-          }],
-        }),
-      });
+      const preferredModels = [
+        process.env.OPENROUTER_VISION_MODEL,
+        'openai/gpt-4o-mini',
+        'google/gemini-2.0-flash-001',
+      ]
+        .map(model => String(model ?? '').trim())
+        .filter((model, index, list) => model && list.indexOf(model) === index);
 
-      const bodyText = await response.text();
-      if (!response.ok) return { cliente: null, monto: null, hora: null, error: bodyText.slice(0, 300) };
+      let bodyText = '';
+      let lastError = '';
+      for (const model of preferredModels) {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.STORE_PUBLIC_URL || 'https://leidydiaz.live',
+            'X-Title': 'Ventas Live Store Receipt',
+          },
+          body: JSON.stringify({
+            model,
+            response_format: { type: 'json_object' },
+            temperature: 0,
+            max_tokens: 250,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                { type: 'image_url', image_url: { url: dataUrl } },
+              ],
+            }],
+          }),
+        });
+
+        bodyText = await response.text();
+        if (response.ok) {
+          lastError = '';
+          break;
+        }
+        lastError = `${model}: ${bodyText.slice(0, 240)}`;
+        bodyText = '';
+      }
+
+      if (!bodyText) return { cliente: null, monto: null, hora: null, error: lastError || 'No se pudo analizar comprobante' };
       const parsed = JSON.parse(firstJsonObject(bodyText) ?? bodyText);
       const content = parsed?.choices?.[0]?.message?.content ?? bodyText;
       const receiptJson = typeof content === 'string' ? JSON.parse(firstJsonObject(content) ?? content) : content;
