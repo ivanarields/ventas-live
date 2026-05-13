@@ -1048,6 +1048,19 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         }
       }
       const fotoUrls = fotoItems.map((item) => item.url);
+      const allFotoItems = (mensajes ?? [])
+        .filter((m: any) => m.media_url)
+        .filter((m: any) => {
+          const mt: string = m.media_type || '';
+          return mt.startsWith('image/') || /\.(jpg|jpeg|png|webp)/i.test(m.media_url);
+        })
+        .map((m: any) => ({
+          id: m.id ?? null,
+          url: m.media_url,
+          mediaType: m.media_type || null,
+          createdAt: m.created_at ?? null,
+          content: m.content ?? null,
+        }));
       const fotoUrlsRecientes = [...fotoItems]
         .sort((a, b) => {
           const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
@@ -1116,6 +1129,50 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 - Si es otra cosa: escribe "OTRO: [descripción breve]".
 Responde SOLO con una línea, sin explicaciones.`;
 
+      const receiptHintRegex = /\b(comprobante|pago|pagado|transferencia|qr|banco|importe|remitente|operaci[oó]n|transacci[oó]n|autorizaci[oó]n|bs\.?|bob)\b/i;
+
+      async function extraerComprobanteDesdeImagen(
+        imagePart: { inlineData: { mimeType: string; data: string } },
+        label: string,
+      ) {
+        const extractResult = await safeCallAi({
+          userId, feature: 'chat_summary',
+          prompt: comprobantePrompt,
+          imageParts: [imagePart], maxTokens: 250, temperature: 0, jsonMode: true,
+        }, label);
+        if (!extractResult?.text) return null;
+        const match = extractResult.text.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        try {
+          return normalizeComprobanteResponse(JSON.parse(match[0]));
+        } catch {
+          return null;
+        }
+      }
+
+      function registrarComprobanteDetectado(
+        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null },
+        texto: string,
+        extraido: { cliente: string | null; monto: string | null; hora: string | null } | null,
+      ) {
+        comprobanteDetectado = true;
+        comprobanteMediaUrl = comprobanteMediaUrl ?? item.url;
+        comprobanteTexto = comprobanteTexto ?? texto;
+        if (extraido && !comprobanteExtraido) {
+          comprobanteExtraido = extraido;
+          const datos = [
+            extraido.cliente,
+            extraido.monto ? `${extraido.monto} Bs` : null,
+            extraido.hora,
+          ].filter(Boolean).join(' - ');
+          comprobanteTexto = datos || comprobanteTexto;
+        }
+        const alreadyAdded = comprobantesDetectados.some(existing =>
+          (item.id && existing.item.id === item.id) || existing.item.url === item.url
+        );
+        if (!alreadyAdded) comprobantesDetectados.push({ item, texto, extraido });
+      }
+
       async function clasificarYExtraer(
         item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null },
         options: { addDescription?: boolean } = {},
@@ -1143,43 +1200,23 @@ Responde SOLO con una línea, sin explicaciones.`;
         const esComprobante = upperDesc.startsWith('COMPROBANTE');
         const esPrenda = upperDesc.startsWith('PRENDA');
 
-        if (esComprobante) {
-          comprobanteDetectado = true;
-          comprobanteMediaUrl = comprobanteMediaUrl ?? item.url;
-          comprobanteTexto = comprobanteTexto ?? desc;
-        }
-
         let extraido: { cliente: string | null; monto: string | null; hora: string | null } | null = null;
         if (esComprobante) {
-          const extractResult = await safeCallAi({
-            userId, feature: 'chat_summary',
-            prompt: comprobantePrompt,
-            imageParts: [imagePart], maxTokens: 250, temperature: 0, jsonMode: true,
-          }, 'extraccion de comprobante');
-          if (extractResult?.text) {
-            const match = extractResult.text.match(/\{[\s\S]*\}/);
-            if (match) {
-              try {
-                const raw = JSON.parse(match[0]);
-                extraido = normalizeComprobanteResponse(raw);
-                if (extraido && !comprobanteExtraido) {
-                  comprobanteExtraido = extraido;
-                  const datos = [
-                    extraido.cliente,
-                    extraido.monto ? `${extraido.monto} Bs` : null,
-                    extraido.hora,
-                  ].filter(Boolean).join(' - ');
-                  comprobanteTexto = datos || comprobanteTexto;
-                }
-              } catch { /* ignorar */ }
-            }
-          }
-          comprobantesDetectados.push({ item, texto: desc, extraido });
+          extraido = await extraerComprobanteDesdeImagen(imagePart, 'extraccion de comprobante');
+          registrarComprobanteDetectado(item, desc, extraido);
         } else if (esPrenda) {
           prendasDetectadas.push({ item, descripcion: desc.replace(/^PRENDA:\s*/i, '').trim() || desc });
+        } else {
+          const fallbackExtraido = await extraerComprobanteDesdeImagen(imagePart, 'extraccion de comprobante fallback live');
+          if (fallbackExtraido?.cliente || fallbackExtraido?.monto || receiptHintRegex.test(desc)) {
+            extraido = fallbackExtraido;
+            registrarComprobanteDetectado(item, desc || 'COMPROBANTE: posible comprobante de pago', extraido);
+          }
         }
 
-        const tipo = esComprobante ? 'comprobante' : esPrenda ? 'prenda' : 'otro';
+        const tipo = comprobantesDetectados.some(existing =>
+          (item.id && existing.item.id === item.id) || existing.item.url === item.url
+        ) ? 'comprobante' : esPrenda ? 'prenda' : 'otro';
         analisisFotos.set(cacheKey, { tipo, desc, extraido });
         return tipo;
       }
@@ -1193,6 +1230,27 @@ Responde SOLO con una línea, sin explicaciones.`;
 
       for (const item of fotoItemsRecientes.slice(0, 8)) {
         await clasificarYExtraer(item, { addDescription: false });
+      }
+
+      const textoConversacion = textos.join('\n');
+      const hayContextoPago = /\b(pagu[eé]|pago|pagado|comprobante|transferencia|deposit[eé]|qr|envi[oó]\s+el\s+pago|le\s+env[ií]o\s+el\s+pago)\b/i.test(textoConversacion);
+      if (hayContextoPago && comprobantesDetectados.length === 0 && (fotoItemsRecientes.length > 0 || allFotoItems.length > 0)) {
+        const fallbackCandidates = [...fotoItemsRecientes, ...allFotoItems]
+          .filter((item, index, list) => list.findIndex(other => other.url === item.url) === index)
+          .sort((a, b) => {
+            const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+            const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+            return tb - ta;
+          });
+        const fallbackItem = fallbackCandidates.find(item => {
+          const cached = analisisFotos.get(item.id ?? item.url);
+          return cached?.tipo !== 'prenda';
+        }) ?? fallbackCandidates[0];
+        registrarComprobanteDetectado(
+          fallbackItem,
+          'COMPROBANTE: imagen pendiente de revision manual',
+          null,
+        );
       }
 
       // Generar resumen final del pedido

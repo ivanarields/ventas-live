@@ -306,3 +306,4 @@ Campos clave de `pagos_venta_live`: `estado`, `main_pago_id`, `panel_mensaje_id`
 4. **Las fotos de comprobante WhatsApp viven solo en PanelPedido** — nunca se copian a TiendaOnline ni a ChehiAppAbril.
 5. **`revision_manual` ≠ `pendiente_whatsapp`**: aunque ambos son ámbar, tienen causas distintas y se tratan diferente.
 6. **La cola WhatsApp marca como fallido un `sending` viejo**: si un envio queda mas de 10 minutos en `sending`, pasa a `failed` con `sending_timeout_revisar_si_llego` para revision/reintento manual.
+7. **Live no debe perder comprobantes si falla la clasificacion inicial**: si una imagen no fue clasificada como `COMPROBANTE` pero el extractor logra leer nombre o monto, se registra igual como comprobante Live; si aun asi no hay datos pero el chat habla de pago y hay una imagen reciente, se crea revision manual usando la imagen mas reciente del chat para que la operadora revise la banca.
