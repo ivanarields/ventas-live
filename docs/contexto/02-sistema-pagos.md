@@ -47,7 +47,8 @@ El operador toca el botón "Registrar" en la pestaña **Pagos**. Abre un formula
        ↓
 6. (Mientras tanto, o antes/después)
    MacroDroid captura notificación Yape/banco en el celular
-   → POST /api/ingest-notification (proxy en server.ts)
+   → POST http://134.122.123.253:3002/api/ingest-notification (MacroDroid Receiver)
+   → reenvía a /api/ingest-notification (proxy en server.ts)
    → Edge Function ingest-notification (ChehiAppAbril)
    → Parsea nombre + monto en cascada (ver sección Parseo)
    → Inserta en `pagos` (ChehiAppAbril)
@@ -106,7 +107,8 @@ La tienda en `/tienda` tiene su propio flujo de pago automático separado del ca
 2. Cliente paga por Yape/transferencia
        ↓
 3A. MacroDroid captura notificación bancaria en el celular
-    → POST https://leidydiaz.live/api/ingest-notification (proxy en server.ts)
+    → POST http://134.122.123.253:3002/api/ingest-notification (MacroDroid Receiver 24/7)
+    → reenvía a https://leidydiaz.live/api/ingest-notification (proxy en server.ts)
     → Edge Function ingest-notification (ChehiAppAbril)
     → Crea pago en pagos (method="Notificación bancaria")
     → Bloque "REENVÍO A TIENDA ONLINE" busca store_orders pending en últimos 2 min
@@ -289,6 +291,7 @@ Campos clave de `pagos_venta_live`: `estado`, `main_pago_id`, `panel_mensaje_id`
 | `INGEST_DEVICE_SECRET` | Header que valida que MacroDroid es legítimo |
 | `WEBHOOK_SECRET` | Valida peticiones del bridge WA (`ventas-live-bridge-2026`) |
 | `WHATSAPP_BRIDGE_URL` | URL del bridge en DigitalOcean (`http://134.122.123.253:3001`) |
+| `MACRODROID_RECEIVER_URL` | URL operativa del receiver 24/7 (`http://134.122.123.253:3002/api/ingest-notification`) |
 | `STORE_OWNER_USER_ID` | Si falta, los pedidos de tienda quedan invisibles (`13dcb065-6099-4776-982c-18e98ff2b27a`) |
 | `VITE_STORE_WA_NUMBER` | Fallback del número WA de la tienda. En producción se usa `official_wa_number` guardado en `store_settings` (configurable desde Configuraciones de la app) |
 
