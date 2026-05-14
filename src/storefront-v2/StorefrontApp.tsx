@@ -352,10 +352,8 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
       {/* Contenido Frontal */}
       <div className="relative flex flex-col items-center justify-center flex-1 px-8 text-center z-10">
         <div className="mb-8">
-          <div className="w-20 h-20 rounded-[28px] bg-gradient-to-br from-[#ff2d78] to-[#ff6fa3] flex items-center justify-center mx-auto mb-5 shadow-lg shadow-[#ff2d78]/30">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-            </svg>
+          <div className="w-20 h-20 rounded-[28px] bg-white flex items-center justify-center mx-auto mb-5 shadow-lg shadow-[#ff2d78]/25 border border-[#ff2d78]/10 overflow-hidden">
+            <img src="/logo.png" alt="Leidy American" className="w-full h-full object-contain p-2" loading="eager" decoding="async" />
           </div>
           <h1 className="text-[32px] font-black text-gray-800 tracking-tight leading-none">
             Leidy

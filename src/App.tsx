@@ -2582,6 +2582,8 @@ function PaymentsView({
   const [verifyingWebOrderId, setVerifyingWebOrderId] = useState<number | null>(null);
   const [pendingWebOrders, setPendingWebOrders] = useState<any[]>([]);
   const [webProfiles, setWebProfiles] = useState<any[]>([]);
+  const [webProductImages, setWebProductImages] = useState<Record<string, string>>({});
+  const [webPreview, setWebPreview] = useState<{ profile: any; order: any; item: any; image: string } | null>(null);
   const [procesandoLive, setProcesandoLive] = useState(false);
   const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
   const [paymentChannel, setPaymentChannel] = useState<'normal' | 'web'>('normal');
@@ -2736,9 +2738,15 @@ function PaymentsView({
   }, [payments, selectedDates, selectedTime]);
 
   const webProfilesForDate = useMemo(() => {
+    const isCountableWebOrder = (order: any) => {
+      const status = String(order?.status ?? '').toLowerCase();
+      return status !== 'cancelled';
+    };
+
     return webProfiles
       .map((profile: any) => {
         const ordersForDate = (profile.orders ?? []).filter((order: any) => {
+          if (!isCountableWebOrder(order)) return false;
           const orderDate = parseAppDate(order.created_at);
           if (!orderDate) return false;
           const matchesDate = selectedDates.some(d => d.toDateString() === orderDate.toDateString());
@@ -2758,6 +2766,54 @@ function PaymentsView({
       })
       .filter((profile: any) => profile.orders.length > 0);
   }, [webProfiles, selectedDates, selectedTime]);
+
+  useEffect(() => {
+    if (paymentChannel !== 'web') return;
+
+    const ids = [...new Set(
+      webProfilesForDate.flatMap((profile: any) =>
+        (profile.orders ?? []).flatMap((order: any) =>
+          (order.items ?? [])
+            .map((item: any) => String(item?.productId ?? '').trim())
+            .filter((id: string) => id)
+        )
+      )
+    )];
+
+    if (ids.length === 0) {
+      setWebProductImages({});
+      return;
+    }
+
+    let cancelled = false;
+    const missingIds = ids.filter((id) => !webProductImages[id]);
+    if (missingIds.length === 0) return;
+
+    Promise.all(missingIds.map(async (id) => {
+      try {
+        const res = await fetch(`/api/products/${encodeURIComponent(id)}`);
+        if (!res.ok) return null;
+        const product = await res.json().catch(() => null);
+        const image = Array.isArray(product?.images) && product.images.length > 0
+          ? product.images[0]
+          : String(product?.image_url ?? '').trim();
+        return image ? { id, image } : null;
+      } catch {
+        return null;
+      }
+    })).then((entries) => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const entry of entries) {
+        if (entry?.id && entry.image) next[entry.id] = entry.image;
+      }
+      if (Object.keys(next).length > 0) {
+        setWebProductImages((prev) => ({ ...prev, ...next }));
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [paymentChannel, webProfilesForDate, webProductImages]);
 
   const stats = useMemo(() => {
     if (paymentChannel === 'web') {
@@ -3067,30 +3123,34 @@ function PaymentsView({
               </div>
             </div>
             <div className="p-3 space-y-2">
-              {profile.orders.map((order: any) => (
-                <div key={`web-order-${order.id}`} className="rounded-2xl bg-gray-50 px-3 py-2">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div>
-                      <p className="text-[11px] font-black text-gray-800">Pedido #{order.id}</p>
-                      <p className={cn(
-                        "text-[9px] font-black uppercase tracking-wider",
-                        order.status === 'paid' ? "text-emerald-600" : order.status === 'cancelled' ? "text-gray-400" : "text-amber-500"
-                      )}>
-                        {order.status === 'paid' ? 'Pago verificado' : order.status}
-                      </p>
+              {profile.orders.map((order: any) => {
+                const firstItem = (order.items ?? [])[0];
+                const itemImage = firstItem?.image || firstItem?.imageUrl || webProductImages[String(firstItem?.productId ?? "")] || firstItem?.productImage || "";
+                const itemCount = (order.items ?? []).length || 0;
+                return (
+                  <button
+                    key={`web-order-${order.id}`}
+                    onClick={() => firstItem && setWebPreview({ profile, order, item: firstItem, image: itemImage })}
+                    className="w-full flex items-center gap-2 rounded-xl bg-white border border-gray-100 px-2 py-1.5 text-left active:scale-[0.99]"
+                  >
+                    <div className="w-11 h-11 rounded-lg bg-gray-100 border border-gray-100 overflow-hidden flex-shrink-0">
+                      {itemImage ? (
+                        <img src={itemImage} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                      ) : null}
                     </div>
-                    <span className="font-black text-brand text-sm">Bs {order.total}</span>
-                  </div>
-                  <div className="space-y-1">
-                    {(order.items ?? []).map((item: any, idx: number) => (
-                      <div key={`${order.id}-${idx}`} className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="font-bold text-gray-700 truncate">{item.productName || item.name || 'Producto tienda'}</span>
-                        <span className="text-gray-400 font-black">x{item.quantity || 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-black text-gray-800 truncate">{firstItem?.productName || firstItem?.name || 'Producto tienda'}</p>
+                      <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider">
+                        <span className={cn(order.status === 'paid' ? 'text-emerald-600' : order.status === 'cancelled' ? 'text-gray-400' : 'text-amber-500')}>
+                          {order.status === 'paid' ? 'Verificado' : order.status}
+                        </span>
+                        {itemCount > 1 && <span className="text-gray-300">? +{itemCount - 1}</span>}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                    </div>
+                    <span className="font-black text-brand text-sm shrink-0">Bs {order.total}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}
@@ -3101,6 +3161,61 @@ function PaymentsView({
             <p className="text-sm font-bold uppercase tracking-[0.2em]">
               Sin pagos web para esta fecha
             </p>
+          </div>
+        )}
+
+        {webPreview && (
+          <div
+            className="fixed inset-0 z-[220] flex items-end sm:items-center justify-center p-3"
+            onClick={() => setWebPreview(null)}
+          >
+            <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
+            <div
+              className="relative z-10 w-full max-w-md rounded-[24px] bg-white shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-400">Detalle del pedido web</p>
+                  <p className="text-sm font-black text-gray-800 truncate">Pedido #{webPreview.order.id}</p>
+                  <p className="text-[10px] font-bold text-gray-500 truncate">{webPreview.profile.name || 'Cliente tienda'}</p>
+                </div>
+                <button onClick={() => setWebPreview(null)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="rounded-2xl overflow-hidden bg-gray-100 border border-gray-100 aspect-square">
+                  {webPreview.image ? (
+                    <img src={webPreview.image} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-300 text-[11px] font-black uppercase tracking-widest">
+                      Sin foto
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black text-gray-800 truncate">{webPreview.item.productName || webPreview.item.name || 'Producto tienda'}</p>
+                    <p className="text-[10px] text-gray-400 font-bold">
+                      {webPreview.item.quantity || 1} unid{(webPreview.item.quantity || 1) !== 1 ? 'ades' : 'ad'}
+                      {webPreview.item.size ? ` · Talla ${webPreview.item.size}` : ''}
+                    </p>
+                  </div>
+                  <span className="text-sm font-black text-brand shrink-0">Bs {webPreview.order.total}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-wider">
+                  <div className="rounded-xl bg-gray-50 px-3 py-2 text-gray-500">Pedido #{webPreview.order.id}</div>
+                  <div className={cn(
+                    "rounded-xl px-3 py-2 text-center",
+                    webPreview.order.status === 'paid' ? "bg-emerald-50 text-emerald-600" :
+                    webPreview.order.status === 'cancelled' ? "bg-gray-100 text-gray-500" : "bg-amber-50 text-amber-600"
+                  )}>
+                    {webPreview.order.status === 'paid' ? 'Pago verificado' : webPreview.order.status}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

@@ -926,6 +926,18 @@ const PORT = Number(process.env.PORT || 3001);
         safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,items,payment_verified_at,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
       ]);
 
+      const productImageMap = new Map<string, string>();
+      const { data: productRows } = await supabaseStore
+        .from('products')
+        .select('id, images, image_url');
+
+      for (const product of (productRows ?? []) as any[]) {
+        const image = Array.isArray(product.images) && product.images.length > 0
+          ? product.images[0]
+          : product.image_url ?? '';
+        if (image) productImageMap.set(String(product.id), image);
+      }
+
       const groups: Record<string, any> = {};
 
       for (const customer of storeCustomers as any[]) {
@@ -956,7 +968,15 @@ const PORT = Number(process.env.PORT || 3001);
             total: 0,
           };
         }
-        groups[key].orders.push(order);
+        const enrichedItems = Array.isArray(order.items) ? order.items.map((item: any) => ({
+          ...item,
+          image: String(item?.image ?? '').trim() || productImageMap.get(String(item?.productId)) || '',
+          imageUrl: String(item?.imageUrl ?? '').trim() || productImageMap.get(String(item?.productId)) || '',
+        })) : [];
+        groups[key].orders.push({
+          ...order,
+          items: enrichedItems,
+        });
         groups[key].total += Number(order.total ?? 0);
         if ((!groups[key].name || groups[key].name === 'Cliente tienda') && order.customer_name) {
           groups[key].name = order.customer_name;
