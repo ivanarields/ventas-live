@@ -188,6 +188,17 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
     return order;
   }
 
+  async function syncPanelClientEstado(clienteId: string, order: any) {
+    const estadoPanel = String(order?.estado ?? '') === 'pagos_verificados'
+      ? 'pagado_verificado'
+      : 'solo_comprobante';
+
+    await supabasePanel
+      .from('panel_clientes')
+      .update({ estado: estadoPanel })
+      .eq('id', clienteId);
+  }
+
   router.get('/cards', async (req: Request, res: Response) => {
     if (!uid(req)) return res.status(401).json({ error: 'x-user-id requerido' });
 
@@ -471,6 +482,7 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
       if (updateError) throw updateError;
 
       const order = await recomputeAndSync(userId, pagoLive.pedido_live_id);
+      await syncPanelClientEstado(String(pagoLive.cliente_id), order);
       res.json({ ok: true, payment: updatedPago, order });
     } catch (err: any) {
       console.error('[live-sales/payments:verify-manual]', err);
@@ -502,6 +514,7 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
       if (updateError) throw updateError;
 
       const order = await recomputeAndSync(userId, pagoLive.pedido_live_id);
+      await syncPanelClientEstado(String(pagoLive.cliente_id), order);
       res.json({ ok: true, payment: updatedPago, order });
     } catch (err: any) {
       console.error('[live-sales/payments:reject]', err);
