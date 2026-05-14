@@ -352,8 +352,8 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
       {/* Contenido Frontal */}
       <div className="relative flex flex-col items-center justify-center flex-1 px-8 text-center z-10">
         <div className="mb-8">
-          <div className="w-20 h-20 rounded-[28px] bg-white flex items-center justify-center mx-auto mb-5 shadow-lg shadow-[#ff2d78]/25 border border-[#ff2d78]/10 overflow-hidden">
-            <img src="/logo.png" alt="Leidy American" className="w-full h-full object-contain p-2" loading="eager" decoding="async" />
+          <div className="w-20 h-20 mx-auto mb-5 overflow-hidden">
+            <img src="/logo.png" alt="Leidy American" className="w-full h-full object-contain" loading="eager" decoding="async" />
           </div>
           <h1 className="text-[32px] font-black text-gray-800 tracking-tight leading-none">
             Leidy
