@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { Rocket } from 'lucide-react';
 
 import { Product, productsApi } from './services/productsApi';
-import { DEFAULT_STORE_CHIPS, StoreChip, parseStoreChips } from './config/storefrontConfig';
+import { StoreChip, parseStoreChips } from './config/storefrontConfig';
 
 const ProductGallery = lazy(() => import('./components/ProductGallery').then(m => ({ default: m.ProductGallery })));
 const ProductDetail = lazy(() => import('./components/ProductDetail').then(m => ({ default: m.ProductDetail })));
@@ -305,7 +305,7 @@ function StoreSkeleton() {
 }
 
 function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstallable, onInstall, darkMode, onToggleDarkMode }: { onEnter: () => void, onOpenProfile: () => void, onOpenCustomerCenter: () => void, isInstallable: boolean, onInstall: () => void, darkMode: boolean, onToggleDarkMode: () => void }) {
-  const [mainCategories, setMainCategories] = useState<StoreChip[]>(DEFAULT_STORE_CHIPS.slice(0, 4));
+  const [mainCategories, setMainCategories] = useState<StoreChip[]>([]);
 
   useEffect(() => {
     fetch('/api/store/settings')
@@ -368,13 +368,15 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
           </p>
         </div>
 
-        <div className="flex flex-wrap justify-center gap-2 mb-10 w-full px-4">
-          {mainCategories.map(cat => (
-            <span key={cat.id} className="px-3 py-1.5 bg-[#fff0f5] text-[#ff2d78] text-[11px] font-black rounded-full uppercase tracking-wider">
-              {cat.label}
-            </span>
-          ))}
-        </div>
+        {mainCategories.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2 mb-10 w-full px-4">
+            {mainCategories.map(cat => (
+              <span key={cat.id} className="px-3 py-1.5 bg-[#fff0f5] text-[#ff2d78] text-[11px] font-black rounded-full uppercase tracking-wider">
+                {cat.label}
+              </span>
+            ))}
+          </div>
+        )}
 
         <button
           onClick={onEnter}

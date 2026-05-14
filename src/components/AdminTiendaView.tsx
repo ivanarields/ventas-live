@@ -121,7 +121,8 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [selectionRequests, setSelectionRequests] = useState<any[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
-  const [storeChips, setStoreChips] = useState<StoreChip[]>(DEFAULT_STORE_CHIPS);
+  const [storeChips, setStoreChips] = useState<StoreChip[]>([]);
+  const [storeChipsLoaded, setStoreChipsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -264,6 +265,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   };
 
   const loadSettings = async () => {
+    setStoreChipsLoaded(false);
     try {
       const res = await fetch('/api/store/settings');
       if (res.ok) {
@@ -279,6 +281,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
         }
       } catch {}
     } catch (e) { console.error(e); }
+    finally { setStoreChipsLoaded(true); }
   };
 
   const savePickupDates = async (dates: typeof pickupDates) => {
@@ -1088,7 +1091,10 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               </div>
               <button
                 type="button"
-                onClick={() => saveStoreChips(DEFAULT_STORE_CHIPS)}
+                onClick={() => {
+                  if (!confirm('Restaurar las categorias por defecto? Esto reemplaza la configuracion actual.')) return;
+                  saveStoreChips(DEFAULT_STORE_CHIPS);
+                }}
                 className="px-3 py-1.5 rounded-full bg-gray-100 text-[11px] font-black text-gray-500"
               >
                 Restaurar
@@ -1096,7 +1102,11 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
             </div>
 
             <div className="space-y-2">
-              {storeChips.map((chip, idx) => (
+              {!storeChipsLoaded ? (
+                [1, 2, 3].map(n => (
+                  <div key={n} className="h-[50px] rounded-xl border border-gray-100 bg-gray-50 animate-pulse" />
+                ))
+              ) : storeChips.map((chip, idx) => (
                 <div key={chip.id} className="grid grid-cols-[1fr_76px_34px_34px] gap-2 items-center rounded-xl border border-gray-100 bg-gray-50 p-2">
                   <input
                     value={chip.label}
@@ -1151,19 +1161,21 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
 
             <button
               type="button"
+              disabled={!storeChipsLoaded}
               onClick={() => {
                 const id = `chip-${Date.now()}`;
                 const next = [...storeChips, { id, label: 'Nueva', value: 'Nueva', kind: 'category' as const, icon: '', active: true, sort: storeChips.length * 10 }];
                 saveStoreChips(next);
               }}
-              className="w-full h-10 rounded-xl border border-dashed border-pink-200 bg-pink-50 text-[12px] font-black text-[#ff2d78]"
+              className="w-full h-10 rounded-xl border border-dashed border-pink-200 bg-pink-50 text-[12px] font-black text-[#ff2d78] disabled:opacity-50"
             >
               Agregar categoria o promo
             </button>
             <button
               type="button"
+              disabled={!storeChipsLoaded}
               onClick={() => saveStoreChips(storeChips)}
-              className="w-full h-10 rounded-xl bg-[#ff2d78] text-[12px] font-black text-white shadow-sm"
+              className="w-full h-10 rounded-xl bg-[#ff2d78] text-[12px] font-black text-white shadow-sm disabled:opacity-50"
             >
               Guardar categorias
             </button>

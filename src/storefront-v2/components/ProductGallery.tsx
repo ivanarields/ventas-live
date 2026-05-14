@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { productsApi, Product, storeImageUrl } from '../services/productsApi';
-import { DEFAULT_STORE_CHIPS, StoreChip, parseStoreChips } from '../config/storefrontConfig';
+import { StoreChip, parseStoreChips } from '../config/storefrontConfig';
 import { storeFavoritesApi } from '../services/storeFavoritesApi';
 
 interface Props {
@@ -31,7 +31,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
   const [reservedMap, setReservedMap] = useState<Record<string, string>>({});
   const [, forceRender] = useState(0);
   const [filter, setFilter] = useState<string>('');
-  const [chips, setChips] = useState<StoreChip[]>(DEFAULT_STORE_CHIPS);
+  const [chips, setChips] = useState<StoreChip[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -93,7 +93,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
         setChips(next);
         if (filter && !next.some(chip => chip.active && chip.value === filter)) setFilter('');
       })
-      .catch(() => setChips(DEFAULT_STORE_CHIPS));
+      .catch(() => setChips([]));
   }, []);
 
   useEffect(() => {
@@ -237,19 +237,21 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
           </div>
         )}
 
-        <div className="flex gap-5 px-5 pb-2 overflow-x-auto scrollbar-hide">
-          {visibleChips.map(chip => (
-            <button
-              key={chip.id}
-              onClick={() => setFilter(filter === chip.value ? '' : chip.value)}
-              className="relative flex-shrink-0 py-2 text-[11px] font-black uppercase tracking-[0.08em] transition-colors"
-              style={{ color: filter === chip.value ? '#ff2d78' : darkMode ? '#bdaeb8' : '#8a8f98' }}
-            >
-              {chip.label}
-              {filter === chip.value && <span className="absolute left-0 right-0 -bottom-0.5 mx-auto h-0.5 rounded-full bg-[#ff2d78]" />}
-            </button>
-          ))}
-        </div>
+        {visibleChips.length > 0 && (
+          <div className="flex gap-5 px-5 pb-2 overflow-x-auto scrollbar-hide">
+            {visibleChips.map(chip => (
+              <button
+                key={chip.id}
+                onClick={() => setFilter(filter === chip.value ? '' : chip.value)}
+                className="relative flex-shrink-0 py-2 text-[11px] font-black uppercase tracking-[0.08em] transition-colors"
+                style={{ color: filter === chip.value ? '#ff2d78' : darkMode ? '#bdaeb8' : '#8a8f98' }}
+              >
+                {chip.label}
+                {filter === chip.value && <span className="absolute left-0 right-0 -bottom-0.5 mx-auto h-0.5 rounded-full bg-[#ff2d78]" />}
+              </button>
+            ))}
+          </div>
+        )}
       </header>
 
       <div className="flex-1 px-4 pt-4 pb-24 overflow-visible">

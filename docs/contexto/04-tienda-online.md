@@ -564,6 +564,7 @@ Etiqueta WEB en historial de pagos
 Perfil de clienta con tab inicial en Pedidos
 Links de mensajes automáticos a perfil/orders
 Rellenar con IA robusto (limpia JSON de basura)
+Categorias del catalogo sin parpadeo de defaults: la tienda y Config esperan `store_chips` antes de pintar chips
 ```
 
 Pendiente recomendado:
