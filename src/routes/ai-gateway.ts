@@ -961,10 +961,15 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
           if (phones.length > 0) {
             const { data: storeWaMessages } = await storeSupabase
               .from('wa_messages')
-              .select('summary')
+              .select('summary,matched_order_id,order_ref')
               .in('from_wa', phones)
               .limit(200);
             for (const event of storeWaMessages ?? []) {
+              const orderRef = Number((event as any).order_ref);
+              const belongsToStoreOrder = Boolean((event as any).matched_order_id) ||
+                (Number.isFinite(orderRef) && validStoreRefs.has(orderRef));
+              if (!belongsToStoreOrder) continue;
+
               const hasMedia = String(event.summary ?? '').includes('media=');
               const validStoreProof = isValidStoreProofSummary(event.summary);
               if (!hasMedia || validStoreProof) {
@@ -977,11 +982,13 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
 
             const { data: storePaymentEvents } = await storeSupabase
               .from('payment_events')
-              .select('raw_text, created_at')
+              .select('raw_text, created_at,matched_order_id')
               .in('sender_wa', phones)
               .gte('created_at', since)
               .limit(200);
             for (const event of storePaymentEvents ?? []) {
+              if (!(event as any).matched_order_id) continue;
+
               const hasMedia = String(event.raw_text ?? '').includes('media=');
               const validStoreProof = isValidStoreProofSummary(event.raw_text);
               if (!hasMedia || validStoreProof) {
