@@ -1209,9 +1209,11 @@ Responde SOLO con una línea, sin explicaciones.`;
           ].filter(Boolean).join(' - ');
           comprobanteTexto = datos || comprobanteTexto;
         }
-        const alreadyAdded = comprobantesDetectados.some(existing =>
-          (item.id && existing.item.id === item.id) || existing.item.url === item.url
-        );
+        // Dedup por ID de mensaje (no por URL): dos mensajes distintos con el mismo
+        // media_url pueden ser comprobantes independientes si el bridge reutilizó la misma URL.
+        const alreadyAdded = item.id
+          ? comprobantesDetectados.some(existing => existing.item.id === item.id)
+          : comprobantesDetectados.some(existing => existing.item.url === item.url);
         if (!alreadyAdded) comprobantesDetectados.push({ item, texto, extraido });
       }
 

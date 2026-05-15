@@ -608,22 +608,25 @@ export async function upsertWhatsappLivePayment(
   };
 
   let existing: any = null;
-  if (input.comprobanteMediaUrl) {
+  // Dedup primario: por ID del mensaje de WhatsApp (el más específico).
+  // Dos mensajes distintos nunca deben fusionarse aunque compartan la misma imagen.
+  if (input.panelMensajeId) {
     const { data, error } = await panelDb
       .from('pagos_venta_live')
       .select('*')
-      .eq('comprobante_media_url', input.comprobanteMediaUrl)
+      .eq('panel_mensaje_id', input.panelMensajeId)
       .limit(1)
       .maybeSingle();
     if (error) throw error;
     existing = data;
   }
 
-  if (!existing && input.panelMensajeId) {
+  if (!existing && !input.panelMensajeId && input.comprobanteMediaUrl) {
+    // Fallback: buscar por URL de imagen solo cuando no hay ID de mensaje
     const { data, error } = await panelDb
       .from('pagos_venta_live')
       .select('*')
-      .eq('panel_mensaje_id', input.panelMensajeId)
+      .eq('comprobante_media_url', input.comprobanteMediaUrl)
       .limit(1)
       .maybeSingle();
     if (error) throw error;
@@ -655,10 +658,9 @@ export async function upsertWhatsappLivePayment(
     if (dupe && !esMensajeDiferente && dupe.estado === 'pendiente_whatsapp') {
       // Mismo mensaje reenviado por error → fusionar
       existing = dupe;
-    } else if (dupe) {
-      // Mensaje diferente (o dupe ya verificado) → crear registro nuevo
-      duplicateOf = dupe.id;
     }
+    // Si el mensaje tiene distinto ID → es un pago diferente aunque tenga el mismo monto.
+    // No marcarlo como duplicado; puede ser un pago legítimo independiente.
   }
 
   const payload = {
