@@ -2587,7 +2587,7 @@ function PaymentsView({
   const [webPreview, setWebPreview] = useState<{ profile: any; order: any; item: any; image: string } | null>(null);
   const [procesandoLive, setProcesandoLive] = useState(false);
   const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
-  const [liveSessionState, setLiveSessionState] = useState<{ active: any | null; lastCompleted: any | null } | null>(null);
+  const [liveSessionState, setLiveSessionState] = useState<{ active: any | null; lastCompleted: any | null; lastAny: any | null } | null>(null);
   const [paymentChannel, setPaymentChannel] = useState<'normal' | 'web' | 'unassigned'>('normal');
 
   const refreshLiveSessionState = async () => {
@@ -2596,12 +2596,13 @@ function PaymentsView({
       setLiveSessionState({
         active: data.active ?? null,
         lastCompleted: data.lastCompleted ?? null,
+        lastAny: data.lastAny ?? null,
       });
       return data;
     } catch (e) {
       console.warn('[live-session] estado no disponible:', e);
-      setLiveSessionState({ active: null, lastCompleted: null });
-      return { active: null, lastCompleted: null };
+      setLiveSessionState({ active: null, lastCompleted: null, lastAny: null });
+      return { active: null, lastCompleted: null, lastAny: null };
     }
   };
 
@@ -2756,18 +2757,21 @@ function PaymentsView({
     if (isStorePayment(payment)) return false;
     if (payment?.livePaymentId) return false;
     const origin = String(payment?.verificationOrigin ?? 'other');
-    if (origin === 'verificado_macrodroid' || origin === 'whatsapp_pending' || origin === 'manual') return false;
+    // server.ts:1027 mapea pagos_venta_live.estado a estos valores. Cualquiera de ellos = tab Live.
+    if (origin === 'automatic' || origin === 'whatsapp_pending' || origin === 'manual') return false;
+    // origin es 'macrodroid_only' u 'other'.
     if (payment?.customerId) {
-      const session = liveSessionState?.lastCompleted ?? liveSessionState?.active;
+      // Cliente conocido: usar rango Live (incluso sesión ya procesada) para clasificar.
+      const session = liveSessionState?.active ?? liveSessionState?.lastCompleted ?? liveSessionState?.lastAny;
       if (session?.startAt && session?.endAt) {
         const t = new Date(payment.date ?? 0).getTime();
         const s = new Date(session.startAt).getTime();
         const e = new Date(session.endAt).getTime();
         return t < s || t > e;
       }
-      return false;
+      return false; // sin info de sesión → conservador, queda en Live
     }
-    return true;
+    return true; // sin customerId → siempre Sin asignar
   };
 
   const paymentBelongsToChannel = (payment: any) => {

@@ -40,10 +40,10 @@
 | 2026-05-12 | Fix fusión logística QR tienda: maybeSingle, retry customer, cascade nombre → crea pedido WEB + pago Tienda Online | `4e05b13` |
 | 2026-05-10 | Tienda unificada: eliminar storefront antiguo, renombrar tienda-v2 a tienda | pendiente |
 | 2026-05-10 | Flujo CONFIRMAR: clienta confirma prendas desde perfil/confirmar | pendiente |
-| 2026-05-15 | **BUG CRÍTICO**: pagos fuera del Live con `customerId` aparecen en tab "Live" (no en "Sin asignar") — `isUnassignedPayment` en `src/App.tsx:2757` | pendiente fix |
-| 2026-05-15 | **BUG CRÍTICO**: `ensureMainDailyPedido` infla `total_amount` del pedido Live con pagos del mismo día fuera del rango — `liveSalesService.ts:241` y `ingest-notification:446` | pendiente fix |
-| 2026-05-15 | **BUG CRÍTICO**: fallback a epoch en `identity.ts:466` muestra 0 fotos en pedidos Live viejos (>2hs de su sesión) | pendiente fix |
-| 2026-05-15 | MacroDroid CREA `customer_id` automáticamente para cualquier nombre → "Sin asignar" nunca se llena | pendiente fix |
+| 2026-05-15 | **fix**: backend expone `lastAny` y `isUnassignedPayment` usa origin `'automatic'`. Tras prueba real 14:09 se detectó que `lastCompleted` se anulaba al procesarse y que mi comparación con `'verificado_macrodroid'` nunca matcheaba (server.ts:1027 devuelve `'automatic'`). | resuelto |
+| 2026-05-15 | fix: `isUnassignedPayment` clasifica pagos fuera del Live a "Sin asignar" usando rango de sesión | `846df33` |
+| 2026-05-15 | fix: `ensureMainDailyPedido` no infla `total_amount` de pedidos `live_sales` con pagos MacroDroid fuera del Live | `846df33` |
+| 2026-05-15 | fix: `identity.ts` ya no usa epoch como fallback, ahora usa pivot±days; ventana ampliada de 2h a 8h | `846df33` |
 | 2026-05-10 | Flujo ENTREGA: admin configura fechas de retiro, clienta elige desde perfil/entrega | pendiente |
 | 2026-05-10 | Número oficial de WA configurable en Configuraciones (official_wa_number) | pendiente |
 | 2026-05-10 | Bug fix: endpoints pickup-dates corregidos para tabla key-value | pendiente |

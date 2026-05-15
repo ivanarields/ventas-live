@@ -211,17 +211,40 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
     return ((data ?? []) as LiveProcessingSession[]).find(session => !parseSessionNotes(session.notes).processed_at) ?? null;
   }
 
+  // Devuelve la última sesión Live (procesada o no). Necesario para clasificar
+  // pagos MacroDroid que llegan después del LISTAR LIVE: el frontend usa este
+  // rango para decidir si un pago fuera del Live va a "Sin asignar".
+  async function getLastAnyLive(userId: string) {
+    if (!supabaseMain) return null;
+    const { data, error } = await supabaseMain
+      .from('live_sessions')
+      .select('id,title,scheduled_at,duration,status,notes,created_at')
+      .eq('user_id', userId)
+      .in('status', ['completed', 'live'])
+      .ilike('title', 'Procesamiento Live%')
+      .order('scheduled_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data as LiveProcessingSession | null;
+  }
+
   router.get('/sessions/current', async (req: Request, res: Response) => {
     const userId = uid(req);
     if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
     if (!supabaseMain) return res.status(503).json({ error: 'Base principal no disponible' });
 
     try {
-      const [active, lastCompleted] = await Promise.all([
+      const [active, lastCompleted, lastAny] = await Promise.all([
         getActiveProcessingLive(userId),
         getLastCompletedProcessingLive(userId),
+        getLastAnyLive(userId),
       ]);
-      res.json({ active: publicSession(active), lastCompleted: publicSession(lastCompleted) });
+      res.json({
+        active: publicSession(active),
+        lastCompleted: publicSession(lastCompleted),
+        lastAny: publicSession(lastAny),
+      });
     } catch (err: any) {
       console.error('[live-sales/sessions/current]', err);
       res.status(500).json({ error: err?.message ?? 'Error interno' });

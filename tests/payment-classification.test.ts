@@ -22,16 +22,12 @@ function classifyPayment(
   liveSession?: { startAt: string; endAt: string } | null,
 ): 'live' | 'web' | 'unassigned' {
   if (isStorePayment(payment)) return 'web';
-
-  // Ligado explícitamente a un pagos_venta_live
   if (payment?.livePaymentId) return 'live';
 
   const origin = String(payment?.verificationOrigin ?? 'other');
+  if (origin === 'automatic' || origin === 'whatsapp_pending' || origin === 'manual') return 'live';
 
-  // Verificado o pendiente de verificar → Live
-  if (origin === 'verificado_macrodroid' || origin === 'whatsapp_pending' || origin === 'manual') return 'live';
-
-  // Tiene cliente conocido: usar rango del Live para decidir
+  // origin es 'macrodroid_only' u 'other'
   if (payment?.customerId) {
     if (liveSession?.startAt && liveSession?.endAt) {
       const t = new Date(payment.date ?? 0).getTime();
@@ -39,10 +35,9 @@ function classifyPayment(
       const e = new Date(liveSession.endAt).getTime();
       return t >= s && t <= e ? 'live' : 'unassigned';
     }
-    return 'live'; // Sin info de sesión → comportamiento conservador
+    return 'live'; // fallback conservador
   }
-
-  return 'unassigned';
+  return 'unassigned'; // sin customerId → siempre unassigned
 }
 
 // --- TESTS ---
@@ -60,10 +55,10 @@ test('pago de tienda online va a Web', () => {
   assert.equal(classifyPayment({ method: 'Tienda Online', customerId: 5, date: '2026-05-15T13:30:00Z' }, LIVE_SESSION), 'web');
 });
 
-test('pago verificado_macrodroid va a Live aunque esté fuera del rango', () => {
+test('pago automatic (verificado por MacroDroid + WA) va a Live aunque esté fuera del rango', () => {
   assert.equal(classifyPayment({
     customerId: 1,
-    verificationOrigin: 'verificado_macrodroid',
+    verificationOrigin: 'automatic',
     date: '2026-05-15T19:00:00Z',
   }, LIVE_SESSION), 'live');
 });
@@ -141,12 +136,27 @@ test('fallback de fotos: sin ventana Live no usa epoch', () => {
 });
 
 test('ensureDailyPedidoFromPayment: pedido live_sales no debe actualizar total_amount', () => {
-  // Simula la lógica del fix en ingest-notification
   function shouldUpdateTotal(currentSource: string): boolean {
     return String(currentSource ?? '').toLowerCase() !== 'live_sales';
   }
+  assert.equal(shouldUpdateTotal('live_sales'), false);
+  assert.equal(shouldUpdateTotal('macrodroid'), true);
+  assert.equal(shouldUpdateTotal(''), true);
+});
 
-  assert.equal(shouldUpdateTotal('live_sales'), false, 'live_sales → NO actualiza total');
-  assert.equal(shouldUpdateTotal('macrodroid'), true, 'macrodroid → SÍ actualiza total');
-  assert.equal(shouldUpdateTotal(''), true, 'sin source → SÍ actualiza total');
+test('pago Bs 10 después del Live procesado va a Sin asignar (caso real prueba 14:17)', () => {
+  // Reproduce el caso real del bug del usuario:
+  // - Sesión Live: 14:09 → 14:15 (UTC 18:09 → 18:15)
+  // - Pago MacroDroid llega a las 14:17 (UTC 18:17), después del cierre y del processed_at
+  // - El backend devuelve verification_origin='macrodroid_only' porque no hay match
+  // - lastAny tiene el rango incluso después del procesamiento
+  const liveSessionPostProcessing = {
+    startAt: '2026-05-15T18:09:32.220Z',
+    endAt:   '2026-05-15T18:15:00.000Z',
+  };
+  assert.equal(classifyPayment({
+    customerId: 497,
+    verificationOrigin: 'macrodroid_only',
+    date: '2026-05-15T18:17:00.000Z',
+  }, liveSessionPostProcessing), 'unassigned');
 });
