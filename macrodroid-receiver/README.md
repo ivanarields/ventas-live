@@ -15,7 +15,7 @@ Flujo:
 
 ## Variables
 
-- `FORWARD_URL`: URL actual de ingestion, por ejemplo `https://leidydiaz.live/api/ingest-notification`.
+- `FORWARD_URL`: URL actual de ingestion, por ejemplo `https://leidycandy.me/api/ingest-notification`.
 - `DEVICE_ID`: opcional. Si MacroDroid manda `x-device-id`, se reenvia ese valor.
 - `DEVICE_SECRET`: opcional. Si MacroDroid manda `x-device-secret`, se reenvia ese valor.
 - `RECEIVER_SECRET`: clave opcional para proteger este receiver.

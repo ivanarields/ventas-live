@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 const PORT = Number(process.env.PORT || 3000);
-const FORWARD_URL = process.env.FORWARD_URL || 'https://leidydiaz.live/api/ingest-notification';
+const FORWARD_URL = process.env.FORWARD_URL || 'https://leidycandy.me/api/ingest-notification';
 const DEVICE_ID = process.env.DEVICE_ID || '';
 const DEVICE_SECRET = process.env.DEVICE_SECRET || '';
 const RECEIVER_SECRET = process.env.RECEIVER_SECRET || '';

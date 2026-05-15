@@ -1,6 +1,6 @@
 import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
-import '../index.css';
+import './storefront.css';
 
 const StorefrontApp = lazy(() => import('./StorefrontApp'));
 

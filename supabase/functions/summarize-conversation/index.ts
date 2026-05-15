@@ -130,17 +130,29 @@ async function transcribirAudio(url: string): Promise<string> {
   }
 }
 
-async function describirFoto(url: string): Promise<string> {
+function normalizeTrafficDirection(direction: string | null | undefined): 'incoming' | 'outgoing' | 'unknown' {
+  const value = String(direction ?? '').trim().toLowerCase();
+  if (!value) return 'unknown';
+  if (['out', 'outgoing', 'sent', 'saliente', 'company', 'empresa'].includes(value)) return 'outgoing';
+  if (['in', 'incoming', 'received', 'entrante', 'entrada', 'customer', 'cliente'].includes(value)) return 'incoming';
+  if (value.startsWith('out')) return 'outgoing';
+  if (value.startsWith('in')) return 'incoming';
+  return 'unknown';
+}
+
+async function describirFoto(url: string, direction: string | null | undefined): Promise<string> {
   try {
     const r = await fetch(url);
     if (!r.ok) { console.warn('Foto fetch failed:', r.status, url); return ''; }
     const buf = await r.arrayBuffer();
     const b64 = toBase64(buf);
     const mime = url.endsWith('.png') ? 'image/png' : url.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    const outgoing = normalizeTrafficDirection(direction) === 'outgoing';
     const d = await openRouterWithImage(`Analiza esta imagen y responde con UNA SOLA línea:
 - Si es un COMPROBANTE de pago, transferencia o captura de QR bancario: escribe "COMPROBANTE: [nombre del pagador] - [monto] Bs - [banco o app]". Extrae el nombre REAL que aparece en el comprobante.
 - Si es una PRENDA de ropa: escribe "PRENDA: [color, tipo, características]". Máximo 15 palabras.
 - Si es otra cosa: escribe "OTRO: [descripción breve]".
+${outgoing ? '- La imagen la envió la EMPRESA al cliente. Nunca la clasifiques como comprobante de pago; solo como PRENDA u OTRO si corresponde.' : ''}
 Responde SOLO con una línea, sin explicaciones.`, mime, b64);
     console.log('Descripcion foto:', d);
     return d;
@@ -201,7 +213,7 @@ Deno.serve(async (req) => {
     // Describir fotos (máx 3)
     const descripciones: string[] = [];
     for (const u of fotoUrls.slice(0, 3)) {
-      const d = await describirFoto(u);
+      const d = await describirFoto(u, (mensajes.find((m: any) => m.media_url === u)?.direction ?? null) as any);
       if (d) descripciones.push(d);
     }
 

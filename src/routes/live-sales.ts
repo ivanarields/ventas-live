@@ -133,6 +133,217 @@ function buildCardPayload(body: any, fallbackEstado: EstadoTarjeta) {
 export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMain?: SupabaseClient, supabaseStore?: SupabaseClient) {
   const router = Router();
 
+  type LiveProcessingSession = {
+    id: number | string;
+    title?: string | null;
+    scheduled_at?: string | null;
+    duration?: number | null;
+    status?: string | null;
+    notes?: string | null;
+    created_at?: string | null;
+  };
+
+  function parseSessionNotes(raw: unknown): Record<string, any> {
+    if (!raw) return {};
+    if (typeof raw !== 'string') return typeof raw === 'object' ? raw as Record<string, any> : {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function sessionRange(session: LiveProcessingSession | null | undefined) {
+    if (!session?.scheduled_at) return null;
+    const start = new Date(session.scheduled_at);
+    if (!Number.isFinite(start.getTime())) return null;
+    const notes = parseSessionNotes(session.notes);
+    const explicitEnd = notes.ended_at ?? notes.end_at ?? null;
+    const end = explicitEnd
+      ? new Date(explicitEnd)
+      : new Date(start.getTime() + Math.max(1, Number(session.duration ?? 0)) * 60 * 1000);
+    if (!Number.isFinite(end.getTime()) || end <= start) return null;
+    return { startAt: start.toISOString(), endAt: end.toISOString() };
+  }
+
+  function publicSession(session: LiveProcessingSession | null | undefined) {
+    if (!session) return null;
+    const range = sessionRange(session);
+    return {
+      id: session.id,
+      title: session.title ?? '',
+      status: session.status ?? '',
+      startAt: range?.startAt ?? session.scheduled_at ?? null,
+      endAt: range?.endAt ?? null,
+      duration: session.duration ?? null,
+      createdAt: session.created_at ?? null,
+      notes: parseSessionNotes(session.notes),
+    };
+  }
+
+  async function getActiveProcessingLive(userId: string) {
+    if (!supabaseMain) return null;
+    const { data, error } = await supabaseMain
+      .from('live_sessions')
+      .select('id,title,scheduled_at,duration,status,notes,created_at')
+      .eq('user_id', userId)
+      .eq('status', 'live')
+      .ilike('title', 'Procesamiento Live%')
+      .order('scheduled_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data as LiveProcessingSession | null;
+  }
+
+  async function getLastCompletedProcessingLive(userId: string) {
+    if (!supabaseMain) return null;
+    const { data, error } = await supabaseMain
+      .from('live_sessions')
+      .select('id,title,scheduled_at,duration,status,notes,created_at')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .ilike('title', 'Procesamiento Live%')
+      .order('scheduled_at', { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    return ((data ?? []) as LiveProcessingSession[]).find(session => !parseSessionNotes(session.notes).processed_at) ?? null;
+  }
+
+  router.get('/sessions/current', async (req: Request, res: Response) => {
+    const userId = uid(req);
+    if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+    if (!supabaseMain) return res.status(503).json({ error: 'Base principal no disponible' });
+
+    try {
+      const [active, lastCompleted] = await Promise.all([
+        getActiveProcessingLive(userId),
+        getLastCompletedProcessingLive(userId),
+      ]);
+      res.json({ active: publicSession(active), lastCompleted: publicSession(lastCompleted) });
+    } catch (err: any) {
+      console.error('[live-sales/sessions/current]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  router.post('/sessions/start', async (req: Request, res: Response) => {
+    const userId = uid(req);
+    if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+    if (!supabaseMain) return res.status(503).json({ error: 'Base principal no disponible' });
+
+    try {
+      const existing = await getActiveProcessingLive(userId);
+      if (existing) return res.json({ ok: true, reused: true, session: publicSession(existing) });
+
+      const now = new Date();
+      const { data, error } = await supabaseMain
+        .from('live_sessions')
+        .insert({
+          title: `Procesamiento Live ${now.toLocaleDateString('es-BO')}`,
+          scheduled_at: now.toISOString(),
+          duration: 1,
+          status: 'live',
+          notes: JSON.stringify({
+            kind: 'whatsapp_live_processing',
+            started_at: now.toISOString(),
+            source: 'payments_live_button',
+          }),
+          user_id: userId,
+        })
+        .select('id,title,scheduled_at,duration,status,notes,created_at')
+        .single();
+      if (error) throw error;
+      res.status(201).json({ ok: true, session: publicSession(data as LiveProcessingSession) });
+    } catch (err: any) {
+      console.error('[live-sales/sessions/start]', err);
+      res.status(500).json({ error: err?.message ?? 'No se pudo iniciar Live' });
+    }
+  });
+
+  router.post('/sessions/close', async (req: Request, res: Response) => {
+    const userId = uid(req);
+    if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+    if (!supabaseMain) return res.status(503).json({ error: 'Base principal no disponible' });
+
+    try {
+      const active = await getActiveProcessingLive(userId);
+      if (!active) return res.status(409).json({ error: 'No hay Live iniciado para cerrar' });
+      if (!active.scheduled_at) return res.status(409).json({ error: 'El Live activo no tiene hora de inicio guardada' });
+
+      const requestedEndAt = req.body?.endAt ? new Date(req.body.endAt) : null;
+      const now = requestedEndAt && Number.isFinite(requestedEndAt.getTime()) ? requestedEndAt : new Date();
+      const start = new Date(active.scheduled_at);
+      if (!Number.isFinite(start.getTime())) return res.status(409).json({ error: 'La hora de inicio del Live no es valida' });
+      if (now <= start) return res.status(409).json({ error: 'La hora de cierre debe ser posterior al inicio del Live' });
+      if (now.getTime() > Date.now() + 5 * 60 * 1000) return res.status(409).json({ error: 'La hora de cierre no puede estar en el futuro' });
+
+      const duration = Math.max(1, Math.ceil((now.getTime() - start.getTime()) / 60000));
+      const notes = {
+        ...parseSessionNotes(active.notes),
+        kind: 'whatsapp_live_processing',
+        started_at: start.toISOString(),
+        ended_at: now.toISOString(),
+        closed_at: now.toISOString(),
+        source: 'payments_live_button',
+      };
+
+      const { data, error } = await supabaseMain
+        .from('live_sessions')
+        .update({
+          duration,
+          status: 'completed',
+          notes: JSON.stringify(notes),
+        })
+        .eq('id', active.id)
+        .eq('user_id', userId)
+        .eq('status', 'live')
+        .select('id,title,scheduled_at,duration,status,notes,created_at')
+        .single();
+      if (error) throw error;
+      res.json({ ok: true, session: publicSession(data as LiveProcessingSession) });
+    } catch (err: any) {
+      console.error('[live-sales/sessions/close]', err);
+      res.status(500).json({ error: err?.message ?? 'No se pudo cerrar Live' });
+    }
+  });
+
+  router.post('/sessions/:id/processed', async (req: Request, res: Response) => {
+    const userId = uid(req);
+    if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+    if (!supabaseMain) return res.status(503).json({ error: 'Base principal no disponible' });
+
+    try {
+      const { data: session, error: readError } = await supabaseMain
+        .from('live_sessions')
+        .select('id,title,scheduled_at,duration,status,notes,created_at')
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .eq('status', 'completed')
+        .single();
+      if (readError) throw readError;
+
+      const notes = {
+        ...parseSessionNotes((session as LiveProcessingSession).notes),
+        processed_at: new Date().toISOString(),
+        processed_source: 'payments_live_button',
+      };
+      const { data, error } = await supabaseMain
+        .from('live_sessions')
+        .update({ notes: JSON.stringify(notes) })
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .select('id,title,scheduled_at,duration,status,notes,created_at')
+        .single();
+      if (error) throw error;
+      res.json({ ok: true, session: publicSession(data as LiveProcessingSession) });
+    } catch (err: any) {
+      console.error('[live-sales/sessions/processed]', err);
+      res.status(500).json({ error: err?.message ?? 'No se pudo marcar Live como procesado' });
+    }
+  });
+
   async function listDayOrders(filters: {
     clienteId?: string | null;
     phone?: string | null;
@@ -766,6 +977,15 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
     if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
 
     try {
+      const startAtRaw = typeof req.query.startAt === 'string' ? req.query.startAt : '';
+      const endAtRaw = typeof req.query.endAt === 'string' ? req.query.endAt : '';
+      const startAt = startAtRaw ? new Date(startAtRaw) : null;
+      const endAt = endAtRaw ? new Date(endAtRaw) : null;
+      const hasRange = Boolean(startAt && endAt && Number.isFinite(startAt.getTime()) && Number.isFinite(endAt.getTime()) && endAt > startAt);
+      if ((startAtRaw || endAtRaw) && !hasRange) {
+        return res.status(400).json({ error: 'Rango de Live invalido' });
+      }
+
       // Traer todos los clientes del panel con al menos 1 mensaje
       const { data: clientes, error } = await supabasePanel
         .from('panel_clientes')
@@ -778,11 +998,17 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
       const clienteIds = (clientes ?? []).map((c: any) => c.id);
       if (clienteIds.length === 0) return res.json({ clientes: [] });
 
-      const { data: ultimosMensajes } = await supabasePanel
+      let mensajesQuery = supabasePanel
         .from('panel_mensajes')
         .select('cliente_id, created_at')
         .in('cliente_id', clienteIds)
         .order('created_at', { ascending: false });
+      if (hasRange) {
+        mensajesQuery = mensajesQuery
+          .gte('created_at', startAt!.toISOString())
+          .lte('created_at', endAt!.toISOString());
+      }
+      const { data: ultimosMensajes } = await mensajesQuery;
 
       // Agrupar: último mensaje por cliente
       const ultimoPorCliente: Record<string, string> = {};
@@ -799,7 +1025,10 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
         return new Date(ultimoMsg) > new Date(c.resumen_at); // mensaje más nuevo que resumen
       }).map((c: any) => ({ id: c.id, nombre: c.nombre ?? 'Sin nombre', phone: c.phone }));
 
-      res.json({ clientes: pendientes });
+      res.json({
+        clientes: pendientes,
+        range: hasRange ? { startAt: startAt!.toISOString(), endAt: endAt!.toISOString() } : null,
+      });
     } catch (err: any) {
       console.error('[live-sales/pending-conversations]', err);
       res.status(500).json({ error: err?.message ?? 'Error interno' });

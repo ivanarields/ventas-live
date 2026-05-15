@@ -5,7 +5,7 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
   const router = Router();
 
   const DEFAULT_SETTINGS: Record<string, string> = {
-    store_name: 'Leidy American',
+    store_name: 'Leidy Shop',
     store_phone: '59160003230',
     reservation_minutes: '1',
     delivery_enabled: 'true',
@@ -15,7 +15,7 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
     delivery_note: 'Entregas de lunes a sabado.',
     address: 'Consulta por WhatsApp',
     store_chips: '',
-    payment_qr_url: '/qr-yape.jpg',
+    payment_qr_url: '/qr-leidy-shop.jpg',
   };
 
   const DEFAULT_DELIVERY_SLOTS = [
@@ -129,6 +129,7 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
       for (const row of data || []) {
         settings[row.setting_key] = row.setting_value || '';
       }
+      res.setHeader('Cache-Control', 'public, max-age=30, s-maxage=120, stale-while-revalidate=300');
       res.json(settings);
     } catch (err: any) {
       if (isMissingTable(err)) return res.json(DEFAULT_SETTINGS);

@@ -869,8 +869,21 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
     try {
       const userId = req.headers['x-user-id'] as string;
       if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
-      const { clienteId } = req.body;
+      const { clienteId, startAt, endAt } = req.body;
       if (!clienteId) return res.status(400).json({ error: 'clienteId requerido' });
+
+      const rangeStart = startAt ? new Date(startAt) : null;
+      const rangeEnd = endAt ? new Date(endAt) : null;
+      const hasLiveRange = Boolean(
+        rangeStart &&
+        rangeEnd &&
+        Number.isFinite(rangeStart.getTime()) &&
+        Number.isFinite(rangeEnd.getTime()) &&
+        rangeEnd > rangeStart
+      );
+      if ((startAt || endAt) && !hasLiveRange) {
+        return res.status(400).json({ error: 'Rango de Live invalido' });
+      }
 
       const panelDb = supabasePanel ?? supabase;
 
@@ -883,14 +896,20 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       const panelPhone: string | null = clienteData?.phone ?? null;
 
       // Leer mensajes de la tabla del panel de WhatsApp
-      const { data: mensajes, error: dbErr } = await panelDb
+      let mensajesQuery = panelDb
         .from('panel_mensajes')
         .select('id, content, media_url, media_type, has_media, direction, created_at')
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: true });
+      if (hasLiveRange) {
+        mensajesQuery = mensajesQuery
+          .gte('created_at', rangeStart!.toISOString())
+          .lte('created_at', rangeEnd!.toISOString());
+      }
+      const { data: mensajes, error: dbErr } = await mensajesQuery;
 
       if (dbErr) return res.status(500).json({ error: dbErr.message });
-      if (!mensajes?.length) return res.status(404).json({ error: 'Sin mensajes' });
+      if (!mensajes?.length) return res.status(404).json({ error: hasLiveRange ? 'Sin mensajes en esta sesion Live' : 'Sin mensajes' });
 
       function phoneDigits(value: unknown) {
         return String(value ?? '').replace(/\D/g, '');
@@ -1023,7 +1042,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       }
 
       const textos: string[]    = [];
-      const fotoItems: Array<{ id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null }> = [];
+      const fotoItems: Array<{ id: string | null; url: string; mediaType: string | null; direction: string | null; createdAt: string | null; content: string | null }> = [];
       const audioUrls: string[] = [];
       const aiErrors = new Set<string>();
 
@@ -1048,6 +1067,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
             id: (m as any).id ?? null,
             url: m.media_url,
             mediaType: mt || null,
+            direction: m.direction ?? null,
             createdAt: m.created_at ?? null,
             content: m.content ?? null,
           });
@@ -1065,6 +1085,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
           id: m.id ?? null,
           url: m.media_url,
           mediaType: m.media_type || null,
+          direction: m.direction ?? null,
           createdAt: m.created_at ?? null,
           content: m.content ?? null,
         }));
@@ -1084,6 +1105,20 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
           const buf = await r.arrayBuffer();
           return { b64: Buffer.from(buf).toString('base64'), mime: r.headers.get('content-type') || 'application/octet-stream' };
         } catch { return null; }
+      }
+
+      function normalizeTrafficDirection(direction: string | null | undefined): 'incoming' | 'outgoing' | 'unknown' {
+        const value = String(direction ?? '').trim().toLowerCase();
+        if (!value) return 'unknown';
+        if (['out', 'outgoing', 'sent', 'saliente', 'company', 'empresa'].includes(value)) return 'outgoing';
+        if (['in', 'incoming', 'received', 'entrante', 'entrada', 'customer', 'cliente'].includes(value)) return 'incoming';
+        if (value.startsWith('out')) return 'outgoing';
+        if (value.startsWith('in')) return 'incoming';
+        return 'unknown';
+      }
+
+      function isOutgoingDirection(direction: string | null | undefined): boolean {
+        return normalizeTrafficDirection(direction) === 'outgoing';
       }
 
       // Cargar prompt de extracción de comprobantes (configurable desde el panel)
@@ -1116,12 +1151,12 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       let comprobanteMediaUrl: string | null = null;
       let comprobanteTexto: string | null = null;
       const comprobantesDetectados: Array<{
-        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null };
+        item: { id: string | null; url: string; mediaType: string | null; direction: string | null; createdAt: string | null; content: string | null };
         texto: string;
         extraido: { cliente: string | null; monto: string | null; hora: string | null } | null;
       }> = [];
       const prendasDetectadas: Array<{
-        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null };
+        item: { id: string | null; url: string; mediaType: string | null; direction: string | null; createdAt: string | null; content: string | null };
         descripcion: string;
       }> = [];
       const analisisFotos = new Map<string, {
@@ -1158,7 +1193,7 @@ Responde SOLO con una línea, sin explicaciones.`;
       }
 
       function registrarComprobanteDetectado(
-        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null },
+        item: { id: string | null; url: string; mediaType: string | null; direction: string | null; createdAt: string | null; content: string | null },
         texto: string,
         extraido: { cliente: string | null; monto: string | null; hora: string | null } | null,
       ) {
@@ -1181,7 +1216,7 @@ Responde SOLO con una línea, sin explicaciones.`;
       }
 
       async function clasificarYExtraer(
-        item: { id: string | null; url: string; mediaType: string | null; createdAt: string | null; content: string | null },
+        item: { id: string | null; url: string; mediaType: string | null; direction: string | null; createdAt: string | null; content: string | null },
         options: { addDescription?: boolean } = {},
       ): Promise<'comprobante' | 'prenda' | 'otro' | 'sin_datos'> {
         const cacheKey = item.id ?? item.url;
@@ -1195,16 +1230,20 @@ Responde SOLO con una línea, sin explicaciones.`;
         if (!media) return 'sin_datos';
         const mime = media.mime || item.mediaType || (item.url.endsWith('.png') ? 'image/png' : item.url.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
         const imagePart = { inlineData: { mimeType: mime, data: media.b64 } };
+        const outgoing = isOutgoingDirection(item.direction);
+        const classificationPrompt = `${CLASIFICADOR_PROMPT}\n\nCONTEXTO DEL REMITENTE:\n${outgoing
+          ? '- La imagen la envió la EMPRESA al cliente. Nunca puede ser un comprobante de pago. Si parece ropa, catálogo o anuncio, clasifícala como PRENDA o OTRO.'
+          : '- La imagen la envió el CLIENTE o no está claro quién la envió.'}`;
 
         const classResult = await safeCallAi({
           userId, feature: 'chat_summary',
-          prompt: CLASIFICADOR_PROMPT,
+          prompt: classificationPrompt,
           imageParts: [imagePart], maxTokens: 200, temperature: 0,
         }, 'clasificacion de imagen');
         const desc = classResult?.text?.trim() ?? '';
         if (desc && options.addDescription !== false) descripciones.push(desc);
         const upperDesc = desc.toUpperCase();
-        const esComprobante = upperDesc.startsWith('COMPROBANTE');
+        const esComprobante = !outgoing && upperDesc.startsWith('COMPROBANTE');
         const esPrenda = upperDesc.startsWith('PRENDA');
 
         let extraido: { cliente: string | null; monto: string | null; hora: string | null } | null = null;
@@ -1214,10 +1253,12 @@ Responde SOLO con una línea, sin explicaciones.`;
         } else if (esPrenda) {
           prendasDetectadas.push({ item, descripcion: desc.replace(/^PRENDA:\s*/i, '').trim() || desc });
         } else {
-          const fallbackExtraido = await extraerComprobanteDesdeImagen(imagePart, 'extraccion de comprobante fallback live');
-          if (fallbackExtraido?.cliente || fallbackExtraido?.monto || receiptHintRegex.test(desc)) {
-            extraido = fallbackExtraido;
-            registrarComprobanteDetectado(item, desc || 'COMPROBANTE: posible comprobante de pago', extraido);
+          if (!outgoing) {
+            const fallbackExtraido = await extraerComprobanteDesdeImagen(imagePart, 'extraccion de comprobante fallback live');
+            if (fallbackExtraido?.cliente || fallbackExtraido?.monto || receiptHintRegex.test(desc)) {
+              extraido = fallbackExtraido;
+              registrarComprobanteDetectado(item, desc || 'COMPROBANTE: posible comprobante de pago', extraido);
+            }
           }
         }
 
@@ -1226,6 +1267,21 @@ Responde SOLO con una línea, sin explicaciones.`;
         ) ? 'comprobante' : esPrenda ? 'prenda' : 'otro';
         analisisFotos.set(cacheKey, { tipo, desc, extraido });
         return tipo;
+      }
+
+      function ensureAllLiveImagesAreVisibleAsCandidates() {
+        const knownIds = new Set(prendasDetectadas.map(p => p.item.id ?? p.item.url));
+        for (const item of fotoItems) {
+          const key = item.id ?? item.url;
+          if (knownIds.has(key)) continue;
+          const cached = analisisFotos.get(key);
+          if (cached?.tipo === 'comprobante') continue;
+          prendasDetectadas.push({
+            item,
+            descripcion: cached?.desc?.replace(/^PRENDA:\s*/i, '').trim() || 'Imagen de prenda enviada durante el Live.',
+          });
+          knownIds.add(key);
+        }
       }
 
       // Comprobante: revisar primero las fotos recientes para no reutilizar comprobantes viejos.
@@ -1238,12 +1294,19 @@ Responde SOLO con una línea, sin explicaciones.`;
       for (const item of fotoItemsRecientes.slice(0, 8)) {
         await clasificarYExtraer(item, { addDescription: false });
       }
+      ensureAllLiveImagesAreVisibleAsCandidates();
 
       const textoConversacion = textos.join('\n');
-      const hayContextoPago = /\b(pagu[eé]|pago|pagado|comprobante|transferencia|deposit[eé]|qr|envi[oó]\s+el\s+pago|le\s+env[ií]o\s+el\s+pago)\b/i.test(textoConversacion);
+      const textoConversacionEntrante = mensajesLive
+        .filter((m: any) => !isOutgoingDirection(m.direction))
+        .map((m: any) => m.content?.trim() ?? '')
+        .filter(Boolean)
+        .join('\n');
+      const hayContextoPago = /\b(pagu[eé]|pago|pagado|comprobante|transferencia|deposit[eé]|qr|envi[oó]\s+el\s+pago|le\s+env[ií]o\s+el\s+pago)\b/i.test(textoConversacionEntrante);
       if (hayContextoPago && comprobantesDetectados.length === 0 && (fotoItemsRecientes.length > 0 || allFotoItems.length > 0)) {
         const fallbackCandidates = [...fotoItemsRecientes, ...allFotoItems]
           .filter((item, index, list) => list.findIndex(other => other.url === item.url) === index)
+          .filter((item) => !isOutgoingDirection(item.direction))
           .sort((a, b) => {
             const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
             const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
@@ -1611,7 +1674,7 @@ Reglas de timeline_steps:
             const nombreDetectado = comprobante.extraido?.cliente ?? fallback.nombre;
             const montoDetectado = parseLiveMonto(comprobante.extraido?.monto) ?? fallback.monto;
             const comprobanteAt = receiptAtFromMessage(comprobante.item.createdAt, comprobante.extraido?.hora);
-            const fechaPedido = boliviaDateKey(comprobanteAt);
+            const fechaPedido = hasLiveRange ? boliviaDateKey(rangeStart!.toISOString()) : boliviaDateKey(comprobanteAt);
             const comprobanteTextoFinal = [
               nombreDetectado,
               montoDetectado ? `Bs ${montoDetectado}` : null,
@@ -1637,11 +1700,23 @@ Reglas de timeline_steps:
               content: comprobante.item.content,
               descripcion: comprobanteTextoFinal,
               messageCreatedAt: comprobante.item.createdAt,
-              metadata: { extracted: comprobante.extraido, classifier_text: comprobante.texto },
+              metadata: {
+                extracted: comprobante.extraido,
+                classifier_text: comprobante.texto,
+                live_range: hasLiveRange ? {
+                  start_at: rangeStart!.toISOString(),
+                  end_at: rangeEnd!.toISOString(),
+                } : null,
+              },
             });
 
             for (const prenda of prendasDetectadas) {
-              if (boliviaDateKey(prenda.item.createdAt ?? comprobanteAt) !== fechaPedido) continue;
+              if (hasLiveRange) {
+                const prendaTime = prenda.item.createdAt ? new Date(prenda.item.createdAt).getTime() : NaN;
+                if (!Number.isFinite(prendaTime) || prendaTime < rangeStart!.getTime() || prendaTime > rangeEnd!.getTime()) continue;
+              } else if (boliviaDateKey(prenda.item.createdAt ?? comprobanteAt) !== fechaPedido) {
+                continue;
+              }
               const selectedByAi = !!prenda.item.id && selectedPrendaMessageIds.has(prenda.item.id);
               await upsertLiveEvidence(panelDb, {
                 pedidoLiveId: order.id,
@@ -1659,6 +1734,10 @@ Reglas de timeline_steps:
                   selected_final: selectedByAi,
                   selection_source: selectedByAi ? 'ai' : 'ai_unselected',
                   contexto_visual: contextoVisual,
+                  live_range: hasLiveRange ? {
+                    start_at: rangeStart!.toISOString(),
+                    end_at: rangeEnd!.toISOString(),
+                  } : null,
                 },
               });
             }

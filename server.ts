@@ -79,8 +79,8 @@ const phoneVariants = (...values: unknown[]) => {
 };
 
 const publicStoreBaseUrl = (value?: string | null) => {
-  const base = String(value || 'https://leidydiaz.live').replace(/\s+/g, '').replace(/\/+$/, '');
-  return base || 'https://leidydiaz.live';
+  const base = String(value || 'https://leidycandy.me').replace(/\s+/g, '').replace(/\/+$/, '');
+  return base || 'https://leidycandy.me';
 };
 
 const isMissingDbObject = (error: any) => {
@@ -1770,6 +1770,27 @@ const PORT = Number(process.env.PORT || 3001);
       const { data: publicUrlData } = uploadClient.storage
         .from('store_images')
         .getPublicUrl(uploadResult.data.path);
+
+      try {
+        const publicUrl = publicUrlData.publicUrl;
+        const renderUrl = new URL(publicUrl);
+        renderUrl.pathname = renderUrl.pathname.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
+        renderUrl.searchParams.set('width', '320');
+        renderUrl.searchParams.set('quality', '58');
+        renderUrl.searchParams.set('resize', 'cover');
+        const thumbResponse = await fetch(renderUrl.toString());
+        if (thumbResponse.ok) {
+          const thumbBuffer = Buffer.from(await thumbResponse.arrayBuffer());
+          const cleanPath = String(uploadResult.data.path ?? '').replace(/^\/+/, '');
+          const dot = cleanPath.lastIndexOf('.');
+          const base = dot >= 0 ? cleanPath.slice(0, dot) : cleanPath;
+          await uploadClient.storage
+            .from('store_images')
+            .upload(`thumbs/${base}.jpg`, thumbBuffer, { contentType: 'image/jpeg', upsert: true, cacheControl: '31536000' });
+        }
+      } catch (thumbErr) {
+        console.warn('[store/upload-image] No se pudo crear thumbnail directo:', thumbErr);
+      }
         
       res.json({ publicUrl: publicUrlData.publicUrl });
     } catch (err: any) {
@@ -1796,9 +1817,9 @@ const PORT = Number(process.env.PORT || 3001);
       const search = req.query.search as string;
       const publicStorefront = !showAll;
 
-      let query = supabaseStore
-        .from("products")
-        .select("*", { count: 'exact' });
+      let query = showAll
+        ? supabaseStore.from("products").select("*", { count: 'exact' })
+        : supabaseStore.from("products").select("*");
 
       if (!showAll) query = query.eq("available", true);
       
@@ -1811,11 +1832,15 @@ const PORT = Number(process.env.PORT || 3001);
       }
 
       // Orden y paginación
+      const endRange = (page * limit) - 1 + (publicStorefront ? 1 : 0);
       query = query.order("created_at", { ascending: false })
-                   .range((page - 1) * limit, (page * limit) - 1);
+                   .range((page - 1) * limit, endRange);
 
       const { data, count, error } = await query;
       if (error) throw error;
+      const rows = data ?? [];
+      const responseData = publicStorefront ? rows.slice(0, limit) : rows;
+      const hasMore = publicStorefront ? rows.length > limit : count ? (page * limit) < count : false;
 
       if (publicStorefront) {
         res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
@@ -1824,11 +1849,11 @@ const PORT = Number(process.env.PORT || 3001);
       }
       
       res.json({
-        data: data ?? [],
-        total: count ?? 0,
+        data: responseData,
+        total: publicStorefront ? ((page - 1) * limit) + responseData.length + (hasMore ? 1 : 0) : count ?? responseData.length,
         page,
         limit,
-        hasMore: count ? (page * limit) < count : false
+        hasMore
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
@@ -1892,6 +1917,38 @@ const PORT = Number(process.env.PORT || 3001);
         .single();
       if (error) throw error;
       res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  app.post("/api/products/:id/relist", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+      const productId = Number(req.params.id);
+      const { data: product, error: readError } = await supabaseStore
+        .from("products")
+        .select("*")
+        .eq("id", productId)
+        .single();
+      if (readError) throw readError;
+      if (!product) return res.status(404).json({ error: "Producto no encontrado" });
+
+      const { id, created_at, updated_at, ...copy } = product as any;
+      const { data, error } = await supabaseStore
+        .from("products")
+        .insert({
+          ...copy,
+          available: true,
+          stock: 1,
+          priority_order: 0,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      res.status(201).json(data);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
@@ -1973,7 +2030,6 @@ const PORT = Number(process.env.PORT || 3001);
     try {
       const {
         items,
-        total,
         customerName,
         customerPhone,
         delivery_type,
@@ -1986,8 +2042,18 @@ const PORT = Number(process.env.PORT || 3001);
         return res.status(400).json({ error: "items requerido (array no vacío)" });
       }
 
+      const normalizedItems = items.map((item: any) => ({
+        productId: String(item?.productId ?? '').trim(),
+        productName: String(item?.productName ?? '').trim(),
+        size: String(item?.size ?? '').trim(),
+        quantity: Math.max(1, Math.floor(Number(item?.quantity) || 1)),
+      })).filter((item: any) => item.productId);
+      if (normalizedItems.length === 0) {
+        return res.status(400).json({ error: "items requerido (array no vacío)" });
+      }
+
       // ── RESERVA EXCLUSIVA: verificar que los productos no estén en otro pedido pending ──
-      const productIds = items.map((i: any) => String(i.productId)).filter(Boolean);
+      const productIds = [...new Set(normalizedItems.map((i: any) => String(i.productId)).filter(Boolean))];
 
       if (productIds.length > 0) {
         // Buscar pedidos pending que contengan alguno de estos productos
@@ -2019,20 +2085,41 @@ const PORT = Number(process.env.PORT || 3001);
         }
       }
 
+      let orderItems = normalizedItems;
+      let computedTotal = 0;
+
       // ── Verificar que los productos existan y estén disponibles ──
       if (productIds.length > 0) {
         const { data: prods } = await supabaseStore
           .from("products")
-          .select("id, available")
+          .select("id, name, price, available, stock")
           .in("id", productIds);
 
-        const unavailable = (prods ?? []).filter((p: any) => !p.available);
+        const productsById = new Map((prods ?? []).map((p: any) => [String(p.id), p]));
+        const unavailable = normalizedItems.filter((item: any) => {
+          const product = productsById.get(String(item.productId));
+          const stock = Number(product?.stock ?? 1);
+          return !product || !product.available || stock <= 0 || stock < item.quantity;
+        });
         if (unavailable.length > 0) {
           return res.status(409).json({
             error: "Uno o más productos ya no están disponibles.",
-            unavailableProducts: unavailable.map((p: any) => p.id),
+            unavailableProducts: unavailable.map((item: any) => item.productId),
           });
         }
+
+        orderItems = normalizedItems.map((item: any) => {
+          const product = productsById.get(String(item.productId));
+          const price = Number(product?.price ?? 0);
+          computedTotal += price * item.quantity;
+          return {
+            productId: item.productId,
+            productName: product?.name ?? item.productName,
+            price,
+            size: item.size,
+            quantity: item.quantity,
+          };
+        });
       }
 
       let userId = null;
@@ -2048,8 +2135,8 @@ const PORT = Number(process.env.PORT || 3001);
       const { data, error } = await supabaseStore
         .from("store_orders")
         .insert({
-          items: items,
-          total: total ?? 0,
+          items: orderItems,
+          total: computedTotal,
           customer_name: customerName ?? "",
           customer_wa: customerPhone ?? "",
           delivery_type: delivery_type ?? null,
@@ -2091,16 +2178,9 @@ const PORT = Number(process.env.PORT || 3001);
           .eq("id", order.id)
           .eq("status", "pending");
 
-        // Liberar los productos (volver a mostrarlos en la tienda)
         const pIds = (order.items ?? []).map((i: any) => i.productId).filter(Boolean);
-        if (pIds.length > 0) {
-          await supabaseStore
-            .from("products")
-            .update({ available: true } as any)
-            .in("id", pIds);
-        }
 
-        console.log(`[store] ⏰ Pedido #${order.id} expirado. ${pIds.length} productos liberados.`);
+        console.log(`[store] ⏰ Pedido #${order.id} expirado. ${pIds.length} reservas removidas.`);
       }
     } catch (e) {
       // Silencioso — no bloquear el servidor
@@ -2154,9 +2234,11 @@ const PORT = Number(process.env.PORT || 3001);
       if (!token) return res.status(401).json({ error: "Token requerido" });
       const { data: user, error: userErr } = await supabaseServer.auth.getUser(token);
       if (userErr || !user.user) return res.status(401).json({ error: "Token inválido" });
+      const customerPhone = user.user.email?.replace('@tiendaleydi.com','') ?? '';
       const { data, error } = await supabaseStore
         .from("store_orders")
         .select("*")
+        .eq("customer_wa", customerPhone)
         .order("created_at", { ascending: false });
       if (error) throw error;
       res.json(data ?? []);
@@ -2190,7 +2272,7 @@ const PORT = Number(process.env.PORT || 3001);
           if (productIds.length > 0) {
             await supabaseStore
               .from("products")
-               .update({ stock: 0 })
+               .update({ stock: 0, available: false })
               .in("id", productIds);
           }
         } catch (e) {
@@ -2649,7 +2731,7 @@ const PORT = Number(process.env.PORT || 3001);
         const greeting = firstName ? `¡Hola ${firstName}! ` : '¡Hola! ';
         const storeMessage =
           `${greeting}🎉\n` +
-          `Tu pago fue confirmado. Tu pedido #${data.id} está listo. ` +
+          `Leidy Shop confirmó tu pago. Tu pedido #${data.id} está listo. ` +
           `¡Muchas gracias por tu compra!\n\n` +
           `Mirá los detalles en tu perfil:\n${profileLink}`;
         await enqueueStoreConfirmation(

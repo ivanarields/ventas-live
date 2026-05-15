@@ -1,6 +1,6 @@
 import React from 'react';
 import { CartItem, cartTotal } from '../StorefrontApp';
-import { storeImageUrl } from '../services/productsApi';
+import { ProductThumb } from './ProductThumb';
 
 interface Props {
   items: CartItem[];
@@ -44,7 +44,7 @@ export function CartView({ items, onBack, onCheckout, onRemove }: Props) {
             {items.map(item => (
               <div key={`${item.product.id}-${item.size}`} className="rounded-[22px] bg-white/88 backdrop-blur border border-white/70 shadow-sm p-2.5 flex gap-3">
                 <div className="w-[68px] h-[78px] rounded-2xl overflow-hidden bg-gray-100 flex-shrink-0">
-                  <img src={storeImageUrl(item.product.images[0], 'thumb')} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                  <ProductThumb image={item.product.images[0]} className="w-full h-full object-cover" width={68} height={78} />
                 </div>
                 <div className="min-w-0 flex-1 py-0.5">
                   <p className="text-[13px] font-black text-gray-800 leading-snug line-clamp-2">{item.product.title}</p>

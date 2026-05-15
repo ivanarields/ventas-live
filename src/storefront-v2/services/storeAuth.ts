@@ -26,11 +26,14 @@ interface StoredSession {
 export const storeAuth = {
 
   /** Guardar sesión después de login/registro exitoso */
-  saveSession: (token: string, user: StoreUser): void => {
+  saveSession: (token: string, user: StoreUser, authSession?: { expires_at?: number; expires_in?: number }): void => {
+    const expiresAt = authSession?.expires_at
+      ? authSession.expires_at * 1000
+      : Date.now() + Math.max(1, Number(authSession?.expires_in ?? 3600)) * 1000;
     const session: StoredSession = {
       token,
       user,
-      expiresAt: Date.now() + 15 * 24 * 60 * 60 * 1000 // 15 días
+      expiresAt
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   },

@@ -35,10 +35,12 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart, cartCount =
   };
 
   const handleShare = () => {
+    const url = `https://leidycandy.me/tienda#producto/${product.id}`;
+    const text = `${product.title} — ${product.price} Bs`;
     if (navigator.share) {
-      navigator.share({ title: product.title, text: `${product.title} — ${product.price} Bs`, url: window.location.href });
+      navigator.share({ title: 'Leidy Shop', text, url });
     } else {
-      navigator.clipboard?.writeText(window.location.href);
+      navigator.clipboard?.writeText(url);
     }
   };
 
@@ -70,6 +72,8 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart, cartCount =
               loading={idx === 0 ? 'eager' : 'lazy'}
               decoding="async"
               fetchPriority={idx === 0 ? 'high' : 'low'}
+              width={720}
+              height={960}
               className="w-full h-full shrink-0 snap-center object-cover object-top"
               style={{ touchAction: 'pan-x pan-y' }}
             />

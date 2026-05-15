@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getStoreSettings, StoreSettings } from '../services/storeSettingsApi';
 
 const BRAND = '#ff2d78';
 
@@ -6,25 +7,14 @@ interface Props {
   onBack: () => void;
 }
 
-interface Settings {
-  store_name?: string;
-  store_phone?: string;
-  official_wa_number?: string;
-  next_live_date?: string;
-  next_live_time?: string;
-  delivery_note?: string;
-  address?: string;
-}
-
 export function CustomerCenter({ onBack }: Props) {
-  const [settings, setSettings] = useState<Settings>({});
+  const [settings, setSettings] = useState<StoreSettings>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/store/settings')
-      .then(r => r.json())
+    getStoreSettings()
       .then(data => {
-        setSettings(data);
+        setSettings(data ?? {});
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -38,14 +28,14 @@ export function CustomerCenter({ onBack }: Props) {
         <button onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-50">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
         </button>
-        <h2 className="text-[18px] font-black text-gray-800">Centro de Clientas</h2>
+        <h2 className="text-[18px] font-black text-gray-800">Leidy Shop</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
         {/* Aviso principal */}
         <div className="bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] rounded-2xl p-5 text-white">
           <p className="text-[11px] font-black uppercase tracking-widest opacity-80 mb-1">Bienvenida</p>
-          <h3 className="text-lg font-black">{settings.store_name || 'Leidy American'}</h3>
+          <h3 className="text-lg font-black">{settings.store_name || 'Leidy Shop'}</h3>
           <p className="text-[13px] font-medium opacity-90 mt-1">Moda femenina con estilo y calidad</p>
         </div>
 
@@ -97,7 +87,7 @@ export function CustomerCenter({ onBack }: Props) {
 
           {[
             { q: 'Como compro?', a: 'Elige productos, agrega al carrito, confirma tu pedido y paga con QR.' },
-            { q: 'Como pago?', a: 'Recibimos pagos por QR (Yape) o transferencia bancaria.' },
+            { q: 'Como pago?', a: 'Recibimos pagos por QR o transferencia bancaria.' },
             { q: 'Cuando entregan?', a: 'Las entregas son segun el dia y horario que elijas al comprar.' },
             { q: 'Puedo retirar?', a: 'Si, puedes elegir retiro en tienda al momento de la compra.' },
             { q: 'Tengo un problema con mi pedido', a: 'Escribenos por WhatsApp y te ayudamos de inmediato.' },

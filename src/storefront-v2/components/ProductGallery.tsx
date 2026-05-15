@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { productsApi, Product, storeImageUrl } from '../services/productsApi';
+import React, { memo, useState, useEffect, useRef, useCallback } from 'react';
+import { productsApi, Product, storeDirectThumbUrl, storeImageFallbackUrl } from '../services/productsApi';
 import { StoreChip, parseStoreChips } from '../config/storefrontConfig';
 import { storeFavoritesApi } from '../services/storeFavoritesApi';
+import { getStoreSettings } from '../services/storeSettingsApi';
 
 interface Props {
   onProductSelect: (product: Product) => void;
@@ -9,33 +10,24 @@ interface Props {
   onBack: () => void;
   onAddToCart: (product: Product, size: string) => void;
   onOpenCart: () => void;
-  onOpenProfile: () => void;
+  onOpenProfile: (tab?: string) => void;
   cartCount: number;
   darkMode?: boolean;
   onToggleDarkMode?: () => void;
 }
 
-function formatCountdown(expiresAt: string): string {
-  const secs = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
-  const m = String(Math.floor(secs / 60)).padStart(2, '0');
-  const s = String(secs % 60).padStart(2, '0');
-  return `${m}:${s}`;
-}
-
 export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProfile, cartCount, darkMode, onToggleDarkMode }: Props) {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedProducts = productsApi.getCachedProducts();
+  const [products, setProducts] = useState<Product[]>(cachedProducts?.data ?? []);
+  const [loading, setLoading] = useState(!cachedProducts?.data?.length);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
+  const [hasMore, setHasMore] = useState(cachedProducts?.hasMore ?? false);
   const [reservedMap, setReservedMap] = useState<Record<string, string>>({});
-  const [, forceRender] = useState(0);
   const [filter, setFilter] = useState<string>('');
   const [chips, setChips] = useState<StoreChip[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [carouselTick, setCarouselTick] = useState(0);
   const [favorites, setFavorites] = useState<Record<string, Product>>(() => storeFavoritesApi.readLocal());
   const [headerHidden, setHeaderHidden] = useState(false);
 
@@ -47,17 +39,27 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
 
   const favoriteCount = Object.keys(favorites).length;
 
-  const toggleFavorite = async (product: Product) => {
-    const next = { ...favorites };
+  const favoritesRef = useRef(favorites);
+  useEffect(() => {
+    favoritesRef.current = favorites;
+  }, [favorites]);
+
+  const toggleFavorite = useCallback(async (product: Product) => {
+    const current = favoritesRef.current;
+    const next = { ...current };
     const liked = !next[product.id];
     if (liked) next[product.id] = product;
     else delete next[product.id];
+    favoritesRef.current = next;
     setFavorites(next);
     const synced = await storeFavoritesApi.set(product, liked);
-    setFavorites(Object.fromEntries(synced.map(item => [String(item.id), item])));
-  };
+    const syncedMap = Object.fromEntries(synced.map(item => [String(item.id), item]));
+    favoritesRef.current = syncedMap;
+    setFavorites(syncedMap);
+  }, []);
 
   const fetchReserved = useCallback(async () => {
+    if (document.visibilityState === 'hidden') return;
     try {
       const r = await fetch('/api/store-orders/reserved-products');
       if (r.ok) setReservedMap(await r.json());
@@ -65,19 +67,19 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
   }, []);
 
   useEffect(() => {
-    const initial = window.setTimeout(fetchReserved, 1200);
+    if (loading || products.length === 0) return;
+    const initial = window.setTimeout(fetchReserved, 2200);
     const t = setInterval(fetchReserved, 15000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchReserved();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearTimeout(initial);
       clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [fetchReserved]);
-
-  useEffect(() => {
-    if (Object.keys(reservedMap).length === 0) return;
-    const t = setInterval(() => forceRender(n => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [reservedMap]);
+  }, [fetchReserved, loading, products.length]);
 
   const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
@@ -86,8 +88,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
   }, [searchQuery]);
 
   useEffect(() => {
-    fetch('/api/store/settings')
-      .then(r => r.ok ? r.json() : null)
+    getStoreSettings()
       .then(settings => {
         const next = parseStoreChips(settings?.store_chips);
         setChips(next);
@@ -97,20 +98,8 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
   }, []);
 
   useEffect(() => {
-    storeFavoritesApi.list()
-      .then(items => setFavorites(Object.fromEntries(items.map(item => [String(item.id), item]))))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!products.some((product, idx) => idx < 2 && product.images.length >= 3)) return;
-    const timer = window.setInterval(() => setCarouselTick(t => t + 1), 2200);
-    return () => clearInterval(timer);
-  }, [products]);
-
-  useEffect(() => {
     setPage(1);
-    setLoading(true);
+    if (products.length === 0) setLoading(true);
     productsApi.getProducts({
       page: 1,
       limit: 8,
@@ -154,13 +143,11 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
 
   const openSearch = () => {
     setSearchOpen(true);
-    setFavoritesOpen(false);
     setTimeout(() => searchInputRef.current?.focus(), 100);
   };
 
   const openFavorites = () => {
-    setFavoritesOpen(true);
-    setSearchOpen(false);
+    onOpenProfile('saved');
   };
 
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
@@ -171,23 +158,6 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
     lastScrollTopRef.current = nextTop;
   };
 
-  useEffect(() => {
-    const el = galleryScrollRef.current;
-    const onNativeScroll = () => {
-      const nextTop = Math.max(el?.scrollTop ?? 0, window.scrollY, document.documentElement.scrollTop || 0);
-      const prevTop = lastScrollTopRef.current;
-      if (nextTop > 90 && nextTop > prevTop + 8) setHeaderHidden(true);
-      if (nextTop < prevTop - 8 || nextTop < 30) setHeaderHidden(false);
-      lastScrollTopRef.current = nextTop;
-    };
-    el?.addEventListener('scroll', onNativeScroll, { passive: true });
-    window.addEventListener('scroll', onNativeScroll, { passive: true });
-    return () => {
-      el?.removeEventListener('scroll', onNativeScroll);
-      window.removeEventListener('scroll', onNativeScroll);
-    };
-  }, []);
-
   return (
     <div ref={galleryScrollRef} onScroll={handleScroll} className="flex flex-col h-[100dvh] overflow-y-auto bg-gradient-to-b from-[#fff0f5] via-white to-white">
       <header className={`sticky top-0 z-50 bg-white/82 backdrop-blur-md border-b border-[#ff2d78]/8 transition-transform duration-300 ${headerHidden && !searchOpen ? '-translate-y-full' : 'translate-y-0'}`}>
@@ -197,7 +167,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
           </button>
           <div className="flex-1 min-w-0">
             <p className="font-black text-[18px] text-gray-800 leading-none">Catalogo</p>
-            <p className="text-[11px] font-black" style={{ color: '#ff2d78' }}>Leidy American</p>
+            <p className="text-[11px] font-black" style={{ color: '#ff2d78' }}>Leidy Shop</p>
           </div>
           <button onClick={onToggleDarkMode} className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-gray-50 transition-colors" title="Modo visual">
             {darkMode ? (
@@ -260,65 +230,20 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
             {[1, 2, 3, 4].map(n => <div key={n} className="bg-gray-100 rounded-[22px] aspect-[3/4] animate-pulse" />)}
           </div>
         ) : (
-          <div className="columns-2 gap-2.5 [column-fill:_balance]">
+          <div className="grid grid-cols-2 gap-2.5">
             {products.map((p, idx) => {
-              const rotating = idx < 2 && p.images.length >= 3;
-              const imageIndex = rotating ? Math.floor((carouselTick + idx) / (idx % 2 === 0 ? 2 : 3)) % Math.min(p.images.length, 3) : 0;
               const liked = Boolean(favorites[p.id]);
-              const shape = idx % 6 === 1 || idx % 6 === 4 ? 'aspect-[2/3]' : (idx % 6 === 2 ? 'aspect-[5/6]' : 'aspect-[3/4]');
-              const displayImages = rotating ? p.images.slice(0, 3) : [p.images[0]];
               return (
-                <article key={p.id} className="mb-2.5 break-inside-avoid">
-                  <div
-                    onClick={() => p.stock > 0 && !reservedMap[String(p.id)] && onProductSelect(p)}
-                    className={`relative ${shape} rounded-[28px] bg-gray-100 overflow-hidden cursor-pointer active:scale-[0.98] transition-transform`}
-                    style={{ boxShadow: darkMode ? 'none' : '0 2px 10px rgba(0,0,0,0.06)' }}
-                  >
-                    <div
-                      className="flex h-full transition-transform duration-700 ease-out"
-                      style={{ width: `${displayImages.length * 100}%`, transform: `translateX(-${imageIndex * (100 / displayImages.length)}%)` }}
-                    >
-                      {displayImages.map((img, imgIdx) => (
-                        <img
-                          key={`${p.id}-${imgIdx}`}
-                          src={storeImageUrl(img, 'thumb')}
-                          alt={p.title}
-                          loading={idx < 4 && imgIdx === 0 ? 'eager' : 'lazy'}
-                          decoding="async"
-                          fetchPriority={idx < 2 && imgIdx === 0 ? 'high' : 'low'}
-                          className="h-full object-cover"
-                          style={{ width: `${100 / displayImages.length}%` }}
-                        />
-                      ))}
-                    </div>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleFavorite(p);
-                      }}
-                      className="absolute right-2 bottom-2 w-7 h-7 rounded-full bg-white/90 backdrop-blur flex items-center justify-center shadow-sm active:scale-90 transition-transform"
-                      aria-label={liked ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-                    >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill={liked ? '#ff2d78' : 'none'} stroke={liked ? '#ff2d78' : '#ff2d78'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                      </svg>
-                    </button>
-                    {p.stock === 0 ? (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="absolute inset-0 bg-black/35" />
-                        <span className="relative bg-red-600 text-white text-[10px] font-black px-4 py-2 rounded-lg uppercase tracking-widest shadow-lg -rotate-12">Vendido</span>
-                      </div>
-                    ) : reservedMap[String(p.id)] ? (
-                      <div className="absolute inset-0 bg-amber-50/80 backdrop-blur-[2px] flex flex-col items-center justify-center gap-1">
-                        <span className="bg-amber-500 text-white text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">Reservado</span>
-                        <span className="text-amber-700 text-[10px] font-black tabular-nums">{formatCountdown(reservedMap[String(p.id)])}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                  <p className="mt-2 px-1 font-black text-[14px] leading-none" style={{ color: '#ff2d78' }}>
-                    {p.price} <span className="text-[10px] text-gray-400 font-bold">Bs</span>
-                  </p>
-                </article>
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  index={idx}
+                  liked={liked}
+                  reserved={Boolean(reservedMap[String(p.id)])}
+                  darkMode={darkMode}
+                  onSelect={onProductSelect}
+                  onToggleFavorite={toggleFavorite}
+                />
               );
             })}
           </div>
@@ -332,8 +257,8 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
         <div ref={loadMoreRef} className="h-20 w-full" />
       </div>
 
-      <nav className="fixed bottom-2 left-1/2 -translate-x-1/2 z-50 w-[min(260px,calc(100%-40px))] h-[42px] rounded-[21px] bg-white/68 backdrop-blur-xl border border-white/70 shadow-[0_14px_35px_rgba(0,0,0,0.12)] flex items-center justify-around px-1.5">
-        <button onClick={() => { setSearchOpen(false); setFavoritesOpen(false); }} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#ff2d78]" aria-label="Tienda">
+      <nav className="fixed bottom-2 left-1/2 -translate-x-1/2 z-50 w-[min(260px,calc(100%-40px))] h-[42px] rounded-[21px] bg-white border border-gray-100 shadow-[0_10px_25px_rgba(0,0,0,0.10)] flex items-center justify-around px-1.5">
+        <button onClick={() => setSearchOpen(false)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#ff2d78]" aria-label="Tienda">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.35" strokeLinecap="round" strokeLinejoin="round"><path d="M4 10.5 12 4l8 6.5"/><path d="M6.5 9.5V20h11V9.5"/><path d="M9 20v-6h6v6"/></svg>
         </button>
         <button onClick={openSearch} className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400" aria-label="Buscar">
@@ -343,41 +268,85 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
           <svg width="17" height="17" viewBox="0 0 24 24" fill={favoriteCount ? '#ff2d78' : 'none'} stroke={favoriteCount ? '#ff2d78' : 'currentColor'} strokeWidth="2.4"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           {favoriteCount > 0 && <span className="absolute top-0.5 right-0.5 min-w-4 h-4 rounded-full bg-[#ff2d78] text-white text-[9px] font-black flex items-center justify-center">{favoriteCount}</span>}
         </button>
-        <button onClick={onOpenProfile} className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400" aria-label="Mi perfil">
+        <button onClick={() => onOpenProfile()} className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400" aria-label="Mi perfil">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </button>
       </nav>
-
-      {favoritesOpen && (
-        <div className="fixed inset-x-0 bottom-0 z-[60] mx-auto max-w-[400px] rounded-t-[22px] bg-white/95 backdrop-blur-xl border border-white/70 shadow-2xl p-3 pb-16">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <p className="text-[15px] font-black text-gray-800">Favoritos</p>
-              <p className="text-[10px] text-gray-400 font-bold">{favoriteCount} prendas guardadas</p>
-            </div>
-            <button onClick={() => setFavoritesOpen(false)} className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center" aria-label="Cerrar favoritos">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
-            </button>
-          </div>
-          {favoriteCount === 0 ? (
-            <p className="text-[12px] text-gray-400 font-bold py-6 text-center">Todavia no marcaste prendas.</p>
-          ) : (
-            <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
-              {Object.values(favorites).map(product => (
-                <button key={product.id} onClick={() => { setFavoritesOpen(false); onProductSelect(product); }} className="w-full flex items-center gap-2.5 rounded-xl bg-white/60 border border-white/60 p-1.5 text-left active:scale-[0.98] transition-transform">
-                  <img src={storeImageUrl(product.images[0], 'thumb')} alt="" className="w-12 h-14 object-cover rounded-lg bg-gray-100 flex-shrink-0" loading="lazy" decoding="async" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[12px] font-black text-gray-800 truncate">{product.title}</p>
-                    <p className="text-[10px] text-gray-400 font-bold mt-0.5">{product.category}</p>
-                    <p className="text-[13px] font-black text-[#ff2d78] mt-0.5">{product.price} Bs</p>
-                  </div>
-                  <span className="px-2.5 py-1.5 rounded-full bg-[#ff2d78] text-white text-[10px] font-black">Comprar</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
+
+const ProductCard = memo(function ProductCard({
+  product,
+  index,
+  liked,
+  reserved,
+  darkMode,
+  onSelect,
+  onToggleFavorite,
+}: {
+  product: Product;
+  index: number;
+  liked: boolean;
+  reserved: boolean;
+  darkMode?: boolean;
+  onSelect: (product: Product) => void;
+  onToggleFavorite: (product: Product) => void;
+}) {
+  const image = product.images[0];
+  const fallbackSrc = storeImageFallbackUrl(image, 'thumb');
+  const [imageSrc, setImageSrc] = useState(() => storeDirectThumbUrl(image));
+
+  useEffect(() => {
+    setImageSrc(storeDirectThumbUrl(image));
+  }, [image]);
+
+  return (
+    <article>
+      <div
+        onClick={() => product.stock > 0 && !reserved && onSelect(product)}
+        className="relative aspect-[3/4] rounded-[22px] bg-gray-100 overflow-hidden cursor-pointer"
+        style={{ boxShadow: darkMode ? 'none' : '0 2px 10px rgba(0,0,0,0.06)' }}
+      >
+        <img
+          src={imageSrc}
+          alt={product.title}
+          loading={index < 2 ? 'eager' : 'lazy'}
+          decoding="async"
+          fetchPriority={index === 0 ? 'high' : 'low'}
+          width={260}
+          height={347}
+          onError={() => {
+            if (imageSrc !== fallbackSrc) setImageSrc(fallbackSrc);
+          }}
+          className="w-full h-full object-cover"
+        />
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleFavorite(product);
+          }}
+          className="absolute right-2 bottom-2 w-7 h-7 rounded-full bg-white/90 backdrop-blur flex items-center justify-center shadow-sm active:scale-90 transition-transform"
+          aria-label={liked ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill={liked ? '#ff2d78' : 'none'} stroke={liked ? '#ff2d78' : '#ff2d78'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+        </button>
+        {product.stock === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 bg-black/35" />
+            <span className="relative bg-red-600 text-white text-[10px] font-black px-4 py-2 rounded-lg uppercase tracking-widest shadow-lg -rotate-12">Vendido</span>
+          </div>
+        ) : reserved ? (
+          <div className="absolute inset-0 bg-amber-50/80 backdrop-blur-[2px] flex flex-col items-center justify-center gap-1">
+            <span className="bg-amber-500 text-white text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">Reservado</span>
+          </div>
+        ) : null}
+      </div>
+      <p className="mt-2 px-1 font-black text-[14px] leading-none" style={{ color: '#ff2d78' }}>
+        {product.price} <span className="text-[10px] text-gray-400 font-bold">Bs</span>
+      </p>
+    </article>
+  );
+});

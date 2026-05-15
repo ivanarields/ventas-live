@@ -66,7 +66,7 @@ export function LiveConfirmation({ onBack }: Props) {
       if (!res.ok) throw new Error(data.error || 'PIN incorrecto');
 
       const userSession = { id: data.user.id, phone: cleanPhone, name: '', token: data.session.access_token };
-      storeAuth.saveSession(userSession.token, userSession);
+      storeAuth.saveSession(userSession.token, userSession, data.session);
       setSession(userSession);
     } catch (err: any) {
       setError(err.message);

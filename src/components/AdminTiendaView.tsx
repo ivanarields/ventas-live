@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ExternalLink, Plus, Edit2, Trash2, Package, ShoppingBag,
   Check, X, Image as ImageIcon, ChevronDown, ChevronUp,
-  Send, AlertCircle, RefreshCw, Camera, Loader2, Copy, Users,
+  Send, AlertCircle, RefreshCw, Camera, Loader2, Copy, Users, RotateCcw,
 } from 'lucide-react';
 import { DEFAULT_STORE_CHIPS, StoreChip, parseStoreChips, serializeStoreChips } from '../storefront-v2/config/storefrontConfig';
 
@@ -73,6 +73,7 @@ interface StoreProduct {
   image_url: string;
   images: string[];
   available: boolean;
+  stock?: number;
   priority_order: number;
 }
 
@@ -445,6 +446,19 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     else alert('Error al eliminar');
   };
 
+  const handleRelist = async (id: number, name: string) => {
+    if (!confirm(`¿Volver a poner "${name}" a la venta con código nuevo?`)) return;
+    const res = await fetch(`/api/products/${id}/relist`, {
+      method: 'POST',
+      headers: { 'x-user-id': userId },
+    });
+    if (res.ok) await loadAll();
+    else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || 'No se pudo volver a poner a la venta');
+    }
+  };
+
   const updateOrder = async (id: number, body: object) => {
     const res = await fetch(`/api/store-orders/${id}`, {
       method: 'PATCH',
@@ -469,7 +483,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-black text-gray-900">Panel de Tienda</h2>
-          <p className="text-xs text-gray-400 font-medium">Leidy American</p>
+          <p className="text-xs text-gray-400 font-medium">Leidy Shop</p>
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -744,6 +758,15 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
 
                   {/* Acciones */}
                   <div className="flex flex-col gap-1.5 flex-shrink-0">
+                    {(!p.available || Number(p.stock ?? 1) <= 0) && (
+                      <button
+                        title="Volver a poner a la venta con código nuevo"
+                        onClick={() => handleRelist(p.id, p.name)}
+                        className="w-8 h-8 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center hover:bg-pink-100 transition-colors"
+                      >
+                        <RotateCcw size={13} />
+                      </button>
+                    )}
                     <button
                       onClick={() => openEdit(p)}
                       className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 transition-colors"
@@ -901,7 +924,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                           </button>
                           <button
                             onClick={() => {
-                              const storeLink = `https://leidydiaz.live/tienda#profile/confirmar`;
+                              const storeLink = `https://leidycandy.me/tienda#profile/confirmar`;
                               const msg = encodeURIComponent(`Hola! Por favor revisa las prendas de tu pedido #${order.id} y confirma si todo está correcto: ${storeLink}\n\n(Necesitarás tu PIN de la tienda)`);
                               window.open(`https://wa.me/591${order.customer_wa}?text=${msg}`, '_blank');
                             }}
@@ -1193,9 +1216,9 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">QR de pago</label>
-              <input type="text" value={settings.payment_qr_url || '/qr-yape.jpg'}
+              <input type="text" value={settings.payment_qr_url || '/qr-leidy-shop.jpg'}
                 onChange={e => saveSetting('payment_qr_url', e.target.value)}
-                placeholder="/qr-yape.jpg o URL de imagen"
+                placeholder="/qr-leidy-shop.jpg o URL de imagen"
                 className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400" />
               <label className="mt-2 flex h-10 items-center justify-center rounded-xl border border-dashed border-pink-200 bg-pink-50 text-[12px] font-black text-[#ff2d78] cursor-pointer">
                 {qrUploading ? 'Subiendo QR...' : 'Subir imagen QR'}
@@ -1210,7 +1233,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   }}
                 />
               </label>
-              <p className="mt-1 text-[10px] text-gray-400 font-medium">Puedes subir una imagen, pegar una URL o dejar /qr-yape.jpg.</p>
+              <p className="mt-1 text-[10px] text-gray-400 font-medium">Puedes subir una imagen, pegar una URL o dejar /qr-leidy-shop.jpg.</p>
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Direccion</label>

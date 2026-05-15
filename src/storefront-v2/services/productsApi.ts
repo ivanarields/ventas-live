@@ -14,19 +14,20 @@ export interface Product {
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1551163943-3f6a855d1153?auto=format&fit=crop&q=70&w=480';
 
-type ImagePreset = 'thumb' | 'detail';
+type ImagePreset = 'thumb' | 'detail' | 'qr';
 
-const PRESETS: Record<ImagePreset, { width: number; quality: number }> = {
-  thumb: { width: 360, quality: 58 },
-  detail: { width: 600, quality: 72 },
+const PRESETS: Record<ImagePreset, { width: number; quality: number; resize: 'cover' | 'contain' }> = {
+  thumb: { width: 320, quality: 58, resize: 'cover' },
+  detail: { width: 720, quality: 74, resize: 'cover' },
+  qr: { width: 520, quality: 82, resize: 'contain' },
 };
 
-export function storeImageUrl(src: string | undefined, preset: ImagePreset = 'thumb'): string {
+function storeRenderedImageUrl(src: string | undefined, preset: ImagePreset = 'thumb'): string {
   if (!src) return FALLBACK_IMG;
 
   try {
     const url = new URL(src);
-    const { width, quality } = PRESETS[preset];
+    const { width, quality, resize } = PRESETS[preset];
 
     if (url.hostname.includes('images.unsplash.com')) {
       url.searchParams.set('w', String(width));
@@ -42,7 +43,7 @@ export function storeImageUrl(src: string | undefined, preset: ImagePreset = 'th
       url.pathname = url.pathname.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
       url.searchParams.set('width', String(width));
       url.searchParams.set('quality', String(quality));
-      url.searchParams.set('resize', 'cover');
+      url.searchParams.set('resize', resize);
       return url.toString();
     }
 
@@ -50,6 +51,37 @@ export function storeImageUrl(src: string | undefined, preset: ImagePreset = 'th
   } catch {
     return src;
   }
+}
+
+export function storeImageFallbackUrl(src: string | undefined, preset: ImagePreset = 'thumb'): string {
+  return storeRenderedImageUrl(src, preset);
+}
+
+export function storeImageUrl(src: string | undefined, preset: ImagePreset = 'thumb'): string {
+  return storeRenderedImageUrl(src, preset);
+}
+
+export function storeDirectThumbUrl(src: string | undefined): string {
+  if (!src) return FALLBACK_IMG;
+
+  try {
+    const url = new URL(src);
+    if (url.pathname.includes('/storage/v1/object/public/store_images/')) {
+      const path = decodeURIComponent(url.pathname.split('/storage/v1/object/public/store_images/')[1] ?? '');
+      if (path && !path.startsWith('thumbs/')) {
+        const cleanPath = path.replace(/^\/+/, '');
+        const dot = cleanPath.lastIndexOf('.');
+        const base = dot >= 0 ? cleanPath.slice(0, dot) : cleanPath;
+        url.pathname = `/storage/v1/object/public/store_images/thumbs/${base}.jpg`;
+        url.search = '';
+        return url.toString();
+      }
+    }
+  } catch {
+    return storeRenderedImageUrl(src, 'thumb');
+  }
+
+  return storeRenderedImageUrl(src, 'thumb');
 }
 
 function mapRow(row: any): Product {
@@ -85,7 +117,35 @@ export interface PaginatedProducts {
   hasMore: boolean;
 }
 
+const PRODUCT_CACHE_KEY = 'storefront_products_page1_v1';
+
+function canUseCache(params?: { page?: number; limit?: number; category?: string; search?: string; admin?: boolean; token?: string }) {
+  return !params?.admin && !params?.token && !params?.category && !params?.search && (!params?.page || params.page === 1);
+}
+
+function readCachedProducts(): PaginatedProducts | null {
+  try {
+    const raw = localStorage.getItem(PRODUCT_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (!cached || !Array.isArray(cached.data)) return null;
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedProducts(products: PaginatedProducts) {
+  try {
+    localStorage.setItem(PRODUCT_CACHE_KEY, JSON.stringify(products));
+  } catch {
+    // Cache opcional; no debe afectar la compra.
+  }
+}
+
 export const productsApi = {
+  getCachedProducts: readCachedProducts,
+
   getProducts: async (params?: { page?: number; limit?: number; category?: string; search?: string; admin?: boolean; token?: string }): Promise<PaginatedProducts> => {
     const p = new URLSearchParams();
     if (params?.page) p.append('page', params.page.toString());
@@ -105,10 +165,12 @@ export const productsApi = {
       return { data: json.map(mapRow), total: json.length, page: 1, limit: json.length, hasMore: false };
     }
 
-    return {
+    const result = {
       ...json,
       data: json.data.map(mapRow),
     };
+    if (canUseCache(params)) writeCachedProducts(result);
+    return result;
   },
 
   getProduct: async (id: string): Promise<Product | undefined> => {

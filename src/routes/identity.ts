@@ -28,6 +28,60 @@ export function createIdentityRouter(
     return (req.headers['x-user-id'] as string) || null;
   }
 
+  function parseLiveSessionNotes(notes: unknown): { startAt: string | null; endAt: string | null; processedAt: string | null } {
+    try {
+      const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
+      return {
+        startAt: typeof parsed?.started_at === 'string' ? parsed.started_at : null,
+        endAt: typeof parsed?.ended_at === 'string' ? parsed.ended_at : typeof parsed?.closed_at === 'string' ? parsed.closed_at : null,
+        processedAt: typeof parsed?.processed_at === 'string' ? parsed.processed_at : null,
+      };
+    } catch {
+      return { startAt: null, endAt: null, processedAt: null };
+    }
+  }
+
+  async function resolveLiveOrderWindow(userId: string, liveOrder: any): Promise<{ from: string; to: string; source: string } | null> {
+    if (!liveOrder) return null;
+
+    const { data: evidenceRows } = await supabasePanel!
+      .from('evidencias_venta_live')
+      .select('metadata')
+      .eq('pedido_live_id', liveOrder.id)
+      .not('metadata', 'is', null)
+      .limit(20);
+
+    for (const row of evidenceRows ?? []) {
+      const range = row?.metadata?.live_range;
+      if (range?.start_at && range?.end_at) {
+        return { from: range.start_at, to: range.end_at, source: 'evidence_live_range' };
+      }
+    }
+
+    const orderCreated = liveOrder.created_at ? new Date(liveOrder.created_at).getTime() : Date.now();
+    const { data: sessions } = await supabase
+      .from('live_sessions')
+      .select('id,notes,created_at,status,user_id')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    let best: { from: string; to: string; source: string; distance: number } | null = null;
+    for (const session of sessions ?? []) {
+      const parsed = parseLiveSessionNotes(session.notes);
+      if (!parsed.startAt || !parsed.endAt) continue;
+      const processedAt = parsed.processedAt ? new Date(parsed.processedAt).getTime() : new Date(session.created_at).getTime();
+      const distance = Math.abs(orderCreated - processedAt);
+      if (distance > 8 * 60 * 60 * 1000) continue;
+      if (!best || distance < best.distance) {
+        best = { from: parsed.startAt, to: parsed.endAt, source: `live_session:${session.id}`, distance };
+      }
+    }
+
+    return best ? { from: best.from, to: best.to, source: best.source } : null;
+  }
+
   // GET /api/identity/profiles
   // Lista todos los perfiles del usuario. ?search=nombre &limit=50 &offset=0
   router.get('/profiles', async (req: Request, res: Response) => {
@@ -392,12 +446,6 @@ export function createIdentityRouter(
 
       if (!cliente) return res.json({ photos: [], cliente_found: false });
 
-      // Rango de fechas
-      const pivot = date ? new Date(date) : (liveOrder?.fecha_pedido ? new Date(liveOrder.fecha_pedido) : new Date());
-      const rangeMs = parseInt(days) * 24 * 60 * 60 * 1000;
-      const from = new Date(pivot.getTime() - rangeMs).toISOString();
-      const to   = new Date(pivot.getTime() + rangeMs).toISOString();
-
       if (!liveOrder) {
         const fechaPedido = date ? String(date).slice(0, 10) : null;
         let q = supabasePanel
@@ -411,6 +459,12 @@ export function createIdentityRouter(
         const { data } = await q.maybeSingle();
         liveOrder = data ?? null;
       }
+
+      const liveWindow = await resolveLiveOrderWindow(userId, liveOrder);
+      const pivot = date ? new Date(date) : (liveOrder?.fecha_pedido ? new Date(liveOrder.fecha_pedido) : new Date());
+      const rangeMs = parseInt(days) * 24 * 60 * 60 * 1000;
+      const from = liveWindow?.from ?? new Date(pivot.getTime() - rangeMs).toISOString();
+      const to = liveWindow?.to ?? new Date(pivot.getTime() + rangeMs).toISOString();
 
       const mensajesQuery = supabasePanel
         .from('panel_mensajes')
@@ -472,6 +526,7 @@ export function createIdentityRouter(
         cliente_found: true,
         cliente_id: cliente.id,
         pedido_live_id: liveOrder?.id ?? null,
+        live_window: liveWindow,
         timeline_steps: Array.isArray(resumenObj?.timeline_steps)
           ? resumenObj.timeline_steps.map((s: unknown) => String(s ?? '').trim()).filter(Boolean).slice(0, 4)
           : [],

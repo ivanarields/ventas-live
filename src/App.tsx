@@ -203,6 +203,7 @@ import {
   Headphones,
   Mic,
   Radio,
+  RadioTower,
   Disc,
   Coins,
   Euro,
@@ -2586,27 +2587,122 @@ function PaymentsView({
   const [webPreview, setWebPreview] = useState<{ profile: any; order: any; item: any; image: string } | null>(null);
   const [procesandoLive, setProcesandoLive] = useState(false);
   const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
-  const [paymentChannel, setPaymentChannel] = useState<'normal' | 'web'>('normal');
+  const [liveSessionState, setLiveSessionState] = useState<{ active: any | null; lastCompleted: any | null } | null>(null);
+  const [paymentChannel, setPaymentChannel] = useState<'normal' | 'web' | 'unassigned'>('normal');
 
-  const procesarLive = async () => {
+  const refreshLiveSessionState = async () => {
+    try {
+      const data = await apiFetch('/api/live-sales/sessions/current');
+      setLiveSessionState({
+        active: data.active ?? null,
+        lastCompleted: data.lastCompleted ?? null,
+      });
+      return data;
+    } catch (e) {
+      console.warn('[live-session] estado no disponible:', e);
+      setLiveSessionState({ active: null, lastCompleted: null });
+      return { active: null, lastCompleted: null };
+    }
+  };
+
+  const parseLiveCloseTime = (startAt: string, raw: string) => {
+    const start = new Date(startAt);
+    const trimmed = raw.trim();
+    if (!trimmed) return new Date();
+
+    const timeMatch = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+    if (timeMatch) {
+      const closeAt = new Date(start);
+      closeAt.setHours(Number(timeMatch[1]), Number(timeMatch[2]), 0, 0);
+      if (closeAt <= start) closeAt.setDate(closeAt.getDate() + 1);
+      return closeAt;
+    }
+
+    const parsed = new Date(trimmed);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  };
+
+  const startLiveSession = async () => {
+    if (!window.confirm('Se iniciará un bloque de Live desde este momento. ¿Continuar?')) return;
+    setProcesandoLive(true);
+    try {
+      await apiFetch('/api/live-sales/sessions/start', { method: 'POST' });
+      await refreshLiveSessionState();
+    } catch (e: any) {
+      alert(e?.message ?? 'No se pudo iniciar Live');
+    } finally {
+      setProcesandoLive(false);
+    }
+  };
+
+  const closeLiveSession = async (session: any) => {
+    const start = session?.startAt ? new Date(session.startAt) : null;
+    const defaultTime = new Date().toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const value = window.prompt(
+      `Hora real en que terminó el Live.\nInicio: ${start ? start.toLocaleString('es-BO') : 'sin hora'}\nEscribe HH:mm o deja la hora actual:`,
+      defaultTime
+    );
+    if (value === null) return;
+
+    const closeAt = parseLiveCloseTime(session.startAt, value);
+    if (!closeAt || !Number.isFinite(closeAt.getTime())) {
+      alert('Hora de cierre inválida. Usa formato HH:mm, por ejemplo 02:00.');
+      return;
+    }
+    if (start && closeAt <= start) {
+      alert('La hora de cierre debe ser posterior al inicio del Live.');
+      return;
+    }
+    if (closeAt.getTime() > Date.now() + 5 * 60 * 1000) {
+      alert('La hora de cierre no puede estar en el futuro.');
+      return;
+    }
+    if (!window.confirm(`Cerrar Live hasta ${closeAt.toLocaleString('es-BO')}?`)) return;
+
+    setProcesandoLive(true);
+    try {
+      await apiFetch('/api/live-sales/sessions/close', {
+        method: 'POST',
+        body: JSON.stringify({ endAt: closeAt.toISOString() }),
+      });
+      await refreshLiveSessionState();
+    } catch (e: any) {
+      alert(e?.message ?? 'No se pudo cerrar Live');
+    } finally {
+      setProcesandoLive(false);
+    }
+  };
+
+  const processClosedLiveSession = async (session: any) => {
     if (procesandoLive) return;
+    if (!session?.startAt || !session?.endAt) {
+      alert('Primero inicia y cierra un Live para poder resumirlo.');
+      return;
+    }
+    if (!window.confirm(`Procesar solo mensajes entre:\n${new Date(session.startAt).toLocaleString('es-BO')}\ny\n${new Date(session.endAt).toLocaleString('es-BO')}?`)) return;
+
     setProcesandoLive(true);
     setProcesandoProgreso(null);
     try {
-      const { clientes } = await apiFetch('/api/live-sales/pending-conversations');
+      const params = new URLSearchParams({ startAt: session.startAt, endAt: session.endAt });
+      const { clientes } = await apiFetch(`/api/live-sales/pending-conversations?${params.toString()}`);
       if (!clientes || clientes.length === 0) {
-        alert('No hay conversaciones pendientes de procesar.');
+        alert('No hay conversaciones pendientes dentro de este Live.');
+        await apiFetch(`/api/live-sales/sessions/${session.id}/processed`, { method: 'POST' });
+        await refreshLiveSessionState();
         return;
       }
       setProcesandoProgreso({ actual: 0, total: clientes.length });
+      let errores = 0;
       for (let i = 0; i < clientes.length; i++) {
         const cliente = clientes[i];
         try {
           await apiFetch('/api/ai/summarize-conversation', {
             method: 'POST',
-            body: JSON.stringify({ clienteId: cliente.id }),
+            body: JSON.stringify({ clienteId: cliente.id, startAt: session.startAt, endAt: session.endAt }),
           });
         } catch (e) {
+          errores += 1;
           console.warn(`[procesarLive] error en ${cliente.nombre}:`, e);
         }
         setProcesandoProgreso({ actual: i + 1, total: clientes.length });
@@ -2615,6 +2711,12 @@ function PaymentsView({
         }
       }
       onRefresh?.();
+      if (errores > 0) {
+        alert(`Live procesado con ${errores} error(es). No lo marco como finalizado para que puedas reintentar.`);
+      } else {
+        await apiFetch(`/api/live-sales/sessions/${session.id}/processed`, { method: 'POST' });
+      }
+      await refreshLiveSessionState();
     } catch (e: any) {
       alert('Error al obtener conversaciones: ' + (e?.message ?? 'Error desconocido'));
     } finally {
@@ -2622,6 +2724,24 @@ function PaymentsView({
       setProcesandoProgreso(null);
     }
   };
+
+  const handleLiveButton = async () => {
+    if (procesandoLive) return;
+    const state = liveSessionState ?? await refreshLiveSessionState();
+    if (state.active) {
+      await closeLiveSession(state.active);
+      return;
+    }
+    if (state.lastCompleted) {
+      await processClosedLiveSession(state.lastCompleted);
+      return;
+    }
+    await startLiveSession();
+  };
+
+  useEffect(() => {
+    refreshLiveSessionState();
+  }, []);
 
   const verificationPalette = (origin: VerificationOrigin) => {
     if (origin === 'automatic') return { bg: '#ecfdf5', fg: '#10b981' };
@@ -2631,6 +2751,30 @@ function PaymentsView({
 
   const isStorePayment = (payment: any) =>
     String(payment?.method ?? '').trim().toLowerCase() === 'tienda online';
+
+  const isUnassignedPayment = (payment: any) => {
+    if (isStorePayment(payment)) return false;
+    if (payment?.livePaymentId) return false;
+    const origin = String(payment?.verificationOrigin ?? 'other');
+    if (origin === 'verificado_macrodroid' || origin === 'whatsapp_pending' || origin === 'manual') return false;
+    if (payment?.customerId) {
+      const session = liveSessionState?.lastCompleted ?? liveSessionState?.active;
+      if (session?.startAt && session?.endAt) {
+        const t = new Date(payment.date ?? 0).getTime();
+        const s = new Date(session.startAt).getTime();
+        const e = new Date(session.endAt).getTime();
+        return t < s || t > e;
+      }
+      return false;
+    }
+    return true;
+  };
+
+  const paymentBelongsToChannel = (payment: any) => {
+    if (paymentChannel === 'web') return isStorePayment(payment);
+    if (paymentChannel === 'unassigned') return isUnassignedPayment(payment);
+    return !isStorePayment(payment) && !isUnassignedPayment(payment);
+  };
 
   const onSelectPerson = (id: string) => {
     onSelectPersonProp(id);
@@ -2824,7 +2968,7 @@ function PaymentsView({
         people: webProfilesForDate.length,
       };
     }
-    const visiblePayments = filteredPayments.filter(p => paymentChannel === 'web' ? isStorePayment(p) : !isStorePayment(p));
+    const visiblePayments = filteredPayments.filter(paymentBelongsToChannel);
     const totalSelected = visiblePayments.reduce((acc, p) => acc + cleanAmount(p.pago), 0);
     const uniquePeople = new Set(visiblePayments.map(p => cleanName(p.nombre).toLowerCase())).size;
 
@@ -2839,7 +2983,7 @@ function PaymentsView({
     const groups: { [key: string]: any } = {};
     
     // Ordenamos por fecha descendente antes de agrupar
-    const visiblePayments = filteredPayments.filter(p => paymentChannel === 'web' ? isStorePayment(p) : !isStorePayment(p));
+    const visiblePayments = filteredPayments.filter(paymentBelongsToChannel);
     const sortedPayments = [...visiblePayments].sort((a, b) => getTS(b.date) - getTS(a.date));
 
     sortedPayments.forEach(p => {
@@ -2946,6 +3090,26 @@ function PaymentsView({
     return result.sort((a: any, b: any) => b.lastTimestamp - a.lastTimestamp);
   }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders, paymentChannel]);
 
+  const unassignedPayments = useMemo(() => {
+    return filteredPayments
+      .filter(isUnassignedPayment)
+      .sort((a, b) => getTS(b.date) - getTS(a.date));
+  }, [filteredPayments]);
+
+  const activeLiveSession = liveSessionState?.active ?? null;
+  const completedLiveSession = liveSessionState?.lastCompleted ?? null;
+  const liveButtonLabel = activeLiveSession ? 'LIVE ON' : completedLiveSession ? 'LISTAR LIVE' : 'LIVE OFF';
+  const liveButtonStyle = activeLiveSession
+    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-600"
+    : completedLiveSession
+      ? "bg-purple-100 text-purple-700 hover:bg-purple-200"
+      : "bg-gray-100 text-gray-500 hover:bg-gray-200";
+  const liveButtonTitle = activeLiveSession
+    ? 'Cerrar el bloque de Live con hora real de cierre'
+    : completedLiveSession
+      ? 'Procesar conversaciones del ultimo Live cerrado'
+      : 'Iniciar bloque de Live desde este momento';
+
   return (
     <motion.div 
       initial={{ opacity: 0, x: 10 }}
@@ -2983,15 +3147,15 @@ function PaymentsView({
             <Hash size={18} />
           </button>
           <button
-            onClick={procesarLive}
+            onClick={handleLiveButton}
             disabled={procesandoLive}
             className={cn(
               "h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 px-2.5 gap-1.5 text-xs font-semibold",
               procesandoLive
                 ? "bg-purple-100 text-purple-600 cursor-not-allowed"
-                : "bg-gray-100 text-gray-500 hover:bg-purple-50 hover:text-purple-600"
+                : liveButtonStyle
             )}
-            title="Procesar todas las conversaciones del Live"
+            title={liveButtonTitle}
           >
             {procesandoLive && procesandoProgreso ? (
               <>
@@ -3002,8 +3166,8 @@ function PaymentsView({
               <Loader2 size={14} className="animate-spin" />
             ) : (
               <>
-                <Zap size={14} />
-                <span>Live</span>
+                {completedLiveSession ? <ClipboardList size={14} /> : <RadioTower size={14} />}
+                <span>{liveButtonLabel}</span>
               </>
             )}
           </button>
@@ -3026,24 +3190,33 @@ function PaymentsView({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-2xl">
+      <div className="grid grid-cols-3 gap-1 bg-gray-100/80 p-0.5 rounded-xl">
         <button
           onClick={() => setPaymentChannel('normal')}
           className={cn(
-            "h-10 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all",
+            "h-7 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
             paymentChannel === 'normal' ? "bg-white text-brand shadow-sm" : "text-gray-400"
           )}
         >
-          Pagos Live
+          Live
         </button>
         <button
           onClick={() => setPaymentChannel('web')}
           className={cn(
-            "h-10 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all",
+            "h-7 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
             paymentChannel === 'web' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400"
           )}
         >
-          Pagos Web
+          Web
+        </button>
+        <button
+          onClick={() => setPaymentChannel('unassigned')}
+          className={cn(
+            "h-7 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+            paymentChannel === 'unassigned' ? "bg-white text-slate-700 shadow-sm" : "text-gray-400"
+          )}
+        >
+          Sin asignar
         </button>
       </div>
 
@@ -3218,6 +3391,35 @@ function PaymentsView({
             </div>
           </div>
         )}
+
+        {paymentChannel === 'unassigned' && (unassignedPayments.length === 0 ? (
+          <div className="text-center py-24 opacity-20">
+            <Wallet className="w-16 h-16 mx-auto mb-4" />
+            <p className="text-sm font-bold uppercase tracking-[0.2em]">
+              Sin pagos sin asignar
+            </p>
+          </div>
+        ) : (
+          unassignedPayments.map((payment: any) => {
+            const date = parseAppDate(payment.date);
+            return (
+              <div key={payment.id} className="rounded-2xl border border-gray-100 bg-white px-3 py-2 flex items-center justify-between gap-3 shadow-sm">
+                <div className="min-w-0">
+                  <p className="text-[12px] font-black text-gray-800 uppercase truncate">
+                    {getVisualName(payment.nombre || 'Pago sin nombre')}
+                  </p>
+                  <p className="text-[10px] font-bold text-gray-400">
+                    {date ? date.toLocaleString('es-BO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sin hora'}
+                  </p>
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-[15px] font-black text-slate-700">Bs {cleanAmount(payment.pago)}</p>
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Fuera de Live</p>
+                </div>
+              </div>
+            );
+          })
+        ))}
 
         {paymentChannel === 'normal' && (groupedPayments.length === 0 ? (
           <div className="text-center py-24 opacity-20">
@@ -6899,4 +7101,3 @@ function AddPedidoModal({ onClose, customerId, customerName, allPedidos, allCust
     </div>
   );
 }
-

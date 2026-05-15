@@ -6,7 +6,7 @@
 //   1. Regex hardcodeados (patrones conocidos)
 //   2. Patrones aprendidos de la tabla `learned_text_patterns`
 //   3. Extracción agresiva (quitar keywords, tomar lo que queda)
-//   4. OpenRouter como último recurso
+//   4. Placeholder "PAGO [banco]" como último recurso
 //
 // Aprendizaje: cada pago procesado guarda su patrón textual (contexto
 // antes/después del nombre) para mejorar extracciones futuras del mismo banco.
@@ -18,8 +18,7 @@ const SUPABASE_URL         = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY     = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const INGEST_DEVICE_SECRET = Deno.env.get('INGEST_DEVICE_SECRET')!;
 const INGEST_USER_ID       = Deno.env.get('INGEST_USER_ID')!;
-const OPENROUTER_API_KEY  = Deno.env.get('OPENROUTER_API_KEY') ?? '';
-const OPENROUTER_MODEL    = Deno.env.get('OPENROUTER_MODEL') ?? 'openai/gpt-4o-mini';
+const GEMINI_API_KEY       = Deno.env.get('GEMINI_API_KEY') ?? '';
 
 // ── Tienda Online — reenvío al motor de cuadrangulación ──────────────────────
 // URL del cliente de la tienda (Supabase de TiendaOnline)
@@ -66,8 +65,7 @@ async function sha256(input: string): Promise<string> {
 
 function parseAmount(text: string): number | null {
   const match =
-    text.match(/([\d][\d.,]*)\s*Bs\.?(?!\w)/i) ||   // Yastaa: "150 Bs" o "1 Bs"
-    text.match(/Bs\.?\s*([\d][\d.,]*)/i) ||           // Yape: "Bs. 150"
+    text.match(/Bs\.?\s*([\d][\d.,]*)/i) ||
     text.match(/\bBOB\s*([\d][\d.,]*)/i) ||
     text.match(/\$us\.?\s*([\d][\d.,]*)/i);
   if (!match) return null;
@@ -84,27 +82,20 @@ function parsePayerName(text: string): string | null {
   const t = text.replace(/[^\w\sÁÉÍÓÚÑáéíóúñ.,|:;$-]/g, ' ').replace(/\s+/g, ' ');
 
   const patterns = [
-    // === YASTAA / BANCO UNIÓN — nombre va primero ===
-    // "JUAN PEREZ RODRIGUEZ te ha enviado 150 Bs"
-    /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{4,120}?)\s+te\s+ha\s+enviado\b/im,
-    // "JUAN PEREZ te envió/transfirió/realizó..."  (genérico nombre-primero)
-    /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{4,120}?)\s+te\s+(?:envi\S*|transf\S*|realiz\S*|pag\S*)\b/im,
-
-    // === YAPE y otros bancos ===
     // Yape QR: "QR DE NOMBRE  te envió Bs. X"
-    /QR\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)\s{1,4}te\s+(?:envi\S*|yape\S*|pag\S*)/i,
+    /QR\s+DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)\s{1,4}te\s+(?:envi\S*|yape\S*|pag\S*)/i,
     // Yape directo: "NOMBRE, te envió Bs. X"
-    /(?:^|\|\s*)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)\s*,\s*te\s+(?:envi\S*|yape\S*|pag\S*|transf\S*)/im,
+    /(?:^|\|\s*)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,80}?)\s*,\s*te\s+(?:envi\S*|yape\S*|pag\S*|transf\S*)/im,
     // Bancos clásicos: "RECIBISTE Bs. X DE NOMBRE"
-    /RECIBISTE\s+(?:Bs\.?\s*[\d.,]+\s+)?DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)(?:\s+(?:por|con|Bs|en|el|a\s+las)|$)/i,
+    /RECIBISTE\s+(?:Bs\.?\s*[\d.,]+\s+)?DE\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+(?:por|con|Bs|en|el|a\s+las)|$)/i,
     // "Transferencia/pago/envío recibido de NOMBRE"
-    /(?:transferencia|pago|envi\S+|dep\S+sito)\s+(?:recibid[oa]\s+)?de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)(?:\s+por|\s+Bs|\s*$)/i,
+    /(?:transferencia|pago|envi\S+|dep\S+sito)\s+(?:recibid[oa]\s+)?de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+por|\s+Bs|\s*$)/i,
     // "de NOMBRE por/Bs"
-    /\bde\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120}?)(?:\s+por|\s+con|\s+Bs|\s*$)/,
+    /\bde\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60}?)(?:\s+por|\s+con|\s+Bs|\s*$)/,
     // "enviado por NOMBRE"
-    /enviado\s+por\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120})/i,
+    /enviado\s+por\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60})/i,
     // "nombre: NOMBRE"
-    /nombre\s*:?\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,120})/i,
+    /nombre\s*:?\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s.]{2,60})/i,
   ];
 
   for (const rx of patterns) {
@@ -119,10 +110,10 @@ function parsePayerName(text: string): string | null {
   return null;
 }
 
-// ─── IA (OpenRouter): parseo inteligente de notificaciones bancarias ─────────
+// ─── IA (Gemini): parseo inteligente de notificaciones bancarias ────────────
 
-async function parseWithOpenRouter(text: string): Promise<{ name: string | null; amount: number | null } | null> {
-  if (!OPENROUTER_API_KEY) return null;
+async function parseWithGemini(text: string): Promise<{ name: string | null; amount: number | null } | null> {
+  if (!GEMINI_API_KEY) return null;
   if (!text || text.length < 5) return null;
 
   const prompt = `Extrae el nombre del pagador y el monto de esta notificación bancaria boliviana.
@@ -136,41 +127,36 @@ Reglas estrictas:
 - El nombre debe estar en MAYUSCULAS exactamente como aparece en el texto
 - El monto es solo el numero (sin "Bs." ni simbolos)
 - Si el texto dice "QR DE JUAN PEREZ te envio Bs. 50" → {"name": "JUAN PEREZ", "amount": 50}
-- Si el texto dice "JUAN PEREZ RODRIGUEZ te ha enviado 150 Bs" → {"name": "JUAN PEREZ RODRIGUEZ", "amount": 150}
 - Si el texto dice "Recibiste un yapeo de Bs. 100" (sin nombre) → {"name": null, "amount": 100}
-- Si el texto dice "Motivo: Transferencia" (sin nombre claro) → {"name": null, "amount": null}
 
 Notificacion: """${text}"""`;
 
   try {
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': Deno.env.get('APP_URL') || 'https://ventas-live.vercel.app',
-        'X-Title': 'Ventas Live',
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0,
-        max_tokens: 150,
-        response_format: { type: 'json_object' },
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 150,
+            responseMimeType: 'application/json',
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        }),
+        signal: AbortSignal.timeout(8000),
+      }
+    );
 
     if (!resp.ok) {
-      console.error('[openrouter] HTTP error', resp.status, await resp.text());
+      console.error('[gemini] HTTP error', resp.status, await resp.text());
       return null;
     }
 
     const data = await resp.json();
-    const contentResp = data.choices?.[0]?.message?.content;
-    const textResp = Array.isArray(contentResp)
-      ? contentResp.map((item: any) => item?.text ?? '').join('').trim()
-      : String(contentResp ?? '').trim();
+    const textResp = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     const jsonMatch = textResp.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) return null;
 
@@ -184,7 +170,7 @@ Notificacion: """${text}"""`;
 
     return { name, amount };
   } catch (err) {
-    console.error('[openrouter] exception:', err);
+    console.error('[gemini] exception:', err);
     return null;
   }
 }
@@ -262,7 +248,7 @@ function looksLikeRealName(candidate: string): boolean {
   if (!candidate) return false;
   const words = candidate.trim().split(/\s+/);
   if (words.length < 2) return false;            // mínimo nombre + apellido
-  if (candidate.length < 6 || candidate.length > 150) return false;
+  if (candidate.length < 6 || candidate.length > 70) return false;
 
   for (const w of words) {
     const upper = w.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -288,7 +274,7 @@ function extractFallbackName(text: string): string | null {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const candidate = cleaned.split(' ').slice(0, 8).join(' ');
+  const candidate = cleaned.split(' ').slice(0, 5).join(' ');
   return looksLikeRealName(candidate) ? candidate : null;
 }
 
@@ -451,40 +437,21 @@ async function ensureDailyPedidoFromPayment(input: {
     .gte('date', range.start)
     .lt('date', range.end)
     .order('created_at', { ascending: true })
-    .limit(20);
+    .limit(1);
   if (existingError) {
     console.error('[daily pedido select]', existingError);
     return null;
   }
 
-  const current = (existing ?? []).find((pedido: any) => (
-    String(pedido.source ?? '').toUpperCase() !== 'WEB' &&
-    String(pedido.label_type ?? '').toUpperCase() !== 'WEB' &&
-    !String(pedido.label ?? '').toUpperCase().startsWith('WEB-')
-  )) ?? null;
+  const current = existing?.[0] ?? null;
   if (current) {
     const status = String(current.status ?? '').toLowerCase();
     const keepStatus = ['listo', 'preparado', 'ready', 'entregado'].includes(status);
-    const isLivePedido = String(current.source ?? '').toLowerCase() === 'live_sales';
-    if (isLivePedido) {
-      // El flujo Live gestiona su propio total_amount via syncMainPedidoForLiveOrder.
-      // MacroDroid no debe reescribir ese total al ingresar un pago fuera del rango Live.
-      const { data, error } = await supabase
-        .from('pedidos')
-        .update({ customer_name: input.customerName, updated_at: new Date().toISOString() })
-        .eq('id', current.id)
-        .eq('user_id', INGEST_USER_ID)
-        .select()
-        .single();
-      if (error) console.error('[daily pedido update live-safe]', error);
-      return data ?? current;
-    }
     const { data: pagosDelDia } = await supabase
       .from('pagos')
       .select('pago')
       .eq('user_id', INGEST_USER_ID)
       .eq('customer_id', input.customerId)
-      .neq('method', 'Tienda Online')
       .gte('date', range.start)
       .lt('date', range.end);
     const totalPagado = (pagosDelDia ?? []).reduce((sum: number, pago: any) => sum + (Number(pago.pago) || 0), 0);
@@ -614,9 +581,6 @@ Deno.serve(async (req) => {
   const deviceSecret = req.headers.get('x-device-secret') ?? '';
 
   if (!deviceId || !deviceSecret)              return jsonResponse({ error: 'Missing x-device-id or x-device-secret' }, 401);
-  if (deviceId === 'keepalive-cron' && deviceSecret === 'keepalive') {
-    return jsonResponse({ ok: true, keepalive: true, ts: new Date().toISOString() });
-  }
   if (deviceSecret !== INGEST_DEVICE_SECRET)   return jsonResponse({ error: 'Invalid device secret' }, 403);
   if (!AUTHORIZED_DEVICES.includes(deviceId)) return jsonResponse({ error: 'Device not in allowlist' }, 403);
 
@@ -678,9 +642,6 @@ Deno.serve(async (req) => {
   if (rawErr?.code === '23505') return jsonResponse({ ok: true, duplicate: true, raw_hash: rawHash });
   if (rawErr) { console.error('[raw insert]', rawErr); return jsonResponse({ error: rawErr.message }, 500); }
 
-  const processing = (async () => {
-    try {
-
   // ── PARSEO ──
   const candidateText = [payload.big_text, payload.text_lines, payload.text, payload.title]
     .filter(s => s && s.length > 0).join(' | ');
@@ -698,16 +659,16 @@ Deno.serve(async (req) => {
     if (payerNameRaw) nameSource = 'learned';
   }
 
-  // OpenRouter: si regex y patrones aprendidos fallaron, pedimos a la IA
+  // IA Gemini: si regex y patrones aprendidos fallaron, pedimos a Gemini
   if (!payerNameRaw) {
-    const openRouterResult = await parseWithOpenRouter(candidateText);
-    if (openRouterResult?.name) {
-      payerNameRaw = openRouterResult.name;
-      nameSource = 'openrouter';
+    const geminiResult = await parseWithGemini(candidateText);
+    if (geminiResult?.name) {
+      payerNameRaw = geminiResult.name;
+      nameSource = 'gemini';
     }
-    // Si OpenRouter encontró monto y nosotros no, también lo usamos
-    if (amount === null && openRouterResult?.amount !== null && openRouterResult?.amount !== undefined) {
-      amount = openRouterResult.amount;
+    // Si Gemini encontró monto y nosotros no, también lo usamos
+    if (amount === null && geminiResult?.amount !== null && geminiResult?.amount !== undefined) {
+      amount = geminiResult.amount;
     }
   }
 
@@ -722,7 +683,7 @@ Deno.serve(async (req) => {
   let confidence = 0;
   if (amount !== null) confidence += 0.55;
   if (payerNameRaw && nameSource === 'regex')    confidence += 0.30;
-  if (payerNameRaw && nameSource === 'openrouter') confidence += 0.28;
+  if (payerNameRaw && nameSource === 'gemini')   confidence += 0.28;
   if (payerNameRaw && nameSource === 'learned')  confidence += 0.25;
   if (payerNameRaw && nameSource === 'fallback') confidence += 0.15;
   if (operationRef) confidence += 0.15;
@@ -735,7 +696,7 @@ Deno.serve(async (req) => {
   const { data: candidate, error: candErr } = await supabase
     .from('parsed_payment_candidates')
     .insert({
-      raw_event_id: rawRow.id, parser_version: 'v4.0-openrouter',
+      raw_event_id: rawRow.id, parser_version: 'v3.0-gemini',
       bank_code: payload.app_package, candidate_text: candidateText,
       currency: 'BOB', amount,
       payer_name_raw: payerNameRaw, payer_name_canonical: payerNameCanonical,
@@ -764,6 +725,14 @@ Deno.serve(async (req) => {
         .from('parsed_payment_candidates').select('id')
         .eq('operation_ref', operationRef).neq('id', candidate.id).limit(1);
       isDuplicate = (byRef?.length ?? 0) > 0;
+    } else {
+      const oneMinAgo = new Date(Date.now() - 60 * 1000).toISOString();
+      const { data: maybeDup } = await supabase
+        .from('pagos').select('id')
+        .eq('user_id', INGEST_USER_ID)
+        .eq('nombre', payerNameRaw)
+        .eq('pago', amount).gte('date', oneMinAgo).limit(1);
+      isDuplicate = (maybeDup?.length ?? 0) > 0;
     }
 
     // Removed payments_ui insertion as the view handles it or it's deprecated
@@ -926,8 +895,8 @@ Deno.serve(async (req) => {
           eventAt,
         });
 
-        // Aprender patrón de extracciones confiables (regex u OpenRouter)
-        if (nameSource === 'regex' || nameSource === 'openrouter') {
+        // Aprender patrón de extracciones confiables (regex o Gemini)
+        if (nameSource === 'regex' || nameSource === 'gemini') {
           const sourceForLearning = payload.big_text || payload.text || '';
           await learnPattern(payload.app_package, sourceForLearning, payerNameRaw);
         }
@@ -943,7 +912,7 @@ Deno.serve(async (req) => {
             const { data: candidates } = await storeClient
               .from('store_orders')
               .select('id, total, customer_wa, items')
-              .in('status', ['pending', 'cancelled'])
+              .eq('status', 'pending')
               .eq('total', amount)
               .gt('created_at', windowStart)
               .order('created_at', { ascending: false });
@@ -958,40 +927,48 @@ Deno.serve(async (req) => {
             } else if (candidates && candidates.length > 1) {
               // MÚLTIPLES candidatos → NO verificar automáticamente
               // Esperar WA con código o verificación manual del admin
-              matched = null;
-              confidence = 'none';
-              console.log(`[tienda-store] ${candidates.length} pedidos de ${amount} Bs - se requiere #pedido por WhatsApp`);
+              console.log(`[tienda-store] ⚠️ ${candidates.length} pedidos de ${amount} Bs — esperando WA/manual`);
             }
 
             if (matched) {
-              const serverUrl = Deno.env.get('SERVER_URL') ?? 'https://leidycandy.me';
-              const response = await fetch(`${serverUrl}/api/store/match-payment`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  orderId: matched.id,
-                  source: `chehi:${rawHash}:${confidence}`,
-                }),
-              });
+              // Confirmar el pedido en la tienda
+              const { data: updatedOrder } = await storeClient
+                .from('store_orders')
+                .update({
+                  status: 'paid',
+                  payment_verified_at: new Date().toISOString(),
+                  payment_method: 'qr',
+                  payment_ref: `chehi:${rawHash}:${confidence}`,
+                })
+                .eq('id', matched.id)
+                .eq('status', 'pending')
+                .select()
+                .single();
 
-              if (!response.ok) {
-                const detail = await response.text().catch(() => '');
-                throw new Error(`No se pudo confirmar tienda #${matched.id}: ${response.status} ${detail}`);
+              if (updatedOrder) {
+                // Ocultar productos vendidos automáticamente
+                const productIds = (updatedOrder.items ?? [])
+                  .map((i: { productId: unknown }) => i.productId)
+                  .filter(Boolean);
+                if (productIds.length > 0) {
+                  await storeClient.from('products').update({ available: false }).in('id', productIds);
+                }
+
+                // Guardar el evento de pago en la tienda
+                await storeClient.from('payment_events').insert({
+                  source: 'chehi_ingest',
+                  raw_text: candidateText.slice(0, 300),
+                  amount,
+                  sender_name: payerNameRaw,
+                  sender_wa: '',
+                  processed: true,
+                  match_confidence: confidence,
+                  hash: rawHash,
+                  matched_order_id: matched.id,
+                });
+
+                console.log(`[tienda-store] ✅ Pedido #${matched.id} verificado (${confidence}). Monto: ${amount} Bs`);
               }
-
-              await storeClient.from('payment_events').insert({
-                source: 'chehi_ingest',
-                raw_text: candidateText.slice(0, 300),
-                amount,
-                sender_name: payerNameRaw,
-                sender_wa: '',
-                processed: true,
-                match_confidence: confidence,
-                hash: rawHash,
-                matched_order_id: matched.id,
-              });
-
-              console.log(`[tienda-store] Pedido #${matched.id} confirmado por servidor (${confidence}). Monto: ${amount} Bs`);
             }
           } catch (storeErr) {
             // El error de la tienda NO debe bloquear el flujo de ChehiApp
@@ -1030,22 +1007,12 @@ Deno.serve(async (req) => {
     capture_quality_score:  confidence * 100,
   });
 
-    } catch (processErr) {
-      console.error('[background processing]', processErr);
-      await supabase.from('raw_notification_events')
-        .update({ ingest_status: 'processing_error' })
-        .eq('id', rawRow.id);
-    }
-  })();
-
-  const edgeRuntime = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
-  if (edgeRuntime?.waitUntil) {
-    edgeRuntime.waitUntil(processing);
-  } else {
-    processing.catch((err) => console.error('[background processing detached]', err));
-  }
-
-  return jsonResponse({ ok: true, accepted: true, raw_hash: rawHash });
+  return jsonResponse({
+    ok: true, raw_hash: rawHash,
+    parsed: { amount, payer: payerNameRaw, name_source: nameSource, confidence: Number(confidence.toFixed(2)) },
+    needs_review: needsReview,
+    auto_processed: !needsReview && !!amount,
+  });
   } catch (err) {
     console.error('[handler crash]', err);
     return jsonResponse({ error: String(err) }, 500);

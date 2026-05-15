@@ -2,7 +2,6 @@ import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { Rocket } from 'lucide-react';
 
 import { Product, productsApi } from './services/productsApi';
-import { StoreChip, parseStoreChips } from './config/storefrontConfig';
 
 const ProductGallery = lazy(() => import('./components/ProductGallery').then(m => ({ default: m.ProductGallery })));
 const ProductDetail = lazy(() => import('./components/ProductDetail').then(m => ({ default: m.ProductDetail })));
@@ -120,12 +119,16 @@ export default function StorefrontApp() {
     handleHash(); // Ejecutar al inicio
 
     return () => window.removeEventListener('hashchange', handleHash);
-  }, [cart.length]);
+  }, []);
 
   const setView = (newView: View, productId?: string) => {
     if (newView === 'welcome') window.location.hash = '';
     else if (newView === 'detail' && productId) window.location.hash = `producto/${productId}`;
     else window.location.hash = newView;
+  };
+
+  const openProfile = (tab?: string) => {
+    window.location.hash = tab ? `profile/${tab}` : 'profile';
   };
 
   const handleProductSelect = (product: Product) => {
@@ -206,12 +209,8 @@ export default function StorefrontApp() {
         {view === 'welcome' && (
           <WelcomeScreen 
             onEnter={() => setView('gallery')} 
-            onOpenProfile={() => setView('profile')}
-            onOpenCustomerCenter={() => setView('customer-center')}
             isInstallable={isInstallable}
             onInstall={handleInstallClick}
-            darkMode={darkMode}
-            onToggleDarkMode={toggleDarkMode}
           />
         )}
 
@@ -224,7 +223,7 @@ export default function StorefrontApp() {
                 onBack={() => setView('welcome')}
                 onAddToCart={addToCart}
                 onOpenCart={() => setView('cart')}
-                onOpenProfile={() => setView('profile')}
+                onOpenProfile={openProfile}
                 cartCount={cartCount(cart)}
                 darkMode={darkMode}
                 onToggleDarkMode={toggleDarkMode}
@@ -260,7 +259,7 @@ export default function StorefrontApp() {
                 onBack={() => setView('gallery')}
                 onOrderComplete={() => {
                   clearCart();
-                  setView('gallery');
+                  openProfile('orders');
                 }}
                 darkMode={darkMode}
               />
@@ -304,19 +303,7 @@ function StoreSkeleton() {
   );
 }
 
-function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstallable, onInstall, darkMode, onToggleDarkMode }: { onEnter: () => void, onOpenProfile: () => void, onOpenCustomerCenter: () => void, isInstallable: boolean, onInstall: () => void, darkMode: boolean, onToggleDarkMode: () => void }) {
-  const [mainCategories, setMainCategories] = useState<StoreChip[]>([]);
-
-  useEffect(() => {
-    fetch('/api/store/settings')
-      .then(r => r.ok ? r.json() : null)
-      .then(settings => {
-        const next = parseStoreChips(settings?.store_chips).filter(chip => chip.active).slice(0, 4);
-        if (next.length > 0) setMainCategories(next);
-      })
-      .catch(() => {});
-  }, []);
-
+function WelcomeScreen({ onEnter, isInstallable, onInstall }: { onEnter: () => void, isInstallable: boolean, onInstall: () => void }) {
   // La carga inicial ahora se hace bajo demanda (paginada) en el componente ProductGallery
   // por lo que no necesitamos prefetch masivo.
 
@@ -325,7 +312,7 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
       
       {/* PWA Banner */}
       {isInstallable && (
-        <div className="absolute top-4 left-4 right-16 z-40 flex items-center justify-between bg-white/90 backdrop-blur rounded-2xl px-3 py-2.5 border border-[#ff2d78]/10 shadow-sm">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 w-[min(310px,calc(100%-48px))] flex items-center justify-between bg-white/92 backdrop-blur rounded-2xl px-3 py-2 border border-[#ff2d78]/10 shadow-sm">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-[#ff2d78] flex items-center justify-center shadow-md shadow-[#ff2d78]/20">
               <Rocket className="w-4 h-4 text-white" />
@@ -345,13 +332,11 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
       )}
 
       {/* Fondo rosado original — sin fotos de collage que consuman recursos */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#fff0f5] via-white to-white z-0" />
-      <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-[#ff2d78]/8 blur-3xl z-0" />
-      <div className="absolute top-40 -left-16 w-48 h-48 rounded-full bg-[#ff2d78]/6 blur-2xl z-0" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,#ffd4e4_0%,#fff0f6_34%,#fff8fb_62%,#ffffff_100%)] z-0" />
 
       {/* Contenido Frontal */}
       <div className="relative flex flex-col items-center justify-center flex-1 px-8 text-center z-10">
-        <div className="mb-8">
+        <div className="mb-7">
           <div className="w-20 h-20 mx-auto mb-5 overflow-hidden">
             <img src="/logo.png" alt="Leidy American" className="w-full h-full object-contain" loading="eager" decoding="async" />
           </div>
@@ -366,32 +351,15 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
           </p>
         </div>
 
-        {mainCategories.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-2 mb-10 w-full px-4">
-            {mainCategories.map(cat => (
-              <span key={cat.id} className="px-3 py-1.5 bg-[#fff0f5] text-[#ff2d78] text-[11px] font-black rounded-full uppercase tracking-wider">
-                {cat.label}
-              </span>
-            ))}
-          </div>
-        )}
-
         <button
           onClick={onEnter}
           onPointerEnter={prefetchGallery}
           onTouchStart={prefetchGallery}
           onFocus={prefetchGallery}
-          className="w-full max-w-[280px] h-14 rounded-2xl font-black text-white text-[16px] shadow-lg shadow-[#ff2d78]/30 active:scale-95 transition-all"
-          style={{ background: 'linear-gradient(135deg, #ff2d78, #ff6fa3)' }}
+          className="w-[min(210px,100%)] h-11 rounded-full font-black text-white text-[14px] shadow-md shadow-[#ff2d78]/20 active:scale-95 transition-all"
+          style={{ background: '#ff2d78' }}
         >
           Ver catálogo
-        </button>
-
-        <button
-          onClick={onOpenCustomerCenter}
-          className="w-full max-w-[280px] h-11 rounded-2xl font-black text-[#ff2d78] text-[14px] border-2 border-[#ff2d78]/20 bg-white mt-3 active:scale-95 transition-all"
-        >
-          Centro de clientas
         </button>
 
         <p className="text-[11px] text-gray-400 mt-4 font-medium">
@@ -401,7 +369,7 @@ function WelcomeScreen({ onEnter, onOpenProfile, onOpenCustomerCenter, isInstall
 
       <div className="relative pb-10 text-center z-10">
         <p className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">
-          Leidy American © 2025
+          Leidy American © 2026
         </p>
       </div>
     </div>

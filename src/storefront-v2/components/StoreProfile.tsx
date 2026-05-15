@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { storeAuth } from '../services/storeAuth';
-import { Product, storeImageUrl } from '../services/productsApi';
+import { Product } from '../services/productsApi';
 import { storeFavoritesApi } from '../services/storeFavoritesApi';
+import { getStoreSettings } from '../services/storeSettingsApi';
+import { ProductThumb } from './ProductThumb';
 
 const BRAND = '#ff2d78';
 
@@ -61,16 +63,17 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
     loadProfile(session.token);
   }, []);
 
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
+
   const loadProfile = async (token: string) => {
     setLoading(true);
     try {
       try {
-        const phoneRes = await fetch('/api/store/settings');
-        if (phoneRes.ok) {
-          const phoneData = await phoneRes.json();
-          const num = String(phoneData?.official_wa_number || phoneData?.store_phone || '').replace(/\D/g, '');
-          if (num) setStorePhone(num);
-        }
+        const phoneData = await getStoreSettings();
+        const num = String(phoneData?.official_wa_number || phoneData?.store_phone || '').replace(/\D/g, '');
+        if (num) setStorePhone(num);
       } catch { /* no crítico */ }
       await storeFavoritesApi.syncLocal();
       const res = await fetch('/api/store-auth/me', { headers: { Authorization: `Bearer ${token}` } });
@@ -131,7 +134,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
         loginData = await loginRes.json();
       }
       if (!loginRes.ok || !loginData.session?.access_token) throw new Error(loginData.error || 'No se pudo ingresar.');
-      storeAuth.saveSession(loginData.session.access_token, { id: loginData.user.id, phone: cleanPhone, name: '' });
+      storeAuth.saveSession(loginData.session.access_token, { id: loginData.user.id, phone: cleanPhone, name: '' }, loginData.session);
       setUser({ phone: cleanPhone, name: '' });
       await loadProfile(loginData.session.access_token);
     } catch (err: any) {
@@ -146,7 +149,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
     if (!selectedPickup && !(customDate && customTime)) return;
     setDeliverySaving(true);
     try {
-      await fetch(`/api/store-orders/${nextOrder.id}/set-delivery`, {
+      const res = await fetch(`/api/store-orders/${nextOrder.id}/set-delivery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
         body: JSON.stringify({
@@ -154,7 +157,10 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
           delivery_slot: selectedPickup?.slot ?? customTime,
         }),
       });
+      if (!res.ok) throw new Error('No se pudo guardar la fecha de retiro.');
       setDeliverySaved(true);
+    } catch (err: any) {
+      setAuthError(err?.message || 'No se pudo guardar la fecha de retiro.');
     } finally {
       setDeliverySaving(false);
     }
@@ -165,12 +171,15 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
     if (!session) return;
     setConfirmLoading(true);
     try {
-      await fetch(`/api/store-orders/${orderId}/customer-confirm`, {
+      const res = await fetch(`/api/store-orders/${orderId}/customer-confirm`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.token}` },
       });
+      if (!res.ok) throw new Error('No se pudo confirmar el pedido.');
       setConfirmDone(true);
       await loadProfile(session.token);
+    } catch (err: any) {
+      setAuthError(err?.message || 'No se pudo confirmar el pedido.');
     } finally {
       setConfirmLoading(false);
     }
@@ -282,7 +291,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
             ) : favorites.map(product => (
               <div key={product.id} className="rounded-3xl bg-white border border-gray-100 shadow-sm p-3 flex gap-3">
                 <button onClick={() => onProductSelect?.(product)} className="w-20 h-24 rounded-2xl overflow-hidden bg-gray-100 flex-shrink-0">
-                  <img src={storeImageUrl(product.images[0], 'thumb')} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                  <ProductThumb image={product.images[0]} className="w-full h-full object-cover" width={80} height={96} />
                 </button>
                 <div className="min-w-0 flex-1 py-1">
                   <p className="text-[13px] font-black text-gray-800 leading-snug line-clamp-2">{product.title}</p>
@@ -414,7 +423,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                         className="w-full h-12 rounded-2xl font-black text-[13px] text-white flex items-center justify-center gap-2"
                         style={{ background: '#25D366' }}
                       >
-                        <span>💬</span> Avisarle a Leidy American
+                        <span>💬</span> Avisarle a Leidy Shop
                       </button>
                     )}
                   </div>

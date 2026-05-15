@@ -4,6 +4,8 @@ import { storeOrdersApi } from '../services/storeOrdersApi';
 import { storeAuth } from '../services/storeAuth';
 import { storeImageUrl } from '../services/productsApi';
 import { storeFavoritesApi } from '../services/storeFavoritesApi';
+import { getStoreSettings } from '../services/storeSettingsApi';
+import { ProductThumb } from './ProductThumb';
 
 const BRAND = '#ff2d78';
 const WA_NUMBER = (import.meta.env.VITE_STORE_WA_NUMBER as string | undefined) ?? '59160003230';
@@ -40,13 +42,13 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
   const [bankDetected, setBankDetected] = useState(false);
   const [waNudge, setWaNudge] = useState(false); // true después de 60 seg sin verificar
   const [elapsedSec, setElapsedSec] = useState(0);
-  const [paymentQrUrl, setPaymentQrUrl] = useState('/qr-yape.jpg');
+  const [paymentQrUrl, setPaymentQrUrl] = useState('/qr-leidy-shop.jpg');
   const [waNumber, setWaNumber] = useState(WA_NUMBER);
+  const [serverTotal, setServerTotal] = useState<number | null>(null);
 
   // ── Al montar: detectar sesión y decidir pantalla ─────────────
   useEffect(() => {
-    fetch('/api/store/settings')
-      .then(r => r.ok ? r.json() : null)
+    getStoreSettings()
       .then(settings => {
         const qr = String(settings?.payment_qr_url || '').trim();
         if (qr) setPaymentQrUrl(qr);
@@ -63,8 +65,16 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
     const session = storeAuth.getCurrentUserSync();
     if (session) {
       // ✅ Ya tiene sesión → ir directo al pago
-      setPhone(session.phone);
-      createOrder(session.phone);
+      storeAuth.getCurrentUser()
+        .then(validUser => {
+          if (!validUser) {
+            setScreen('identify');
+            return;
+          }
+          setPhone(validUser.phone);
+          createOrder(validUser.phone);
+        })
+        .catch(() => setScreen('identify'));
       return;
     }
 
@@ -105,6 +115,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
       const order = await storeOrdersApi.create(payload);
       if (!order?.id) throw new Error('No se pudo crear el pedido. Intenta de nuevo.');
       setOrderId(order.id);
+      setServerTotal(Number(order.total) || total);
       setScreen('payment');
     } catch (err: any) {
       if (err?.message?.includes('409') || err?.message?.includes('reservado') || err?.message?.includes('disponible')) {
@@ -180,7 +191,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
       if (loginRes.ok && loginData.session?.access_token) {
         token = loginData.session.access_token;
-        storeAuth.saveSession(token!, { id: loginData.user.id, phone: cleanPhone, name: '' });
+        storeAuth.saveSession(token!, { id: loginData.user.id, phone: cleanPhone, name: '' }, loginData.session);
         void storeFavoritesApi.syncLocal();
       } else {
         // 2. Si login falla → registrar (primera vez, mismo PIN)
@@ -204,7 +215,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
         const loginData2 = await loginRes2.json();
         if (!loginRes2.ok) throw new Error('Cuenta creada. Ya puedes ingresar con tu PIN.');
         token = loginData2.session?.access_token;
-        storeAuth.saveSession(token!, { id: loginData2.user.id, phone: cleanPhone, name: '' });
+        storeAuth.saveSession(token!, { id: loginData2.user.id, phone: cleanPhone, name: '' }, loginData2.session);
         void storeFavoritesApi.syncLocal();
       }
 
@@ -278,24 +289,25 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
     const secs = String(timeLeft % 60).padStart(2, '0');
     const pct = (timeLeft / PAYMENT_SECONDS) * 100;
     const tColor = timeLeft < 30 ? '#ef4444' : timeLeft < 60 ? '#f59e0b' : BRAND;
+    const payableTotal = serverTotal ?? total;
 
     const sendWA = () => {
       const msg = encodeURIComponent(
-        `Hola! Ya pague mi pedido de tienda #${orderId} por ${total.toFixed(2)} Bs. Mi numero es ${phone}. Adjunto comprobante.`
+        `Hola! Ya pague mi pedido de tienda #${orderId} por ${payableTotal.toFixed(2)} Bs. Mi numero es ${phone}. Adjunto comprobante.`
       );
       window.open(`https://wa.me/${waNumber}?text=${msg}`, '_blank');
     };
 
     const downloadVisibleQr = async () => {
       try {
-        const response = await fetch(paymentQrUrl, { cache: 'no-store' });
+        const response = await fetch(paymentQrUrl);
         if (!response.ok) throw new Error('No se pudo descargar el QR');
         const blob = await response.blob();
         const objectUrl = URL.createObjectURL(blob);
         const extension = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
         const link = document.createElement('a');
         link.href = objectUrl;
-        link.download = `QR-Leidy-American.${extension}`;
+        link.download = `QR-Leidy-Shop.${extension}`;
         link.style.display = 'none';
         document.body.appendChild(link);
         link.click();
@@ -333,7 +345,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           <div className="mb-3">
             <p className="text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Total a Pagar</p>
             <p className="font-black leading-none text-gray-800 tracking-tight" style={{ fontSize: 'clamp(38px, 9dvh, 52px)' }}>
-              {total.toFixed(2)} <span className="text-[20px] text-[#ff2d78]">Bs</span>
+              {payableTotal.toFixed(2)} <span className="text-[20px] text-[#ff2d78]">Bs</span>
             </p>
             <p className="text-[12px] text-gray-400 font-medium mt-2">
               Pedido {orderId ? `#${orderId}` : 'creando'} - {itemCount} articulo(s)
@@ -355,7 +367,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
                 ).map(({ img, title, key }) => (
                   <div key={key} className="flex-shrink-0 w-16 h-20 rounded-2xl overflow-hidden bg-[#fff0f5]">
                     {img ? (
-                      <img src={storeImageUrl(img, 'thumb')} alt={title} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                      <ProductThumb image={img} alt={title} className="w-full h-full object-cover" width={64} height={80} />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-[#ff2d78] font-black text-[10px]">LA</div>
                     )}
@@ -374,7 +386,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
             >
               <div className="w-14 h-14 rounded-2xl overflow-hidden bg-[#fff0f5] flex-shrink-0">
                 {primaryImage ? (
-                  <img src={storeImageUrl(primaryImage, 'thumb')} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                  <ProductThumb image={primaryImage} className="w-full h-full object-cover" width={56} height={56} />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[#ff2d78] font-black">LA</div>
                 )}
@@ -382,7 +394,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Resumen</p>
                 <p className="text-[13px] font-black text-gray-800 truncate">
-                  {primaryItem ? primaryItem.product.title : 'Pedido Leidy American'}
+                  {primaryItem ? primaryItem.product.title : 'Pedido Leidy Shop'}
                 </p>
                 <p className="text-[11px] font-bold text-gray-500">1 prenda - Retiro coordinado</p>
               </div>
@@ -392,7 +404,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           {/* QR */}
           <div className="relative mb-3">
             <div className="rounded-3xl overflow-hidden bg-white shadow-[0_15px_40px_rgb(255,45,120,0.15)] border-4 border-white mx-auto" style={{ width: 'clamp(200px, 40dvh, 260px)', height: 'clamp(200px, 40dvh, 260px)' }}>
-              <img src={paymentQrUrl} alt="QR" className="w-full h-full object-cover mix-blend-multiply" />
+              <img src={storeImageUrl(paymentQrUrl, 'qr')} alt="QR" className="w-full h-full object-contain mix-blend-multiply" loading="eager" decoding="async" fetchPriority="high" />
             </div>
           </div>
 
@@ -470,7 +482,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           {items.map((item, idx) => (
             <div key={idx} className="flex items-center gap-2 py-1">
               {item.product.images?.[0] && (
-                <img src={storeImageUrl(item.product.images[0], 'thumb')} alt="" className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-white" loading="lazy" decoding="async" />
+                <ProductThumb image={item.product.images[0]} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-white" width={40} height={40} />
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-[12px] font-black text-gray-800 truncate">{item.product.title}</p>

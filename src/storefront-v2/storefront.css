@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  --color-brand: #ff2d78;
+  --color-brand-secondary: #fff0f3;
+  --color-brand-muted: #ff85a2;
+  --color-brand-end: #ff0050;
+
+  --color-base-bg: #f8f9fa;
+  --color-base-border: rgba(0, 0, 0, 0.05);
+  --color-base-text: #1a1a1a;
+  --color-base-text-muted: #6b7280;
+
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+}
+
+@layer base {
+  body {
+    @apply text-base-text antialiased overflow-hidden;
+    background-color: var(--color-base-bg);
+    min-height: 100vh;
+    min-height: 100dvh;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .store-dark {
+    background: #171018 !important;
+    color: #f8eef4;
+  }
+
+  .store-dark .bg-white,
+  .store-dark .bg-white\/95,
+  .store-dark .bg-white\/92,
+  .store-dark .bg-white\/90,
+  .store-dark .bg-white\/88,
+  .store-dark .bg-white\/84,
+  .store-dark .bg-white\/82,
+  .store-dark .bg-white\/80,
+  .store-dark .bg-white\/78,
+  .store-dark .bg-white\/60 {
+    background-color: rgba(34, 25, 34, 0.96) !important;
+  }
+
+  .store-dark .bg-gray-50,
+  .store-dark .bg-gray-100,
+  .store-dark .bg-\[\#fdf5f7\],
+  .store-dark .bg-\[\#f5f5f5\],
+  .store-dark .bg-\[\#fff0f5\] {
+    background-color: #2b202b !important;
+  }
+
+  .store-dark .text-gray-900,
+  .store-dark .text-gray-800,
+  .store-dark .text-gray-700 {
+    color: #f8eef4 !important;
+  }
+
+  .store-dark .text-gray-500,
+  .store-dark .text-gray-400 {
+    color: #bdaeb8 !important;
+  }
+
+  .store-dark .border-gray-100,
+  .store-dark .border-gray-200,
+  .store-dark .border-white {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+  }
+
+  .store-dark input,
+  .store-dark textarea,
+  .store-dark select {
+    background-color: #241a24 !important;
+    color: #f8eef4 !important;
+  }
+
+  .store-dark .bg-gradient-to-b {
+    background: linear-gradient(180deg, #2a1422 0%, #171018 48%, #130f14 100%) !important;
+  }
+
+  .store-dark .shadow-2xl,
+  .store-dark .shadow-sm,
+  .store-dark .shadow-lg {
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.32) !important;
+  }
+
+  .store-dark .mix-blend-multiply {
+    mix-blend-mode: normal !important;
+  }
+
+  .store-dark .text-red-600 {
+    color: #fb7185 !important;
+  }
+}
+

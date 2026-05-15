@@ -11,7 +11,7 @@ const STORE_URL = Deno.env.get('SUPABASE_URL')!;
 const STORE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // URL pública de tu servidor (ngrok en dev, dominio en prod)
-const SERVER_URL = Deno.env.get('SERVER_URL') ?? 'https://leidydiaz.live';
+const SERVER_URL = Deno.env.get('SERVER_URL') ?? 'https://leidycandy.me';
 
 Deno.serve(async (req: Request) => {
   // CORS para MacroDroid

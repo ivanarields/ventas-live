@@ -206,7 +206,7 @@ export default function SelectionConfirmation() {
         </div>
 
         <p className="text-[11px] text-gray-300 text-center mt-6 font-medium">
-          Leidy American — Tienda Online
+          Leidy Shop
         </p>
       </div>
     </div>

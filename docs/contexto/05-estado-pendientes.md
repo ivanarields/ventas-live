@@ -1,4 +1,4 @@
-# Estado Actual y Pendientes — actualizado 2026-05-12
+# Estado Actual y Pendientes — actualizado 2026-05-15
 
 ## Qué está funcionando y probado ✅
 
@@ -31,9 +31,19 @@
 
 | Fecha | Cambio | Commit |
 |-------|--------|--------|
+| 2026-05-15 | **Auditoría Claude Code task-20**: 4 bugs críticos encontrados en flujo Live/Sin asignar (ver `docs/planes/hallazgos-20-*.md`) | solo auditoría |
+| 2026-05-14 | Fix sincronizar estado cliente en panel después de verificación manual | `3308814` |
+| 2026-05-14 | Nuevos iconos de app versionados, logo reemplazado, preview de pedidos web compacto | `0f2ba24` |
+| 2026-05-13 | Barra flotante compacta y panel favoritos optimizado en tienda | `aca0d71` |
+| 2026-05-13 | Separar fotos y mensajes de tienda del análisis Live; fix comprobantes revisión manual | `2350aa8` |
+| 2026-05-13 | Reforzar MacroDroid receiver antifallos + autenticación puente Supabase | `0f32bfd` |
 | 2026-05-12 | Fix fusión logística QR tienda: maybeSingle, retry customer, cascade nombre → crea pedido WEB + pago Tienda Online | `4e05b13` |
 | 2026-05-10 | Tienda unificada: eliminar storefront antiguo, renombrar tienda-v2 a tienda | pendiente |
 | 2026-05-10 | Flujo CONFIRMAR: clienta confirma prendas desde perfil/confirmar | pendiente |
+| 2026-05-15 | **BUG CRÍTICO**: pagos fuera del Live con `customerId` aparecen en tab "Live" (no en "Sin asignar") — `isUnassignedPayment` en `src/App.tsx:2757` | pendiente fix |
+| 2026-05-15 | **BUG CRÍTICO**: `ensureMainDailyPedido` infla `total_amount` del pedido Live con pagos del mismo día fuera del rango — `liveSalesService.ts:241` y `ingest-notification:446` | pendiente fix |
+| 2026-05-15 | **BUG CRÍTICO**: fallback a epoch en `identity.ts:466` muestra 0 fotos en pedidos Live viejos (>2hs de su sesión) | pendiente fix |
+| 2026-05-15 | MacroDroid CREA `customer_id` automáticamente para cualquier nombre → "Sin asignar" nunca se llena | pendiente fix |
 | 2026-05-10 | Flujo ENTREGA: admin configura fechas de retiro, clienta elige desde perfil/entrega | pendiente |
 | 2026-05-10 | Número oficial de WA configurable en Configuraciones (official_wa_number) | pendiente |
 | 2026-05-10 | Bug fix: endpoints pickup-dates corregidos para tabla key-value | pendiente |
