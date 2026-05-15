@@ -2742,6 +2742,10 @@ function PaymentsView({
 
   useEffect(() => {
     refreshLiveSessionState();
+    // Polling cada 30s para que el rango Live (incluido lastAny) se mantenga
+    // al día sin depender del cache del navegador o de la recarga manual.
+    const interval = setInterval(() => { refreshLiveSessionState(); }, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   const verificationPalette = (origin: VerificationOrigin) => {
