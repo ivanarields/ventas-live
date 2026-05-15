@@ -1291,9 +1291,37 @@ Responde SOLO con una línea, sin explicaciones.`;
         return tb - ta;
       });
 
-      for (const item of fotoItemsRecientes.slice(0, 8)) {
+      // Cuando el frontend pasa rango Live (hasLiveRange), analizamos TODAS las fotos del rango
+      // para no perder comprobantes en ninguna posición. En modo legacy (sin rango), conservamos
+      // el límite de 8 para no disparar costos en chats viejos sin tope claro.
+      const LIMITE_FOTOS_LEGACY = 8;
+      const LIMITE_FOTOS_SEGURIDAD = 40; // tope duro contra runs descontrolados
+      const itemsAClasificar = hasLiveRange
+        ? fotoItemsRecientes.slice(0, LIMITE_FOTOS_SEGURIDAD)
+        : fotoItemsRecientes.slice(0, LIMITE_FOTOS_LEGACY);
+
+      for (const item of itemsAClasificar) {
         await clasificarYExtraer(item, { addDescription: false });
       }
+
+      // Segunda pasada: foto entrante clasificada como "otro" + contexto de pago en el chat
+      // → intentar leerla como comprobante. Cubre casos donde Gemini duda en la clasificación.
+      if (hasLiveRange) {
+        for (const item of itemsAClasificar) {
+          if (isOutgoingDirection(item.direction)) continue;
+          const cached = analisisFotos.get(item.id ?? item.url);
+          if (cached?.tipo !== 'otro') continue;
+          const media = await fetchBase64(item.url);
+          if (!media) continue;
+          const imagePart = { inlineData: { mimeType: media.mime, data: media.b64 } };
+          const extraido = await extraerComprobanteDesdeImagen(imagePart, 'reintento comprobante sobre otro');
+          if (extraido?.monto || extraido?.cliente) {
+            registrarComprobanteDetectado(item, cached.desc || 'COMPROBANTE: detectado en reintento', extraido);
+            analisisFotos.set(item.id ?? item.url, { tipo: 'comprobante', desc: cached.desc, extraido });
+          }
+        }
+      }
+
       ensureAllLiveImagesAreVisibleAsCandidates();
 
       const textoConversacion = textos.join('\n');

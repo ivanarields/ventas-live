@@ -44,6 +44,7 @@
 | 2026-05-15 | fix: `isUnassignedPayment` clasifica pagos fuera del Live a "Sin asignar" usando rango de sesión | `846df33` |
 | 2026-05-15 | fix: `ensureMainDailyPedido` no infla `total_amount` de pedidos `live_sales` con pagos MacroDroid fuera del Live | `846df33` |
 | 2026-05-15 | fix: `identity.ts` ya no usa epoch como fallback, ahora usa pivot±days; ventana ampliada de 2h a 8h | `846df33` |
+| 2026-05-15 | fix: análisis IA del Live procesa hasta 40 fotos (antes solo 8) + reintento sobre clasificaciones "otro" para encontrar comprobantes que Gemini dudó | pendiente push |
 | 2026-05-10 | Flujo ENTREGA: admin configura fechas de retiro, clienta elige desde perfil/entrega | pendiente |
 | 2026-05-10 | Número oficial de WA configurable en Configuraciones (official_wa_number) | pendiente |
 | 2026-05-10 | Bug fix: endpoints pickup-dates corregidos para tabla key-value | pendiente |
