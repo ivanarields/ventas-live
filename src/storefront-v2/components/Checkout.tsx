@@ -10,6 +10,38 @@ import { ProductThumb } from './ProductThumb';
 const BRAND = '#ff2d78';
 const WA_NUMBER = (import.meta.env.VITE_STORE_WA_NUMBER as string | undefined) ?? '59160003230';
 const PAYMENT_SECONDS = 120; // 2 minutos
+export const PENDING_ORDER_KEY = 'tienda.pendingOrder';
+
+export type PendingOrderSnapshot = {
+  orderId: number;
+  expiresAt: string; // ISO
+  total: number;
+  phone: string;
+};
+
+export function readPendingOrder(): PendingOrderSnapshot | null {
+  try {
+    const raw = localStorage.getItem(PENDING_ORDER_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as PendingOrderSnapshot;
+    if (!data?.orderId || !data?.expiresAt) return null;
+    if (new Date(data.expiresAt).getTime() <= Date.now()) {
+      localStorage.removeItem(PENDING_ORDER_KEY);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingOrder() {
+  try { localStorage.removeItem(PENDING_ORDER_KEY); } catch {}
+}
+
+function savePendingOrder(snap: PendingOrderSnapshot) {
+  try { localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify(snap)); } catch {}
+}
 
 interface Props {
   items: CartItem[];
@@ -56,6 +88,37 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
         if (num) setWaNumber(num);
       })
       .catch(() => {});
+
+    // ── RETOMAR pedido pendiente: si el cliente cerró el QR y volvió,
+    // localStorage tiene un pedido vivo → ir directo a la pantalla de pago
+    // sin necesidad del carrito en memoria.
+    const pending = readPendingOrder();
+    if (pending) {
+      fetch(`/api/store-orders/${pending.orderId}/status`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data || data.status !== 'pending') {
+            clearPendingOrder();
+            if (items.length === 0) setScreen('empty_cart');
+            else setScreen('identify');
+            return;
+          }
+          const remaining = data.expiresAt
+            ? Math.max(0, Math.floor((new Date(data.expiresAt).getTime() - Date.now()) / 1000))
+            : PAYMENT_SECONDS;
+          setOrderId(data.id);
+          setServerTotal(Number(data.total) || pending.total);
+          setPhone(pending.phone || data.customerWa || '');
+          setTimeLeft(remaining);
+          setScreen('payment');
+        })
+        .catch(() => {
+          clearPendingOrder();
+          if (items.length === 0) setScreen('empty_cart');
+          else setScreen('identify');
+        });
+      return;
+    }
 
     if (items.length === 0) {
       setScreen('empty_cart');
@@ -116,8 +179,30 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
       if (!order?.id) throw new Error('No se pudo crear el pedido. Intenta de nuevo.');
       setOrderId(order.id);
       setServerTotal(Number(order.total) || total);
+      savePendingOrder({
+        orderId: order.id,
+        expiresAt: (order as any).expires_at ?? new Date(Date.now() + PAYMENT_SECONDS * 1000).toISOString(),
+        total: Number(order.total) || total,
+        phone: customerPhone,
+      });
       setScreen('payment');
     } catch (err: any) {
+      // Pedido pendiente del mismo cliente → retomarlo en vez de crear otro
+      if (err?.duplicate && err?.existingOrderId) {
+        const exp = err.expiresAt ?? new Date(Date.now() + PAYMENT_SECONDS * 1000).toISOString();
+        const remaining = Math.max(0, Math.floor((new Date(exp).getTime() - Date.now()) / 1000));
+        setOrderId(err.existingOrderId);
+        setServerTotal(Number(err.total) || total);
+        setTimeLeft(remaining || PAYMENT_SECONDS);
+        savePendingOrder({
+          orderId: err.existingOrderId,
+          expiresAt: exp,
+          total: Number(err.total) || total,
+          phone: customerPhone,
+        });
+        setScreen('payment');
+        return;
+      }
       if (err?.message?.includes('409') || err?.message?.includes('reservado') || err?.message?.includes('disponible')) {
         setAuthError('⏰ Este producto está reservado por otra persona. Intenta de nuevo en unos segundos.');
         setScreen('identify');
@@ -137,7 +222,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
     if (screen !== 'payment' || !orderId) return;
     const t = setInterval(() => {
       setTimeLeft(s => {
-        if (s <= 1) { setExpired(true); clearInterval(t); return 0; }
+        if (s <= 1) { setExpired(true); clearPendingOrder(); clearInterval(t); return 0; }
         return s - 1;
       });
       setElapsedSec(e => {
@@ -159,7 +244,11 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
         setBankDetected(!!detected);
         if (status === 'paid' || status === 'confirmed') {
           setVerified(true);
+          clearPendingOrder();
           setScreen('verified');
+        }
+        if (status === 'cancelled') {
+          clearPendingOrder();
         }
       }
     } catch {}

@@ -1,6 +1,6 @@
 # Tienda Online - Estado Actual
 
-Actualizado: 2026-05-11 (noche - IA robusta)
+Actualizado: 2026-05-15 (blindaje del flujo de pago QR)
 
 ## Qué Es
 
@@ -166,7 +166,15 @@ Estados usados:
 Reserva actual:
 
 ```txt
-90 segundos (1.5 minutos)
+2 minutos (120 segundos)
+```
+
+Columnas agregadas en la migracion `migracion-tienda-blindaje-pago.sql`:
+
+```txt
+partial_payment_amount  monto realmente pagado si fue menor al total
+payment_shortfall       cuanto falta para completar el pedido
+reminder_sent_at        cuando se envio recordatorio de comprobante (no repetir)
 ```
 
 ### `store_customer_media`
@@ -364,10 +372,22 @@ https://ventas-live.vercel.app/tienda#producto/5
 4. Va a checkout
 5. Se identifica con WhatsApp + PIN
 6. Elige entrega/retiro, fecha y horario
-7. Se crea store_orders con reserva de 90 segundos
+7. Se crea store_orders con reserva de 2 minutos
 8. Paga y se verifica el pago
 9. El pedido queda listo para preparación/seguimiento
 ```
+
+## Blindaje Del Flujo De Pago QR
+
+Reglas activas que protegen el flujo del QR contra casos reales:
+
+- **Pago incompleto (menos del total)**: el pedido NO se confirma, se guardan `partial_payment_amount` y `payment_shortfall`, y se encola un WhatsApp automatico al cliente avisando cuanto falta. Aparece badge naranja "PAGO PARCIAL" en el panel admin.
+- **Pago excedente (mas del total)**: confirma el pedido normal. El sobrante queda a favor de la tienda.
+- **Cierre del QR**: el frontend guarda `tienda.pendingOrder` en localStorage; al volver a `/tienda` la app redirige automaticamente al checkout y retoma el pedido pendiente. El boton "<-" lleva al catalogo.
+- **Pago sin comprobante**: cron cada 60s. A los 5 min envia recordatorio por WhatsApp. A los 15 min auto-confirma el pedido (banco basta como prueba).
+- **MacroDroid caido**: endpoint `/api/store/macrodroid-health` reporta segundos desde la ultima notificacion. Si pasan > 10 min con pedidos pending, banner rojo en panel de pedidos.
+- **Duplicados (mismo WhatsApp con 2 pedidos paralelos)**: backend bloquea con 409 + `existingOrderId`; el frontend redirige al QR del pedido existente.
+- **Sin comprobante con banco detectado**: badge morado "SIN COMPROBANTE" en panel admin.
 
 ## Flujo De Perfil De Clienta
 
@@ -449,6 +469,7 @@ POST /api/store/ingest-wa
 POST /api/store/match-payment
 GET  /api/store/whatsapp-photos
 POST /api/store/notify-live-ready
+GET  /api/store/macrodroid-health   health check del puente MacroDroid
 ```
 
 Estos endpoints conectan la reserva de tienda con comprobantes, notificaciones bancarias, fotos de WhatsApp y preparación operativa. No deben mover fotos reales a ChehiAppAbril.

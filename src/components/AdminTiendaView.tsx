@@ -139,6 +139,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [orderFilter, setOrderFilter] = useState<'all' | 'pending' | 'paid' | 'cancelled'>('all');
   const [storeProfiles, setStoreProfiles] = useState<any[]>([]);
+  const [macroHealth, setMacroHealth] = useState<{ alert: boolean; lastIngestAgeSec: number | null; pendingCount: number } | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const categoryOptions = storeChips
@@ -151,6 +152,28 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     if (subTab !== 'pedidos') return;
     const interval = setInterval(() => loadOrders(), 15000);
     return () => clearInterval(interval);
+  }, [subTab]);
+
+  // Health check de MacroDroid: si hace > 10 min que no llega notificación
+  // y hay pedidos pending, mostramos banner rojo (revisar el teléfono).
+  useEffect(() => {
+    if (subTab !== 'pedidos') return;
+    let alive = true;
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch('/api/store/macrodroid-health');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive) setMacroHealth({
+          alert: !!data.alert,
+          lastIngestAgeSec: data.lastIngestAgeSec ?? null,
+          pendingCount: data.pendingCount ?? 0,
+        });
+      } catch {}
+    };
+    fetchHealth();
+    const interval = setInterval(fetchHealth, 30000);
+    return () => { alive = false; clearInterval(interval); };
   }, [subTab]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -810,6 +833,19 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       {subTab === 'pedidos' && (
         <div className="space-y-3">
 
+          {/* Banner: MacroDroid sin notificaciones */}
+          {macroHealth?.alert && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+              <div className="text-red-500 text-lg leading-none mt-0.5">⚠</div>
+              <div className="flex-1">
+                <p className="text-[12px] font-black text-red-700">MacroDroid sin notificaciones hace {Math.floor((macroHealth.lastIngestAgeSec ?? 0) / 60)} min</p>
+                <p className="text-[10px] text-red-600 mt-0.5">
+                  Hay {macroHealth.pendingCount} pedido(s) esperando pago. Revisa el teléfono que envía notificaciones del banco.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Stats rápidas */}
           <div className="grid grid-cols-3 gap-2">
             {[
@@ -878,6 +914,14 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                           {cfg.label}
                         </span>
                         {isExpired && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-500">EXPIRADO</span>}
+                        {Number((order as any).payment_shortfall) > 0 && order.status === 'pending' && (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600" title={`Pagó Bs ${(order as any).partial_payment_amount} de Bs ${order.total}`}>
+                            ⚠ PAGO PARCIAL · falta Bs {Number((order as any).payment_shortfall).toFixed(2)}
+                          </span>
+                        )}
+                        {String((order as any).payment_ref ?? '').includes('bank-detected') && !(order as any).wa_proof_received && order.status === 'pending' && (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600">SIN COMPROBANTE</span>
+                        )}
                       </div>
                       <p className="text-[11px] text-gray-400">
                         {new Date(order.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}

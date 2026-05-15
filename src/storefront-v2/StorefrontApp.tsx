@@ -65,6 +65,27 @@ export default function StorefrontApp() {
     }
   };
 
+  // ── AUTO-RETOMAR PEDIDO ───────────────────────────────────────
+  // Si el cliente cerró la página del QR pero su pedido sigue vivo,
+  // al volver a /tienda lo enviamos directo al checkout (decisión C).
+  // El botón "← Volver al catálogo" del checkout permite escapar.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('tienda.pendingOrder');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data?.orderId || !data?.expiresAt) return;
+      if (new Date(data.expiresAt).getTime() <= Date.now()) {
+        localStorage.removeItem('tienda.pendingOrder');
+        return;
+      }
+      // Forzar la vista de checkout (Checkout.tsx detecta el pendingOrder y retoma)
+      if (window.location.hash.replace('#', '') !== 'checkout') {
+        window.location.hash = 'checkout';
+      }
+    } catch {}
+  }, []);
+
   // Sincronización con Hash URL
   useEffect(() => {
     const handleHash = async () => {

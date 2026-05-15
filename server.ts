@@ -2006,7 +2006,7 @@ const PORT = Number(process.env.PORT || 3001);
     try {
       const { data, error } = await supabaseStore
         .from("store_orders")
-        .select("id, status, payment_verified_at, payment_ref, wa_proof_received")
+        .select("id, status, payment_verified_at, payment_ref, wa_proof_received, items, total, expires_at, customer_wa")
         .eq("id", Number(req.params.id))
         .single();
       if (error) throw error;
@@ -2018,6 +2018,10 @@ const PORT = Number(process.env.PORT || 3001);
         bankDetected: paymentRef.includes('bank-detected'),
         proofReceived: !!(data as any).wa_proof_received,
         requiresProof: data.status !== 'paid' && data.status !== 'confirmed' && paymentRef.includes('bank-detected'),
+        items: (data as any).items ?? [],
+        total: (data as any).total ?? 0,
+        expiresAt: (data as any).expires_at ?? null,
+        customerWa: (data as any).customer_wa ?? '',
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
@@ -2050,6 +2054,33 @@ const PORT = Number(process.env.PORT || 3001);
       })).filter((item: any) => item.productId);
       if (normalizedItems.length === 0) {
         return res.status(400).json({ error: "items requerido (array no vacío)" });
+      }
+
+      // ── BLOQUEO DE DUPLICADOS: 1 pedido pending por número de WhatsApp ──
+      // Si el cliente ya tiene un pedido pending activo, devolvemos su id
+      // para que el frontend lo redirija al QR existente en vez de crear otro.
+      const customerWa = String(customerPhone ?? '').trim();
+      if (customerWa) {
+        const nowIso = new Date().toISOString();
+        const { data: existingPending } = await supabaseStore
+          .from("store_orders")
+          .select("id, expires_at, total")
+          .eq("customer_wa", customerWa)
+          .eq("status", "pending")
+          .gt("expires_at", nowIso)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (existingPending) {
+          return res.status(409).json({
+            error: "Ya tienes un pedido activo esperando pago. Continúa con ese antes de crear otro.",
+            existingOrderId: existingPending.id,
+            expiresAt: existingPending.expires_at,
+            total: existingPending.total,
+            duplicate: true,
+          });
+        }
       }
 
       // ── RESERVA EXCLUSIVA: verificar que los productos no estén en otro pedido pending ──
@@ -2186,6 +2217,71 @@ const PORT = Number(process.env.PORT || 3001);
       // Silencioso — no bloquear el servidor
     }
   }, 30 * 1000); // cada 30 segundos
+
+  // ── RECORDATORIO DE COMPROBANTE + AUTO-CONFIRM ────────────────
+  // Cada 60s revisa pedidos donde el banco detectó pago pero falta
+  // el comprobante por WhatsApp.
+  //   • A los 5 min sin comprobante → manda recordatorio por WhatsApp.
+  //   • A los 15 min sin comprobante → confirma igual (banco basta).
+  setInterval(async () => {
+    try {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+      // 1) Pedidos detectados por banco, sin recordatorio aún, > 5 min
+      const { data: needReminder } = await supabaseStore
+        .from('store_orders')
+        .select('id, customer_wa, total, payment_verified_at')
+        .like('payment_ref', 'bank-detected:%')
+        .eq('wa_proof_received', false)
+        .is('reminder_sent_at', null)
+        .not('payment_verified_at', 'is', null)
+        .lt('payment_verified_at', fiveMinAgo);
+
+      for (const o of (needReminder ?? [])) {
+        const waNumber = String(o.customer_wa ?? '').replace(/\D/g, '');
+        if (!waNumber) continue;
+        try {
+          await supabaseServer.from('whatsapp_message_queue').insert({
+            user_id: String(process.env.STORE_OWNER_USER_ID || 'store-auto'),
+            phone: waNumber.startsWith('591') ? waNumber : `591${waNumber}`,
+            message_body: `Hola! Vimos tu pago de Bs ${o.total}. Falta tu comprobante para confirmar el pedido #${o.id}. Envíalo aquí por WhatsApp, por favor.`,
+            type: 'store_proof_reminder',
+            reference_id: String(o.id),
+            reference_type: 'store_order',
+          } as any);
+          await supabaseStore
+            .from('store_orders')
+            .update({ reminder_sent_at: new Date().toISOString() } as any)
+            .eq('id', o.id);
+          console.log(`[store] 📩 Recordatorio de comprobante enviado para pedido #${o.id}`);
+        } catch (e: any) {
+          console.error('[store] Error encolando recordatorio:', e?.message);
+        }
+      }
+
+      // 2) Pedidos detectados por banco, sin comprobante, > 15 min → confirmar
+      const { data: needAutoConfirm } = await supabaseStore
+        .from('store_orders')
+        .select('id, payment_ref')
+        .like('payment_ref', 'bank-detected:%')
+        .eq('wa_proof_received', false)
+        .in('status', ['pending', 'cancelled'])
+        .not('payment_verified_at', 'is', null)
+        .lt('payment_verified_at', fifteenMinAgo);
+
+      for (const o of (needAutoConfirm ?? [])) {
+        try {
+          await confirmStoreOrder(o.id, `${o.payment_ref}:auto-confirm-15min`);
+          console.log(`[store] ✅ Pedido #${o.id} auto-confirmado tras 15 min sin comprobante`);
+        } catch (e: any) {
+          console.error('[store] Error auto-confirmando:', e?.message);
+        }
+      }
+    } catch (e) {
+      // Silencioso
+    }
+  }, 60 * 1000); // cada 60 segundos
 
   app.get("/api/store-orders/me", async (req, res) => {
     try {
@@ -2438,6 +2534,8 @@ const PORT = Number(process.env.PORT || 3001);
       .update({
         payment_method: 'qr',
         payment_ref: nextRef,
+        // marca timestamp para que el cron de recordatorio pueda medir el tiempo transcurrido
+        payment_verified_at: order?.payment_verified_at ?? new Date().toISOString(),
       } as any)
       .eq('id', Number(order.id))
       .in('status', ['pending', 'cancelled']);
@@ -2775,11 +2873,71 @@ const PORT = Number(process.env.PORT || 3001);
       }
 
       // Intentar cruzar con pedido pendiente (margen corto pero suficiente para el webhook del banco)
-      const result = await tryMatchOrder({
+      let result = await tryMatchOrder({
         amount: parsedAmount,
         senderPhone: senderPhone ?? '',
         windowMinutes: 2,
       });
+
+      // ── FALLBACK PAGO INCOMPLETO / EXCEDENTE ─────────────────────
+      // Si no hubo match por monto exacto, intentamos por teléfono +
+      // pedido pending en ventana. Diferenciamos:
+      //   - amount >= total → confirma (excedente aceptado).
+      //   - amount  < total → marca pago parcial + WhatsApp recordatorio.
+      let mismatchKind: 'partial' | 'excess' | null = null;
+      const cleanSender = (senderPhone ?? '').replace(/\D/g, '');
+      if (!result && cleanSender) {
+        const windowStart = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { data: candidates } = await supabaseStore
+          .from('store_orders')
+          .select('*')
+          .eq('status', 'pending')
+          .gt('created_at', windowStart)
+          .order('created_at', { ascending: false });
+
+        const sameWa = (candidates ?? []).find((o: any) => {
+          const phones = phoneVariants(o.customer_wa, o.customer_phone);
+          return phones.some((p: string) => p === cleanSender || p.endsWith(cleanSender) || cleanSender.endsWith(p));
+        });
+
+        if (sameWa) {
+          const total = Number(sameWa.total);
+          if (parsedAmount >= total) {
+            // EXCEDENTE: confirmar normal (decisión del usuario)
+            result = { order: sameWa, confidence: 'alta' };
+            mismatchKind = 'excess';
+          } else {
+            // PARCIAL: registrar shortfall + encolar WhatsApp al cliente
+            mismatchKind = 'partial';
+            const shortfall = Number((total - parsedAmount).toFixed(2));
+            try {
+              await supabaseStore
+                .from('store_orders')
+                .update({
+                  partial_payment_amount: parsedAmount,
+                  payment_shortfall: shortfall,
+                } as any)
+                .eq('id', sameWa.id)
+                .eq('status', 'pending');
+
+              const waNumber = String(sameWa.customer_wa ?? '').replace(/\D/g, '');
+              if (waNumber) {
+                await supabaseServer.from('whatsapp_message_queue').insert({
+                  user_id: String(process.env.STORE_OWNER_USER_ID || 'store-auto'),
+                  phone: waNumber.startsWith('591') ? waNumber : `591${waNumber}`,
+                  message_body: `Hola! Recibimos tu pago de Bs ${parsedAmount} para el pedido #${sameWa.id}, pero faltan Bs ${shortfall} para completar el total de Bs ${total}. Por favor envía la diferencia para confirmar tu pedido.`,
+                  type: 'store_partial_payment',
+                  reference_id: String(sameWa.id),
+                  reference_type: 'store_order',
+                } as any);
+              }
+              console.log(`[store-match] PARCIAL: pedido #${sameWa.id} pagó ${parsedAmount}/${total}, falta ${shortfall} Bs`);
+            } catch (e: any) {
+              console.error('[store-match] Error guardando pago parcial:', e?.message);
+            }
+          }
+        }
+      }
 
       const eventData: any = {
         source: 'macrodroid',
@@ -2788,7 +2946,7 @@ const PORT = Number(process.env.PORT || 3001);
         sender_name: senderName ?? '',
         sender_wa: senderPhone ?? '',
         processed: !!result,
-        match_confidence: result ? result.confidence : 'none',
+        match_confidence: result ? result.confidence : (mismatchKind === 'partial' ? 'partial' : 'none'),
         hash: hash ?? null,
       };
 
@@ -2796,7 +2954,7 @@ const PORT = Number(process.env.PORT || 3001);
         eventData.matched_order_id = result.order.id;
         const canAutoConfirm = result.confidence === 'alta' && await isStoreCustomerVerifiedForAuto(result.order);
         if (canAutoConfirm) {
-          await confirmStoreOrder(result.order.id, `bank:${hash ?? 'manual'}:${result.confidence}`);
+          await confirmStoreOrder(result.order.id, `bank:${hash ?? 'manual'}:${result.confidence}${mismatchKind === 'excess' ? ':excess' : ''}`);
           eventData.processed = true;
         } else {
           await markStoreOrderBankDetected(result.order, `bank:${hash ?? 'manual'}:${result.confidence}`);
@@ -3546,6 +3704,47 @@ Responde solo JSON:
 
     } catch (err: any) {
       console.error('[store/match-payment]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Health check de MacroDroid ───────────────────────────────
+  // Devuelve cuántos segundos pasaron desde la última notificación
+  // y si hay pedidos pending esperando. Frontend muestra banner rojo
+  // si lastIngestAgeSec > 600 (10 min) y pendingCount > 0.
+  app.get('/api/store/macrodroid-health', async (_req, res) => {
+    try {
+      const { data: lastEvent } = await supabaseServer
+        .from('payment_events')
+        .select('created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const nowIso = new Date().toISOString();
+      const { data: pending } = await supabaseStore
+        .from('store_orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .gt('expires_at', nowIso);
+
+      const lastIngestAt = lastEvent?.created_at ?? null;
+      const lastIngestAgeSec = lastIngestAt
+        ? Math.floor((Date.now() - new Date(lastIngestAt).getTime()) / 1000)
+        : null;
+
+      const pendingCount = (pending as any)?.length ?? 0;
+      const stale = lastIngestAgeSec != null && lastIngestAgeSec > 600;
+      const alert = stale && pendingCount > 0;
+
+      res.json({
+        ok: true,
+        lastIngestAt,
+        lastIngestAgeSec,
+        pendingCount,
+        alert,
+      });
+    } catch (err: any) {
       res.status(500).json({ error: err?.message ?? 'Error interno' });
     }
   });

@@ -41,7 +41,15 @@ export const storeOrdersApi = {
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || `Error ${res.status} registrando pedido`);
+      const err: any = new Error(errData.error || `Error ${res.status} registrando pedido`);
+      err.status = res.status;
+      if (errData.duplicate && errData.existingOrderId) {
+        err.duplicate = true;
+        err.existingOrderId = errData.existingOrderId;
+        err.expiresAt = errData.expiresAt;
+        err.total = errData.total;
+      }
+      throw err;
     }
     return res.json();
   },
