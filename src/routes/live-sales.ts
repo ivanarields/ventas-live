@@ -211,9 +211,9 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
     return ((data ?? []) as LiveProcessingSession[]).find(session => !parseSessionNotes(session.notes).processed_at) ?? null;
   }
 
-  // Devuelve la última sesión Live (procesada o no). Necesario para clasificar
-  // pagos MacroDroid que llegan después del LISTAR LIVE: el frontend usa este
-  // rango para decidir si un pago fuera del Live va a "Sin asignar".
+  // Devuelve la última sesión Live (procesada o no). Necesario para que el
+  // portero en /api/ingest-notification sepa si un pago MacroDroid cae dentro
+  // de la ventana de sesión cuando el Live ya se cerró.
   async function getLastAnyLive(userId: string) {
     if (!supabaseMain) return null;
     const { data, error } = await supabaseMain

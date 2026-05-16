@@ -1,4 +1,4 @@
-# Estado Actual y Pendientes — actualizado 2026-05-15
+# Estado Actual y Pendientes — actualizado 2026-05-16
 
 ## Qué está funcionando y probado ✅
 
@@ -51,7 +51,7 @@
 | 2026-05-16 | fix: dedup comprobantes usa (ID+URL) en vez de solo ID; evita que 3 fotos en un mismo mensaje WA queden reducidas a 1 comprobante procesado | pendiente push |
 | 2026-05-16 | fix: match MacroDroid → comprobante ya no requiere nombre extraído si se conoce el ID del cliente; soluciona que 2 de 3 comprobantes quedaban sin match verde | pendiente push |
 | 2026-05-16 | feat: pagos MacroDroid se descartan cuando el Live está apagado (portero en /api/ingest-notification); pestaña "Sin asignar" eliminada | pendiente push |
-| 2026-05-15 | fix: useMemo de groupedPayments/stats/unassignedPayments ahora dependen de liveSessionState → pagos MacroDroid fuera del Live se clasifican correctamente a Sin Asignar cuando carga el estado de sesión | pendiente push |
+| 2026-05-16 | refactor: "Sin asignar" eliminado completamente del código (isUnassignedPayment, unassignedPayments, render block borrados de App.tsx) | pendiente push |
 | 2026-05-15 | fix: polling cada 30s de live session state para que `lastAny` se mantenga al día sin depender de cache del navegador | pendiente push |
 | 2026-05-10 | Flujo ENTREGA: admin configura fechas de retiro, clienta elige desde perfil/entrega | pendiente |
 | 2026-05-10 | Número oficial de WA configurable en Configuraciones (official_wa_number) | pendiente |

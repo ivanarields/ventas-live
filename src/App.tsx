@@ -2589,7 +2589,7 @@ function PaymentsView({
   const [procesandoLive, setProcesandoLive] = useState(false);
   const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
   const [liveSessionState, setLiveSessionState] = useState<{ active: any | null; lastCompleted: any | null; lastAny: any | null } | null>(null);
-  const [paymentChannel, setPaymentChannel] = useState<'normal' | 'web' | 'unassigned'>('normal');
+  const [paymentChannel, setPaymentChannel] = useState<'normal' | 'web'>('normal');
 
   const refreshLiveSessionState = async () => {
     try {
@@ -2806,31 +2806,9 @@ function PaymentsView({
   const isStorePayment = (payment: any) =>
     String(payment?.method ?? '').trim().toLowerCase() === 'tienda online';
 
-  const isUnassignedPayment = (payment: any) => {
-    if (isStorePayment(payment)) return false;
-    if (payment?.livePaymentId) return false;
-    const origin = String(payment?.verificationOrigin ?? 'other');
-    // server.ts:1027 mapea pagos_venta_live.estado a estos valores. Cualquiera de ellos = tab Live.
-    if (origin === 'automatic' || origin === 'whatsapp_pending' || origin === 'manual') return false;
-    // origin es 'macrodroid_only' u 'other'.
-    if (payment?.customerId) {
-      // Cliente conocido: usar rango Live (incluso sesión ya procesada) para clasificar.
-      const session = liveSessionState?.active ?? liveSessionState?.lastCompleted ?? liveSessionState?.lastAny;
-      if (session?.startAt && session?.endAt) {
-        const t = new Date(payment.date ?? 0).getTime();
-        const s = new Date(session.startAt).getTime();
-        const e = new Date(session.endAt).getTime();
-        return t < s || t > e;
-      }
-      return true; // sin info de sesión → macrodroid_only va a Sin asignar por defecto
-    }
-    return true; // sin customerId → siempre Sin asignar
-  };
-
   const paymentBelongsToChannel = (payment: any) => {
     if (paymentChannel === 'web') return isStorePayment(payment);
-    if (paymentChannel === 'unassigned') return isUnassignedPayment(payment);
-    return !isStorePayment(payment) && !isUnassignedPayment(payment);
+    return !isStorePayment(payment);
   };
 
   const onSelectPerson = (id: string) => {
@@ -3017,7 +2995,7 @@ function PaymentsView({
       count: visiblePayments.length,
       people: uniquePeople
     };
-  }, [filteredPayments, paymentChannel, webProfilesForDate, liveSessionState]);
+  }, [filteredPayments, paymentChannel, webProfilesForDate]);
 
   const groupedPayments = useMemo(() => {
     const groups: { [key: string]: any } = {};
@@ -3128,13 +3106,7 @@ function PaymentsView({
     }
 
     return result.sort((a: any, b: any) => b.lastTimestamp - a.lastTimestamp);
-  }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders, paymentChannel, liveSessionState]);
-
-  const unassignedPayments = useMemo(() => {
-    return filteredPayments
-      .filter(isUnassignedPayment)
-      .sort((a, b) => getTS(b.date) - getTS(a.date));
-  }, [filteredPayments, liveSessionState]);
+  }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders, paymentChannel]);
 
   const activeLiveSession = liveSessionState?.active ?? null;
   const completedLiveSession = liveSessionState?.lastCompleted ?? null;
@@ -3424,35 +3396,6 @@ function PaymentsView({
             </div>
           </div>
         )}
-
-        {paymentChannel === 'unassigned' && (unassignedPayments.length === 0 ? (
-          <div className="text-center py-24 opacity-20">
-            <Wallet className="w-16 h-16 mx-auto mb-4" />
-            <p className="text-sm font-bold uppercase tracking-[0.2em]">
-              Sin pagos sin asignar
-            </p>
-          </div>
-        ) : (
-          unassignedPayments.map((payment: any) => {
-            const date = parseAppDate(payment.date);
-            return (
-              <div key={payment.id} className="rounded-2xl border border-gray-100 bg-white px-3 py-2 flex items-center justify-between gap-3 shadow-sm">
-                <div className="min-w-0">
-                  <p className="text-[12px] font-black text-gray-800 uppercase truncate">
-                    {getVisualName(payment.nombre || 'Pago sin nombre')}
-                  </p>
-                  <p className="text-[10px] font-bold text-gray-400">
-                    {date ? date.toLocaleString('es-BO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sin hora'}
-                  </p>
-                </div>
-                <div className="flex-shrink-0 text-right">
-                  <p className="text-[15px] font-black text-slate-700">Bs {cleanAmount(payment.pago)}</p>
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Fuera de Live</p>
-                </div>
-              </div>
-            );
-          })
-        ))}
 
         {paymentChannel === 'normal' && (groupedPayments.length === 0 ? (
           <div className="text-center py-24 opacity-20">
