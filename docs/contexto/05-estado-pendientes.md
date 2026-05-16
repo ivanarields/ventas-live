@@ -47,6 +47,7 @@
 | 2026-05-15 | fix: `ensureMainDailyPedido` no infla `total_amount` de pedidos `live_sales` con pagos MacroDroid fuera del Live | `846df33` |
 | 2026-05-15 | fix: `identity.ts` ya no usa epoch como fallback, ahora usa pivot±days; ventana ampliada de 2h a 8h | `846df33` |
 | 2026-05-15 | fix: análisis IA del Live procesa hasta 40 fotos (antes solo 8) + reintento sobre clasificaciones "otro" para encontrar comprobantes que Gemini dudó | `95882d8` |
+| 2026-05-16 | fix: dedup comprobantes usa (ID+URL) en vez de solo ID; evita que 3 fotos en un mismo mensaje WA queden reducidas a 1 comprobante procesado | pendiente push |
 | 2026-05-16 | fix: match MacroDroid → comprobante ya no requiere nombre extraído si se conoce el ID del cliente; soluciona que 2 de 3 comprobantes quedaban sin match verde | pendiente push |
 | 2026-05-16 | feat: pagos MacroDroid se descartan cuando el Live está apagado (portero en /api/ingest-notification); pestaña "Sin asignar" eliminada | pendiente push |
 | 2026-05-15 | fix: useMemo de groupedPayments/stats/unassignedPayments ahora dependen de liveSessionState → pagos MacroDroid fuera del Live se clasifican correctamente a Sin Asignar cuando carga el estado de sesión | pendiente push |

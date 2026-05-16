@@ -1209,11 +1209,14 @@ Responde SOLO con una línea, sin explicaciones.`;
           ].filter(Boolean).join(' - ');
           comprobanteTexto = datos || comprobanteTexto;
         }
-        // Dedup por ID de mensaje (no por URL): dos mensajes distintos con el mismo
-        // media_url pueden ser comprobantes independientes si el bridge reutilizó la misma URL.
-        const alreadyAdded = item.id
-          ? comprobantesDetectados.some(existing => existing.item.id === item.id)
-          : comprobantesDetectados.some(existing => existing.item.url === item.url);
+        // Dedup por (ID + URL): evita procesar dos veces la misma foto,
+        // pero permite que un mensaje con múltiples fotos aporte varios comprobantes.
+        // Si el bridge reutiliza la misma URL en mensajes distintos, el ID diferente los distingue.
+        const alreadyAdded = item.id && item.url
+          ? comprobantesDetectados.some(e => e.item.id === item.id && e.item.url === item.url)
+          : item.id
+            ? comprobantesDetectados.some(e => e.item.id === item.id)
+            : comprobantesDetectados.some(e => e.item.url === item.url);
         if (!alreadyAdded) comprobantesDetectados.push({ item, texto, extraido });
       }
 
