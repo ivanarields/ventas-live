@@ -3767,10 +3767,26 @@ Responde solo JSON:
   // ── Puente MacroDroid → Supabase ─────────────────────────────────────────
   // MacroDroid envía aquí. Vercel siempre está encendido y reenvía a Supabase.
   // Así el celular nunca ve un timeout por cold start de Supabase.
+  // Si no hay ningún Live activo, el pago se descarta silenciosamente.
   app.post('/api/ingest-notification', async (req, res) => {
     try {
       const deviceId     = req.headers['x-device-id']     as string ?? '';
       const deviceSecret = req.headers['x-device-secret'] as string ?? '';
+
+      // Verificar si hay un Live activo antes de procesar el pago
+      const { data: activeLive } = await supabaseServer
+        .from('live_sessions')
+        .select('id')
+        .eq('status', 'live')
+        .ilike('title', 'Procesamiento Live%')
+        .limit(1)
+        .maybeSingle();
+
+      if (!activeLive) {
+        // No hay Live activo → descartar silenciosamente (200 para que MacroDroid no reintente)
+        console.log('[ingest-notification] Live apagado, pago descartado');
+        return res.json({ ok: true, ignored: true, reason: 'live_off' });
+      }
 
       const supabaseUrl = process.env.SUPABASE_URL!;
       const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';

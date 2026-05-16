@@ -3232,7 +3232,7 @@ function PaymentsView({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1 bg-gray-100/80 p-0.5 rounded-xl">
+      <div className="grid grid-cols-2 gap-1 bg-gray-100/80 p-0.5 rounded-xl">
         <button
           onClick={() => setPaymentChannel('normal')}
           className={cn(
@@ -3250,15 +3250,6 @@ function PaymentsView({
           )}
         >
           Web
-        </button>
-        <button
-          onClick={() => setPaymentChannel('unassigned')}
-          className={cn(
-            "h-7 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-            paymentChannel === 'unassigned' ? "bg-white text-slate-700 shadow-sm" : "text-gray-400"
-          )}
-        >
-          Sin asignar
         </button>
       </div>
 
