@@ -4,6 +4,7 @@ import qrcodeImg from 'qrcode';
 import axios from 'axios';
 import http from 'http';
 import { handleBridgeApiRoute } from './send.js';
+import { buildMediaPath } from './media-path.js';
 
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -64,12 +65,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => console.log(`🌐 Servidor QR escuchando en puerto ${PORT}`));
 
 // ─── Helpers ───
-function mimeToExt(mime) {
-  const map = { 'image/jpeg':'jpg','image/png':'png','image/webp':'webp',
-    'audio/ogg; codecs=opus':'ogg','audio/ogg':'ogg','audio/mpeg':'mp3',
-    'video/mp4':'mp4','application/pdf':'pdf' };
-  return map[mime] || 'bin';
-}
 function normalizePhone(raw) {
   if (!raw) return null;
   let p = raw.replace(/@[a-z.]+$/, '');
@@ -77,10 +72,10 @@ function normalizePhone(raw) {
   return p;
 }
 
-async function uploadMedia(base64, mimetype, phone, timestamp) {
+async function uploadMedia(base64, mimetype, phone, timestamp, messageId) {
   try {
-    const ext  = mimeToExt(mimetype);
-    const path = `${phone}/${timestamp}.${ext}`;
+    const fallbackUnique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const path = buildMediaPath(phone, timestamp, mimetype, messageId, fallbackUnique);
     const buf  = Buffer.from(base64, 'base64');
     const res  = await axios.post(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, buf, {
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY,
@@ -199,7 +194,8 @@ client.on('message_create', async (msg) => {
         mediaMimetype = media.mimetype;
         mediaUrl = await uploadMedia(
           media.data, media.mimetype,
-          fromPhone, msg.timestamp
+          fromPhone, msg.timestamp,
+          msg.id?._serialized
         );
       }
     }

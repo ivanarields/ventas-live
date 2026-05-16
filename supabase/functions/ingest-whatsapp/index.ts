@@ -107,7 +107,7 @@ async function processMessage(req: Request) {
       }
     }
 
-    if (mediaUrl) {
+    if (mediaUrl && !messageId) {
       const since10m = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const { data: existingMedia } = await supabase
         .from('panel_mensajes')
