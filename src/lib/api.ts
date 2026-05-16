@@ -75,6 +75,7 @@ export const pagosApi = {
   verifyLivePayment: (id: string | number) =>
     apiFetch(`/api/live-sales/payments/${id}/verify-manual`, { method: "POST" }),
   pendingWebOrders: () => apiFetch("/api/store/pending-manual"),
+  listTienda: (date?: string) => apiFetch(`/api/pagos-tienda${date ? `?date=${encodeURIComponent(date)}` : ""}`),
   verifyWebStoreOrder: (storeOrderId: number) =>
     apiFetch(`/api/store/verify-manual/${storeOrderId}`, { method: "POST" }),
 };

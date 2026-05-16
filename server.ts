@@ -2747,65 +2747,66 @@ const PORT = Number(process.env.PORT || 3001);
         }
         console.log(`[store-match] Pedido inyectado, ID: ${newPedido?.id}`);
 
-        // 3. Registrar el pago en ChehiAppAbril (página de pagos)
+        // 3. Registrar el pago en TiendaOnline (tabla pagos_tienda).
+        //    La tienda queda separada del sistema principal: ya NO se insertan
+        //    pagos en ChehiAppAbril.pagos con method='Tienda Online'.
+        //    Si hay match con notificación bancaria, su info se guarda como
+        //    metadatos del pago de tienda y se borra el registro bancario que
+        //    haya quedado en ChehiAppAbril para no contaminar el sistema principal.
         try {
-          const todayStart = new Date();
-          todayStart.setHours(0, 0, 0, 0);
+          const storeCustomerIdRef = data.customer_id ?? null;
 
-          if (linkedPago?.id) {
-            console.log(`[store-pago] Vinculando pago existente #${linkedPago.id} como Tienda Online`);
-            const { error: updatePagoErr } = await supabaseServer
-              .from('pagos')
-              .update({
-                nombre: finalName || data.customer_name || 'Cliente Tienda',
-                method: 'Tienda Online',
-                status: 'completed',
-                customer_id: globalCustomerId,
-                user_id: ownerUserId,
-              } as any)
-              .eq('id', linkedPago.id);
-
-            if (updatePagoErr) {
-              console.error(`[store-pago] ERROR vinculando pago existente #${linkedPago.id}: ${updatePagoErr.message}`);
-            }
-          }
-
-          console.log(`[store-pago] Buscando pago existente para customer_id: ${globalCustomerId}, monto: ${data.total}`);
-          const { data: existingPago, error: existingPagoErr } = await supabaseServer
-            .from('pagos')
+          const { data: existingStorePago, error: existingStorePagoErr } = await supabaseStore
+            .from('pagos_tienda')
             .select('id')
-            .eq('customer_id', globalCustomerId)
-            .eq('pago', data.total)
-            .eq('method', 'Tienda Online')
-            .gte('created_at', todayStart.toISOString())
-            .limit(1);
+            .eq('store_order_id', orderId)
+            .maybeSingle();
 
-          if (existingPagoErr) {
-            console.error(`[store-pago] ERROR buscando pago existente: ${existingPagoErr.message}`);
+          if (existingStorePagoErr && existingStorePagoErr.code !== 'PGRST116') {
+            console.error(`[store-pago] ERROR buscando pago de tienda: ${existingStorePagoErr.message}`);
           }
 
-          if (!existingPago?.length) {
-            console.log(`[store-pago] Creando nuevo pago en Chehi`);
-            const { data: newPago, error: pagoErr } = await supabaseServer.from('pagos').insert({
-              nombre: finalName || data.customer_name || 'Cliente Tienda',
-              pago: data.total,
+          if (!existingStorePago) {
+            const pagoTiendaPayload: any = {
+              store_order_id: orderId,
+              store_customer_id: storeCustomerIdRef,
+              customer_name: finalName || data.customer_name || 'Cliente Tienda',
+              customer_wa: data.customer_wa ?? null,
+              amount: data.total,
               method: 'Tienda Online',
               status: 'completed',
-              date: now,
-              customer_id: globalCustomerId,
-              user_id: ownerUserId,
-            } as any).select('id').single();
+              payment_date: now,
+              owner_user_id: ownerUserId,
+            };
 
-            if (pagoErr) {
-              console.error(`[store-pago] ERROR al crear pago: ${pagoErr.message}`);
+            if (linkedPago?.id) {
+              pagoTiendaPayload.bank_sender_name = linkedPago.nombre ?? null;
+              console.log(`[store-pago] Pago bancario #${linkedPago.id} se traslada a TiendaOnline`);
+              const { error: deletePagoErr } = await supabaseServer
+                .from('pagos')
+                .delete()
+                .eq('id', linkedPago.id);
+              if (deletePagoErr) {
+                console.error(`[store-pago] ERROR borrando pago bancario #${linkedPago.id}: ${deletePagoErr.message}`);
+              }
+            }
+
+            const { data: newPagoTienda, error: pagoTiendaErr } = await supabaseStore
+              .from('pagos_tienda')
+              .insert(pagoTiendaPayload)
+              .select('id')
+              .single();
+
+            if (pagoTiendaErr) {
+              console.error(`[store-pago] ERROR al crear pago_tienda: ${pagoTiendaErr.message}`);
             } else {
-              console.log(`[store-pago] 💰 Pago Tienda Online creado en Chehi, ID: ${newPago?.id}`);
+              console.log(`[store-pago] 💰 Pago de tienda creado en TiendaOnline, ID: ${newPagoTienda?.id}`);
             }
           } else {
-            console.log(`[store-pago] ⏭️ Pago ya existe para pedido #${orderId}, omitido`);
+            console.log(`[store-pago] ⏭️ Pago de tienda ya existe para pedido #${orderId}, omitido`);
           }
         } catch (pagoErr) {
-          console.error('[store-pago] Error al crear pago en Chehi:', pagoErr);
+          console.error('[store-pago] Error al crear pago en TiendaOnline:', pagoErr);
         }
       } else {
         console.log(`[store-match] globalCustomerId es null, saltando inyección de pedido y pago`);
@@ -3492,6 +3493,34 @@ Responde solo JSON:
         .eq('wa_proof_received', true)
         .gte('created_at', todayStart.toISOString())
         .order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data ?? []);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint: Pagos confirmados de la tienda (para pestaña Pagos Web) ──
+  // Lee de TiendaOnline.pagos_tienda. La pestaña Web del sistema principal
+  // muestra estos pagos sin contaminar la tabla pagos de ChehiAppAbril.
+  app.get('/api/pagos-tienda', async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string | undefined;
+      const date = (req.query.date as string | undefined) ?? null;
+
+      let q = supabaseStore
+        .from('pagos_tienda')
+        .select('id, store_order_id, store_customer_id, customer_name, customer_wa, amount, method, status, payment_date, bank_sender_name, owner_user_id, created_at');
+
+      if (userId) q = q.eq('owner_user_id', userId);
+
+      if (date) {
+        const dayStart = new Date(`${date}T00:00:00`);
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+        q = q.gte('payment_date', dayStart.toISOString()).lt('payment_date', dayEnd.toISOString());
+      }
+
+      const { data, error } = await q.order('payment_date', { ascending: false });
       if (error) return res.status(500).json({ error: error.message });
       res.json(data ?? []);
     } catch (err: any) {

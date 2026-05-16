@@ -2803,13 +2803,10 @@ function PaymentsView({
     return { bg: '#f8fafc', fg: '#94a3b8' };
   };
 
-  const isStorePayment = (payment: any) =>
-    String(payment?.method ?? '').trim().toLowerCase() === 'tienda online';
-
-  const paymentBelongsToChannel = (payment: any) => {
-    if (paymentChannel === 'web') return isStorePayment(payment);
-    return !isStorePayment(payment);
-  };
+  // Los pagos de tienda viven en TiendaOnline.pagos_tienda, no en `payments`.
+  // La pestaña Web muestra `webProfilesForDate` y `pendingWebOrders` directamente.
+  // En la pestaña Normal todos los pagos cargados pertenecen al sistema principal.
+  const paymentBelongsToChannel = (_payment: any) => paymentChannel !== 'web';
 
   const onSelectPerson = (id: string) => {
     onSelectPersonProp(id);
@@ -3035,7 +3032,6 @@ function PaymentsView({
 
     Object.values(groups).forEach((group: any) => {
       const origins = group.history.map((p: any) => p.verificationOrigin) as VerificationOrigin[];
-      const onlyStorePayments = group.history.length > 0 && group.history.every((p: any) => isStorePayment(p));
       const hasAutomatic = origins.includes('automatic');
       const hasUnmatched = origins.some((o: string) => o === 'macrodroid_only' || o === 'other');
       const hasWhatsappPending = group.history.some((p: any) =>
@@ -3052,9 +3048,7 @@ function PaymentsView({
           p.livePaymentStatus === 'revision_manual'
         )
       )?.livePaymentId ?? null;
-      group.verificationOrigin = onlyStorePayments
-        ? 'automatic'
-        : hasWhatsappPending
+      group.verificationOrigin = hasWhatsappPending
         ? 'whatsapp_pending'
         : origins.includes('manual')
           ? 'manual'
