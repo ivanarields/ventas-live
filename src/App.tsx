@@ -215,7 +215,8 @@ import {
   Printer,
   FileSpreadsheet,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  RotateCcw
 } from 'lucide-react';
 import { 
   format, 
@@ -2577,7 +2578,7 @@ function PaymentsView({
   };
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [isDeletingTodayPayments, setIsDeletingTodayPayments] = useState(false);
+  const [isDeletingTodayPayments] = useState(false); // unused — botón eliminado
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
   const [verifyingLivePaymentId, setVerifyingLivePaymentId] = useState<string | null>(null);
   const [verifyingWebOrderId, setVerifyingWebOrderId] = useState<number | null>(null);
@@ -2726,6 +2727,54 @@ function PaymentsView({
     }
   };
 
+  const reanalyzeLiveSession = async () => {
+    if (procesandoLive) return;
+    const state = liveSessionState ?? await refreshLiveSessionState();
+    const session = state?.lastAny;
+    if (!session?.startAt || !session?.endAt) {
+      alert('No hay ningún Live reciente para re-analizar.');
+      return;
+    }
+    setProcesandoLive(true);
+    setProcesandoProgreso(null);
+    try {
+      const params = new URLSearchParams({
+        startAt: session.startAt,
+        endAt: session.endAt,
+        reanalyze: 'true',
+      });
+      const { clientes } = await apiFetch(`/api/live-sales/pending-conversations?${params.toString()}`);
+      if (!clientes || clientes.length === 0) {
+        alert('No hay conversaciones en ese Live.');
+        return;
+      }
+      setProcesandoProgreso({ actual: 0, total: clientes.length });
+      let errores = 0;
+      for (let i = 0; i < clientes.length; i++) {
+        const cliente = clientes[i];
+        try {
+          await apiFetch('/api/ai/summarize-conversation', {
+            method: 'POST',
+            body: JSON.stringify({ clienteId: cliente.id, startAt: session.startAt, endAt: session.endAt }),
+          });
+        } catch (e) {
+          errores += 1;
+          console.warn(`[reanalizar] error en ${cliente.nombre}:`, e);
+        }
+        setProcesandoProgreso({ actual: i + 1, total: clientes.length });
+        if (i < clientes.length - 1) await new Promise(r => setTimeout(r, 2000));
+      }
+      onRefresh?.();
+      await refreshLiveSessionState();
+      if (errores > 0) alert(`Re-análisis completado con ${errores} error(es).`);
+    } catch (e: any) {
+      alert('Error al re-analizar: ' + (e?.message ?? 'Error desconocido'));
+    } finally {
+      setProcesandoLive(false);
+      setProcesandoProgreso(null);
+    }
+  };
+
   const handleLiveButton = async () => {
     if (procesandoLive) return;
     const state = liveSessionState ?? await refreshLiveSessionState();
@@ -2805,23 +2854,6 @@ function PaymentsView({
     }
   };
 
-  const handleDeleteTodayPayments = async () => {
-    if (isDeletingTodayPayments) return;
-    const command = window.prompt('Escribe BORRAR PAGOS HOY para eliminar todos los pagos del día.');
-    if (command?.trim().toUpperCase() !== 'BORRAR PAGOS HOY') return;
-    if (!window.confirm('Se eliminarán todos los pagos de hoy y sus pedidos creados hoy. ¿Continuar?')) return;
-    setIsDeletingTodayPayments(true);
-    try {
-      const result = await adminApi.deleteTodayPayments();
-      onRefresh?.();
-      alert(`Pagos borrados: ${result.pagoIds?.length ?? 0}`);
-    } catch (error: any) {
-      console.error('Error borrando pagos de hoy:', error);
-      alert(error?.message ?? 'Error al borrar pagos de hoy');
-    } finally {
-      setIsDeletingTodayPayments(false);
-    }
-  };
 
   useEffect(() => {
     pagosApi.pendingWebOrders()
@@ -3106,7 +3138,7 @@ function PaymentsView({
 
   const activeLiveSession = liveSessionState?.active ?? null;
   const completedLiveSession = liveSessionState?.lastCompleted ?? null;
-  const liveButtonLabel = activeLiveSession ? 'LIVE ON' : completedLiveSession ? 'LISTAR LIVE' : 'LIVE OFF';
+  const liveButtonLabel = activeLiveSession ? 'Live' : completedLiveSession ? 'Listar' : 'Live';
   const liveButtonStyle = activeLiveSession
     ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-600"
     : completedLiveSession
@@ -3134,14 +3166,16 @@ function PaymentsView({
           <h2 className="text-2xl font-extrabold text-base-text tracking-tight uppercase">Pagos</h2>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={handleDeleteTodayPayments}
-            disabled={isDeletingTodayPayments}
-            className="w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-60"
-            title="Borrar pagos de hoy"
-          >
-            <RefreshCw size={18} className={isDeletingTodayPayments ? 'animate-spin' : ''} />
-          </button>
+          {liveSessionState?.lastAny && (
+            <button
+              onClick={reanalyzeLiveSession}
+              disabled={procesandoLive}
+              className="w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 bg-amber-50 text-amber-600 hover:bg-amber-100 disabled:opacity-60"
+              title="Re-analizar el último Live (reprocesa todos los chats, incluyendo los ya alistados)"
+            >
+              <RotateCcw size={16} />
+            </button>
+          )}
           <button
             onClick={() => setShowOnlyWithPhone(!showOnlyWithPhone)}
             className={cn(

@@ -31,6 +31,7 @@
 
 | Fecha | Cambio | Commit |
 |-------|--------|--------|
+| 2026-05-15 | feat: botón Re-analizar (naranja) reprocesa todos los chats del último Live incluyendo los ya alistados; eliminar botón "Borrar pagos de hoy"; texto del botón Live más corto | pendiente |
 | 2026-05-15 | fix: dos comprobantes del mismo monto enviados por WhatsApp ahora crean 2 pagos separados (bug en dedup por URL de imagen y marcado incorrecto como posible_duplicado) | pendiente |
 | 2026-05-15 | **Auditoría Claude Code task-20**: 4 bugs críticos encontrados en flujo Live/Sin asignar (ver `docs/planes/hallazgos-20-*.md`) | solo auditoría |
 | 2026-05-14 | Fix sincronizar estado cliente en panel después de verificación manual | `3308814` |

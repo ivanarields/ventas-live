@@ -1041,9 +1041,11 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
         }
       }
 
+      const reanalyze = req.query.reanalyze === 'true';
       const pendientes = (clientes ?? []).filter((c: any) => {
         const ultimoMsg = ultimoPorCliente[c.id];
-        if (!ultimoMsg) return false; // sin mensajes, no procesar
+        if (!ultimoMsg) return false; // sin mensajes en el rango, no procesar
+        if (reanalyze) return true; // re-análisis: incluir todos sin importar resumen_at
         if (!c.resumen_at) return true; // nunca procesado
         return new Date(ultimoMsg) > new Date(c.resumen_at); // mensaje más nuevo que resumen
       }).map((c: any) => ({ id: c.id, nombre: c.nombre ?? 'Sin nombre', phone: c.phone }));
