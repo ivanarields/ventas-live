@@ -114,7 +114,9 @@ export function findMacrodroidMatchForLivePayment(
 ) {
   const monto = parseLiveMonto(pagoLive?.monto);
   const matchTimes = resolveLivePaymentMatchTimes(pagoLive);
-  if (!monto || matchTimes.length === 0 || !pagoLive?.nombre_detectado) return null;
+  // Permitir match por customer ID aunque no se haya extraído el nombre del comprobante
+  if (!monto || matchTimes.length === 0) return null;
+  if (!pagoLive?.nombre_detectado && !input.mainCustomerId) return null;
 
   const windowMs = (input.windowMinutes ?? 5) * 60 * 1000;
 
@@ -482,7 +484,9 @@ export async function matchLivePaymentWithMacrodroid(
   },
 ) {
   const monto = parseLiveMonto(input.pagoLive.monto);
-  if (!monto || !input.pagoLive.nombre_detectado) return input.pagoLive;
+  if (!monto) return input.pagoLive;
+  // Permitir match por customer ID aunque el AI no haya extraído el nombre
+  if (!input.pagoLive.nombre_detectado && !input.mainCustomerId) return input.pagoLive;
 
   let messageCreatedAt: string | null = null;
   if (input.pagoLive.panel_mensaje_id) {
