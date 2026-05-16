@@ -2822,7 +2822,7 @@ function PaymentsView({
         const e = new Date(session.endAt).getTime();
         return t < s || t > e;
       }
-      return false; // sin info de sesión → conservador, queda en Live
+      return true; // sin info de sesión → macrodroid_only va a Sin asignar por defecto
     }
     return true; // sin customerId → siempre Sin asignar
   };
@@ -3017,7 +3017,7 @@ function PaymentsView({
       count: visiblePayments.length,
       people: uniquePeople
     };
-  }, [filteredPayments, paymentChannel, webProfilesForDate]);
+  }, [filteredPayments, paymentChannel, webProfilesForDate, liveSessionState]);
 
   const groupedPayments = useMemo(() => {
     const groups: { [key: string]: any } = {};
@@ -3128,13 +3128,13 @@ function PaymentsView({
     }
 
     return result.sort((a: any, b: any) => b.lastTimestamp - a.lastTimestamp);
-  }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders, paymentChannel]);
+  }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders, paymentChannel, liveSessionState]);
 
   const unassignedPayments = useMemo(() => {
     return filteredPayments
       .filter(isUnassignedPayment)
       .sort((a, b) => getTS(b.date) - getTS(a.date));
-  }, [filteredPayments]);
+  }, [filteredPayments, liveSessionState]);
 
   const activeLiveSession = liveSessionState?.active ?? null;
   const completedLiveSession = liveSessionState?.lastCompleted ?? null;

@@ -47,6 +47,7 @@
 | 2026-05-15 | fix: `ensureMainDailyPedido` no infla `total_amount` de pedidos `live_sales` con pagos MacroDroid fuera del Live | `846df33` |
 | 2026-05-15 | fix: `identity.ts` ya no usa epoch como fallback, ahora usa pivot±days; ventana ampliada de 2h a 8h | `846df33` |
 | 2026-05-15 | fix: análisis IA del Live procesa hasta 40 fotos (antes solo 8) + reintento sobre clasificaciones "otro" para encontrar comprobantes que Gemini dudó | `95882d8` |
+| 2026-05-15 | fix: useMemo de groupedPayments/stats/unassignedPayments ahora dependen de liveSessionState → pagos MacroDroid fuera del Live se clasifican correctamente a Sin Asignar cuando carga el estado de sesión | pendiente push |
 | 2026-05-15 | fix: polling cada 30s de live session state para que `lastAny` se mantenga al día sin depender de cache del navegador | pendiente push |
 | 2026-05-10 | Flujo ENTREGA: admin configura fechas de retiro, clienta elige desde perfil/entrega | pendiente |
 | 2026-05-10 | Número oficial de WA configurable en Configuraciones (official_wa_number) | pendiente |

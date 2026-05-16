@@ -1943,7 +1943,6 @@ const PORT = Number(process.env.PORT || 3001);
           ...copy,
           available: true,
           stock: 1,
-          priority_order: 0,
         })
         .select()
         .single();

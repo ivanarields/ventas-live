@@ -482,6 +482,30 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     }
   };
 
+  const handleRelistOrderItems = async (order: StoreOrder) => {
+    const productIds = [...new Set((order.items ?? []).map(item => Number(item.productId)).filter(Boolean))];
+    if (productIds.length === 0) {
+      alert('Este pedido no tiene prendas para volver a vender.');
+      return;
+    }
+    if (!confirm(`¿Volver a poner ${productIds.length} prenda(s) de este pedido a la venta con código nuevo?`)) return;
+    try {
+      for (const productId of productIds) {
+        const res = await fetch(`/api/products/${productId}/relist`, {
+          method: 'POST',
+          headers: { 'x-user-id': userId },
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `No se pudo relistar producto ${productId}`);
+        }
+      }
+      await loadAll();
+    } catch (err: any) {
+      alert(err?.message || 'No se pudieron volver a poner las prendas a la venta');
+    }
+  };
+
   const updateOrder = async (id: number, body: object) => {
     const res = await fetch(`/api/store-orders/${id}`, {
       method: 'PATCH',
@@ -954,6 +978,17 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                           <span className="text-[13px] font-black" style={{ color: BRAND }}>{Number(order.total).toFixed(2)} Bs</span>
                         </div>
                       </div>
+
+                      {(order.items ?? []).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRelistOrderItems(order)}
+                          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[11px] bg-pink-50 text-pink-600 hover:bg-pink-100 transition-colors"
+                        >
+                          <RotateCcw size={12} />
+                          Volver a vender prendas
+                        </button>
+                      )}
 
                       {/* Acciones según estado */}
                       {order.status === 'pending' && (

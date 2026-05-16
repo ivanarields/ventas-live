@@ -16,7 +16,7 @@
       "destination": "/tienda.html"
     },
     {
-      "source": "/((?!api/|icon-|manifest\\.json|sw\\.js|sw-tienda\\.js|assets/).*)",
+      "source": "/((?!api/|icon-|manifest\\.json|sw\\.js|sw-tienda\\.js|assets/|demo-products/).*)",
       "destination": "/index.html"
     }
   ],
