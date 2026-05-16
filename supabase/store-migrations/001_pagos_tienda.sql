@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS pagos_tienda (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   store_order_id BIGINT REFERENCES store_orders(id) ON DELETE SET NULL,
-  store_customer_id UUID REFERENCES store_customers(id) ON DELETE SET NULL,
+  store_customer_id BIGINT REFERENCES store_customers(id) ON DELETE SET NULL,
   customer_name TEXT,
   customer_wa TEXT,
   amount NUMERIC(12,2) NOT NULL,

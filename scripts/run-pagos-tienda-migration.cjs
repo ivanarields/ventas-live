@@ -3,22 +3,26 @@ const { Client } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
-const REGIONS = ['us-east-1','sa-east-1','us-east-2','us-west-1','us-west-2'];
+const HOSTS = [
+  { host: 'db.thgbfurscfjcmgokyyif.supabase.co', port: 5432, user: 'postgres' },
+  { host: 'aws-0-us-east-1.pooler.supabase.com', port: 6543, user: 'postgres.thgbfurscfjcmgokyyif' },
+  { host: 'aws-0-sa-east-1.pooler.supabase.com', port: 6543, user: 'postgres.thgbfurscfjcmgokyyif' },
+  { host: 'aws-0-us-west-1.pooler.supabase.com', port: 6543, user: 'postgres.thgbfurscfjcmgokyyif' },
+];
 
-async function tryRegion(region, sql) {
-  const host = `aws-0-${region}.pooler.supabase.com`;
+async function tryHost({ host, port, user }, sql) {
   const client = new Client({
     host,
-    port: 6543,
-    user: 'postgres.thgbfurscfjcmgokyyif',
+    port,
+    user,
     password: 'Natural1-Stopper4',
     database: 'postgres',
     ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000
+    connectionTimeoutMillis: 8000
   });
   try {
     await client.connect();
-    console.log(`Conectado via ${host}`);
+    console.log(`Conectado via ${host}:${port}`);
     await client.query(sql);
     const check = await client.query(`
       SELECT column_name FROM information_schema.columns
@@ -28,7 +32,7 @@ async function tryRegion(region, sql) {
     console.log('Columnas creadas:', check.rows.map(r => r.column_name).join(', '));
     return true;
   } catch (err) {
-    console.log(`Fallo ${region}: ${err.message}`);
+    console.log(`Fallo ${host}:${port}: ${err.message}`);
     return false;
   } finally {
     await client.end().catch(() => {});
@@ -38,14 +42,14 @@ async function tryRegion(region, sql) {
 async function run() {
   const sqlPath = path.join(process.cwd(), 'supabase/store-migrations/001_pagos_tienda.sql');
   const sql = fs.readFileSync(sqlPath, 'utf8');
-  for (const region of REGIONS) {
-    const ok = await tryRegion(region, sql);
+  for (const target of HOSTS) {
+    const ok = await tryHost(target, sql);
     if (ok) {
       console.log('Migracion aplicada correctamente.');
       return;
     }
   }
-  console.error('No se pudo aplicar la migracion en ninguna region.');
+  console.error('No se pudo aplicar la migracion en ningun host.');
   process.exit(1);
 }
 
