@@ -3773,18 +3773,35 @@ Responde solo JSON:
       const deviceId     = req.headers['x-device-id']     as string ?? '';
       const deviceSecret = req.headers['x-device-secret'] as string ?? '';
 
-      // Verificar si hay un Live activo antes de procesar el pago
-      const { data: activeLive } = await supabaseServer
+      // Verificar si hay un Live activo o uno recientemente cerrado que cubra el tiempo del pago.
+      // MacroDroid puede retrasarse en enviar la notificación: el pago ocurrió durante el Live
+      // pero la notificación llega al servidor minutos después de que el Live ya cerró.
+      const { data: sessions } = await supabaseServer
         .from('live_sessions')
-        .select('id')
-        .eq('status', 'live')
+        .select('id,status,notes')
+        .in('status', ['live', 'completed'])
         .ilike('title', 'Procesamiento Live%')
-        .limit(1)
-        .maybeSingle();
+        .order('created_at', { ascending: false })
+        .limit(3);
 
-      if (!activeLive) {
-        // No hay Live activo → descartar silenciosamente (200 para que MacroDroid no reintente)
-        console.log('[ingest-notification] Live apagado, pago descartado');
+      const capturedAtMs = req.body?.captured_at_ms ? Number(req.body.captured_at_ms) : null;
+      const paymentTime = capturedAtMs && Number.isFinite(capturedAtMs) ? new Date(capturedAtMs) : new Date();
+
+      const allowed = (sessions ?? []).some((s: any) => {
+        if (s.status === 'live') return true; // Live activo siempre acepta
+        // Live cerrado: aceptar si el tiempo del pago cae dentro de la ventana de sesión
+        try {
+          const notes = typeof s.notes === 'string' ? JSON.parse(s.notes) : s.notes;
+          const startAt = notes?.started_at ? new Date(notes.started_at) : null;
+          const endAt = notes?.ended_at ? new Date(notes.ended_at) : null;
+          if (!startAt) return false;
+          const end = endAt ?? new Date(); // si no hay endAt, asumir ahora
+          return paymentTime >= startAt && paymentTime <= end;
+        } catch { return false; }
+      });
+
+      if (!allowed) {
+        console.log('[ingest-notification] Pago fuera de ventana Live, descartado', paymentTime.toISOString());
         return res.json({ ok: true, ignored: true, reason: 'live_off' });
       }
 
