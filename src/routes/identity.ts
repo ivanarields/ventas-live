@@ -501,6 +501,25 @@ export function createIdentityRouter(
         if (ev.panel_mensaje_id) evidenceByMessageId.set(ev.panel_mensaje_id, ev);
       }
 
+      // Marcar comprobantes de tienda: fotos que la tienda usó como prueba de pago
+      // pero que no tienen evidencia Live. Sin este cruce quedan con tipo=null
+      // y pasan como "prendas" en el selector de fotos.
+      const storeProofMsgIds = new Set<string>();
+      if (supabaseStore) {
+        const panelMsgIds = photosRaw.map((m: any) => m.id);
+        if (panelMsgIds.length > 0) {
+          const { data: storeProofs } = await supabaseStore
+            .from('payment_events')
+            .select('hash')
+            .eq('source', 'wa_proof');
+          for (const sp of storeProofs ?? []) {
+            const parts = (sp.hash ?? '').split(':');
+            const msgId = parts[2]; // formato: wa-proof:{orderId}:{panel_message_id}
+            if (msgId && panelMsgIds.includes(msgId)) storeProofMsgIds.add(msgId);
+          }
+        }
+      }
+
       let resumenObj: any = null;
       try { resumenObj = cliente.resumen ? JSON.parse(cliente.resumen) : null; } catch { resumenObj = null; }
       const aiSelected = new Set<string>((Array.isArray(resumenObj?.prendas_seleccionadas) ? resumenObj.prendas_seleccionadas : [])
@@ -513,7 +532,7 @@ export function createIdentityRouter(
         const selectedFinal = typeof meta.selected_final === 'boolean' ? meta.selected_final : selectedByAi;
         return {
           ...photo,
-          tipo: ev?.tipo ?? null,
+          tipo: storeProofMsgIds.has(photo.id) ? 'comprobante' : (ev?.tipo ?? null),
           descripcion: ev?.descripcion ?? null,
           selected_by_ai: selectedByAi,
           selected_final: selectedFinal,
