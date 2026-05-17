@@ -2859,6 +2859,22 @@ function PaymentsView({
     }
   };
 
+  const rejectWebStoreOrder = async (storeOrderId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('¿Rechazar este pago? El producto volverá a estar disponible en la tienda.')) return;
+    setVerifyingWebOrderId(storeOrderId);
+    try {
+      await pagosApi.rejectWebStoreOrder(storeOrderId);
+      setWebOrderDetail(null);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error rechazando pago web:', error);
+      alert('No se pudo rechazar el pago');
+    } finally {
+      setVerifyingWebOrderId(null);
+    }
+  };
+
   const verifyLivePaymentFromPayments = async (livePaymentId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setVerifyingLivePaymentId(livePaymentId);
@@ -2901,6 +2917,14 @@ function PaymentsView({
   const webProfilesForDate = useMemo(() => {
     const isCountableWebOrder = (order: any) => {
       const status = String(order?.status ?? '').toLowerCase();
+      const paymentRef = String(order?.payment_ref ?? '').toLowerCase();
+      // Pedidos rechazados manualmente desaparecen de Pagos Web.
+      if (paymentRef.startsWith('rejected-manual')) return false;
+      // Pedidos pagados siempre se ven (color verde).
+      if (status === 'paid') return true;
+      // Pedidos con comprobante recibido se ven aunque estén "cancelled" (revisión manual morada).
+      if (order?.wa_proof_received) return true;
+      // Resto: ocultar cancelados sin comprobante.
       return status !== 'cancelled';
     };
 
@@ -3364,13 +3388,22 @@ function PaymentsView({
                 </div>
 
                 {needsManual && (
-                  <button
-                    onClick={(e) => verifyWebStoreOrder(order.id, e)}
-                    disabled={verifyingWebOrderId === order.id}
-                    className="w-full py-3 rounded-2xl bg-violet-600 text-white font-black uppercase tracking-widest text-[11px] disabled:opacity-50 active:scale-[0.98] shadow-md shadow-violet-200"
-                  >
-                    {verifyingWebOrderId === order.id ? 'Confirmando…' : 'Confirmar manualmente'}
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={(e) => rejectWebStoreOrder(order.id, e)}
+                      disabled={verifyingWebOrderId === order.id}
+                      className="py-3 rounded-2xl bg-white border-2 border-red-200 text-red-600 font-black uppercase tracking-widest text-[11px] disabled:opacity-50 active:scale-[0.98]"
+                    >
+                      Rechazar
+                    </button>
+                    <button
+                      onClick={(e) => verifyWebStoreOrder(order.id, e)}
+                      disabled={verifyingWebOrderId === order.id}
+                      className="py-3 rounded-2xl bg-emerald-600 text-white font-black uppercase tracking-widest text-[11px] disabled:opacity-50 active:scale-[0.98] shadow-md shadow-emerald-200"
+                    >
+                      {verifyingWebOrderId === order.id ? '...' : 'Confirmar'}
+                    </button>
+                  </div>
                 )}
 
                 <div className="space-y-2">

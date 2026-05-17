@@ -78,6 +78,8 @@ export const pagosApi = {
   listTienda: (date?: string) => apiFetch(`/api/pagos-tienda${date ? `?date=${encodeURIComponent(date)}` : ""}`),
   verifyWebStoreOrder: (storeOrderId: number) =>
     apiFetch(`/api/store/verify-manual/${storeOrderId}`, { method: "POST" }),
+  rejectWebStoreOrder: (storeOrderId: number) =>
+    apiFetch(`/api/store/reject-manual/${storeOrderId}`, { method: "POST" }),
 };
 
 // ─── PEDIDOS ──────────────────────────────────────────────────────────────────

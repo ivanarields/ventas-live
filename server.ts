@@ -961,7 +961,7 @@ const PORT = Number(process.env.PORT || 3001);
 
       const [storeCustomers, storeOrders] = await Promise.all([
         safeSelect(supabaseStore, 'store_customers', 'id,whatsapp,display_name,total_orders,total_spent,created_at', (q) => q.order('created_at', { ascending: false }).limit(300)),
-        safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,items,payment_verified_at,wa_proof_received,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
+        safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,items,payment_verified_at,wa_proof_received,payment_ref,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
       ]);
 
       const productImageMap = new Map<string, string>();
@@ -2015,11 +2015,15 @@ const PORT = Number(process.env.PORT || 3001);
   app.get("/api/store-orders/reserved-products", async (req, res) => {
     try {
       const now = new Date().toISOString();
+      // Productos reservados:
+      // 1. Pedido pending dentro del tiempo de reserva (2 min)
+      // 2. Pedido pending con comprobante recibido (revisión manual, sin importar el tiempo)
+      //    → protege a la clienta que ya pagó hasta que el operador decida Confirmar/Rechazar.
       const { data: pendingOrders } = await supabaseStore
         .from("store_orders")
-        .select("id, items, expires_at")
+        .select("id, items, expires_at, wa_proof_received")
         .eq("status", "pending")
-        .gt("expires_at", now);
+        .or(`expires_at.gt.${now},wa_proof_received.eq.true`);
 
       const reservedMap: Record<string, string> = {};
       for (const order of (pendingOrders ?? [])) {
@@ -2228,6 +2232,10 @@ const PORT = Number(process.env.PORT || 3001);
   });
 
   // ── EXPIRACIÓN AUTOMÁTICA: cada 30 seg, cancelar pedidos sin pago ──────
+  // Excepción: si ya llegó el comprobante por WhatsApp (wa_proof_received=true),
+  // NO se cancela aunque pase el tiempo. La tarjeta morada queda visible en
+  // Pagos Web hasta que el operador apriete Confirmar o Rechazar manualmente.
+  // Esto protege a la clienta que sí pagó pero MacroDroid no detectó el banco.
   setInterval(async () => {
     try {
       const now = new Date().toISOString();
@@ -2235,6 +2243,7 @@ const PORT = Number(process.env.PORT || 3001);
         .from("store_orders")
         .select("id, items")
         .eq("status", "pending")
+        .eq("wa_proof_received", false)
         .lt("expires_at", now);
 
       if (!expired?.length) return;
@@ -2244,7 +2253,8 @@ const PORT = Number(process.env.PORT || 3001);
           .from("store_orders")
           .update({ status: "cancelled" } as any)
           .eq("id", order.id)
-          .eq("status", "pending");
+          .eq("status", "pending")
+          .eq("wa_proof_received", false);
 
         const pIds = (order.items ?? []).map((i: any) => i.productId).filter(Boolean);
 
@@ -3564,6 +3574,30 @@ Responde solo JSON:
       if (isNaN(storeOrderId)) return res.status(400).json({ error: 'ID inválido' });
       const confirmed = await confirmStoreOrder(storeOrderId, 'manual-web');
       if (!confirmed) return res.status(400).json({ error: 'No se pudo confirmar — ya pagado o no existe' });
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // ── Endpoint 7: Rechazo manual del pago por el operador ──
+  // Cuando el operador verifica en el banco y el pago NO llegó, rechaza el pedido.
+  // El producto vuelve a estar disponible en la tienda y la tarjeta morada desaparece.
+  app.post('/api/store/reject-manual/:storeOrderId', async (req, res) => {
+    try {
+      const storeOrderId = parseInt(req.params.storeOrderId);
+      if (isNaN(storeOrderId)) return res.status(400).json({ error: 'ID inválido' });
+
+      const { data, error } = await supabaseStore
+        .from('store_orders')
+        .update({ status: 'cancelled', payment_ref: 'rejected-manual' } as any)
+        .eq('id', storeOrderId)
+        .in('status', ['pending', 'cancelled'])
+        .select('id')
+        .single();
+
+      if (error || !data) return res.status(400).json({ error: 'No se pudo rechazar — ya pagado o no existe' });
+      console.log(`[store] ❌ Pedido #${storeOrderId} rechazado manualmente`);
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? 'Error interno' });

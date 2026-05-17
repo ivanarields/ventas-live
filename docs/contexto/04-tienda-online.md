@@ -626,3 +626,17 @@ Pestaña "Pagos Web" del sistema principal:
 Fix IA (2026-05-17): el clasificador de imágenes ya no registra fotos basura
 (QR sueltos, memes, capturas que no son comprobantes) como `pagos_venta_live` vacíos.
 Solo se registran si la IA extrajo nombre o monto.
+
+## Revisión manual con dos botones (2026-05-17)
+
+Cuando llega comprobante por WhatsApp pero no hay confirmación bancaria:
+- El pedido NO se cancela aunque pase el tiempo de reserva (cron de expiración
+  excluye pedidos con `wa_proof_received=true`).
+- El producto sigue reservado en la tienda (`/api/store-orders/reserved-products`
+  incluye pedidos pending con `wa_proof_received=true`) para proteger a la clienta
+  que ya pagó.
+- En Pagos Web aparece tarjeta morada con dos botones dentro de la página de detalles:
+  - **Confirmar** (verde) → llama a `confirmStoreOrder`, marca como pagado, oculta producto.
+  - **Rechazar** (rojo) → llama a `/api/store/reject-manual/:orderId`, marca el pedido
+    como `cancelled` con `payment_ref='rejected-manual'`, libera el producto.
+- Pedidos con `payment_ref` que empieza con `rejected-manual` se filtran del frontend.
