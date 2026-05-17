@@ -172,17 +172,10 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
   const [pedidosLiveCargando, setPedidosLiveCargando] = useState(false);
   const [pagoAccionId, setPagoAccionId] = useState<string | null>(null);
 
-  const _comprobantesUrls = new Set<string>([
-    ...pedidosLive.flatMap(o => o.pagos ?? []).flatMap(p => p.comprobante_media_url ? [p.comprobante_media_url] : []),
-    ...pedidosLive.flatMap(o => o.evidencias ?? []).flatMap(e => e.tipo === 'comprobante' && e.media_url ? [e.media_url] : []),
-  ]);
-  const fotos = mensajes
-    .filter(m => m.has_media && m.media_url && isImage(m.media_url))
-    .filter((m, i, arr) => {
-      if (_comprobantesUrls.has(m.media_url!)) return false;
-      if (resumen?.comprobante && resumen.comprobante !== 'null' && i === arr.length - 1) return false;
-      return true;
-    });
+  // Solo fotos clasificadas como prenda por la IA — nunca el chat completo
+  const fotos = pedidosLive
+    .flatMap(o => o.evidencias ?? [])
+    .filter(e => e.tipo === 'prenda' && e.media_url);
 
   // Parsear resumen JSON
   useEffect(() => {
@@ -548,10 +541,10 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
             Fotos de prendas ({fotos.length})
           </p>
           <div className="grid grid-cols-3 gap-2">
-            {fotos.map((m, i) => (
-              <button key={m.id} onClick={() => setFotoGrande(m.media_url!)}
+            {fotos.map((e) => (
+              <button key={e.id} onClick={() => setFotoGrande(e.media_url!)}
                 className="aspect-square rounded-xl overflow-hidden border border-slate-200 shadow-sm hover:scale-[1.03] transition-transform active:scale-95">
-                <img src={m.media_url!} alt={`foto ${i+1}`} className="w-full h-full object-cover" />
+                <img src={e.media_url!} alt="prenda" className="w-full h-full object-cover" />
               </button>
             ))}
           </div>
