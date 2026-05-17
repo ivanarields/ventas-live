@@ -172,7 +172,17 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
   const [pedidosLiveCargando, setPedidosLiveCargando] = useState(false);
   const [pagoAccionId, setPagoAccionId] = useState<string | null>(null);
 
-  const fotos = mensajes.filter(m => m.has_media && m.media_url && isImage(m.media_url));
+  const _comprobantesUrls = new Set<string>([
+    ...pedidosLive.flatMap(o => o.pagos ?? []).flatMap(p => p.comprobante_media_url ? [p.comprobante_media_url] : []),
+    ...pedidosLive.flatMap(o => o.evidencias ?? []).flatMap(e => e.tipo === 'comprobante' && e.media_url ? [e.media_url] : []),
+  ]);
+  const fotos = mensajes
+    .filter(m => m.has_media && m.media_url && isImage(m.media_url))
+    .filter((m, i, arr) => {
+      if (_comprobantesUrls.has(m.media_url!)) return false;
+      if (resumen?.comprobante && resumen.comprobante !== 'null' && i === arr.length - 1) return false;
+      return true;
+    });
 
   // Parsear resumen JSON
   useEffect(() => {
@@ -535,28 +545,16 @@ function DetallePedido({ cliente, onVolver, onBorrar, onTarjetaChange }: {
       {fotos.length > 0 && (
         <div className="mx-4 mt-4">
           <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">
-            Fotografías de la conversación ({fotos.length})
+            Fotos de prendas ({fotos.length})
           </p>
           <div className="grid grid-cols-3 gap-2">
-            {fotos.map((m, i) => {
-              const esComprobante = resumen?.comprobante && resumen.comprobante !== 'null' && i === fotos.length - 1;
-              return (
-                <button key={m.id} onClick={() => setFotoGrande(m.media_url!)}
-                  className="aspect-square rounded-xl overflow-hidden border shadow-sm hover:scale-[1.03] transition-transform active:scale-95 relative"
-                  style={{ borderColor: esComprobante ? '#86efac' : '#f1f5f9' }}>
-                  <img src={m.media_url!} alt={`foto ${i+1}`} className="w-full h-full object-cover" />
-                  {esComprobante && (
-                    <div className="absolute top-1 right-1 bg-green-500 rounded-full p-0.5">
-                      <CreditCard size={9} className="text-white" />
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+            {fotos.map((m, i) => (
+              <button key={m.id} onClick={() => setFotoGrande(m.media_url!)}
+                className="aspect-square rounded-xl overflow-hidden border border-slate-200 shadow-sm hover:scale-[1.03] transition-transform active:scale-95">
+                <img src={m.media_url!} alt={`foto ${i+1}`} className="w-full h-full object-cover" />
+              </button>
+            ))}
           </div>
-          <p className="text-[9px] text-slate-300 mt-2">
-            {resumen?.comprobante && resumen.comprobante !== 'null' ? '💳 La última foto es el comprobante detectado' : ''}
-          </p>
         </div>
       )}
 
