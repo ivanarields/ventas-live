@@ -1257,7 +1257,7 @@ Responde SOLO con una línea, sin explicaciones.`;
         } else {
           if (!outgoing) {
             const fallbackExtraido = await extraerComprobanteDesdeImagen(imagePart, 'extraccion de comprobante fallback live');
-            if (fallbackExtraido?.cliente || fallbackExtraido?.monto || receiptHintRegex.test(desc)) {
+            if (fallbackExtraido?.cliente || fallbackExtraido?.monto) {
               extraido = fallbackExtraido;
               registrarComprobanteDetectado(item, desc || 'COMPROBANTE: posible comprobante de pago', extraido);
             }

@@ -609,3 +609,20 @@ Evitar copiar fotos; mantener solo links salvo decisión explícita.
 5. Si falla storage de tienda, no usar base principal como fallback.
 6. Toda migración de tienda va solo en thgbfurscfjcmgokyyif.
 ```
+
+## Separación total tienda ↔ sistema principal (2026-05-17)
+
+`confirmStoreOrder` ya NO toca `ChehiAppAbril.customers` ni `ChehiAppAbril.pedidos`.
+Los pedidos web viven únicamente en TiendaOnline (`store_orders`, `store_customers`,
+`pagos_tienda`). Ya no aparecen en Mesa de Preparación del sistema principal.
+
+Pestaña "Pagos Web" del sistema principal:
+- Tarjeta verde = pedido verificado (pago confirmado automático)
+- Tarjeta morada = pedido con comprobante WhatsApp recibido pero sin banco (revisión manual)
+- Click en una tarjeta abre página de detalles a pantalla completa con todas las prendas
+- Botón "Confirmar manualmente" dentro de la página de detalles para casos morados
+- Endpoint `/api/admin/store-profiles` incluye `wa_proof_received` por pedido
+
+Fix IA (2026-05-17): el clasificador de imágenes ya no registra fotos basura
+(QR sueltos, memes, capturas que no son comprobantes) como `pagos_venta_live` vacíos.
+Solo se registran si la IA extrajo nombre o monto.

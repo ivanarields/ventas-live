@@ -2586,6 +2586,7 @@ function PaymentsView({
   const [webProfiles, setWebProfiles] = useState<any[]>([]);
   const [webProductImages, setWebProductImages] = useState<Record<string, string>>({});
   const [webPreview, setWebPreview] = useState<{ profile: any; order: any; item: any; image: string } | null>(null);
+  const [webOrderDetail, setWebOrderDetail] = useState<{ profile: any; order: any } | null>(null);
   const [procesandoLive, setProcesandoLive] = useState(false);
   const [procesandoProgreso, setProcesandoProgreso] = useState<{ actual: number; total: number } | null>(null);
   const [liveSessionState, setLiveSessionState] = useState<{ active: any | null; lastCompleted: any | null; lastAny: any | null } | null>(null);
@@ -2848,6 +2849,7 @@ function PaymentsView({
     setVerifyingWebOrderId(storeOrderId);
     try {
       await pagosApi.verifyWebStoreOrder(storeOrderId);
+      setWebOrderDetail(null);
       onRefresh?.();
     } catch (error) {
       console.error('Error verificando pago web:', error);
@@ -3246,66 +3248,42 @@ function PaymentsView({
       </div>
 
       <div className="space-y-3">
-        {/* Pedidos de tienda con comprobante WA pendiente de verificación manual */}
-        {paymentChannel === 'web' && pendingWebOrders.map((order: any) => (
-          <div key={`web-pending-${order.id}`} className="card-modern p-0 overflow-hidden">
-            <div className="w-full pl-2 pr-4 py-4 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                <div className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#faf5ff', color: '#a855f7' }}>
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-                <div className="flex flex-col items-start min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[9px] font-black bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-md uppercase tracking-wider">WEB</span>
-                    <span className="font-bold text-base-text text-sm uppercase tracking-tight truncate">
-                      {order.customer_name || order.customer_wa || 'Cliente Tienda'}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-base-text-muted">Pedido #{order.id} · Comprobante recibido</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 flex-shrink-0">
-                <button
-                  onClick={(e) => verifyWebStoreOrder(order.id, e)}
-                  disabled={verifyingWebOrderId === order.id}
-                  className="px-3 py-2 rounded-xl bg-violet-50 text-violet-600 border border-violet-100 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 active:scale-95"
-                >
-                  {verifyingWebOrderId === order.id ? '...' : 'Verificar'}
-                </button>
-                <span className="font-extrabold text-brand text-base">Bs {order.total}</span>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {paymentChannel === 'web' && webProfilesForDate.map((profile: any) => (
+        {paymentChannel === 'web' && webProfilesForDate.map((profile: any) => {
+          const needsReview = (profile.orders ?? []).some((o: any) => o.status !== 'paid' && o.wa_proof_received);
+          const headerBg = needsReview ? 'bg-violet-50 border-violet-100' : 'bg-emerald-50/40 border-emerald-100';
+          const badgeClass = needsReview ? 'bg-violet-100 text-violet-600' : 'bg-emerald-100 text-emerald-600';
+          return (
           <div key={`web-profile-${profile.key}`} className="card-modern p-0 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100">
+            <div className={cn("px-3 py-2 border-b", headerBg)}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-[9px] font-black bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-md uppercase tracking-wider">WEB</span>
-                    <span className="font-black text-sm text-base-text uppercase truncate">{profile.name || 'Cliente tienda'}</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className={cn("text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider", badgeClass)}>WEB</span>
+                    <span className="font-black text-[13px] text-base-text uppercase truncate">{profile.name || 'Cliente tienda'}</span>
                   </div>
                   <p className="text-[10px] text-base-text-muted font-bold">
                     {profile.phone || 'Sin número'} · {profile.orders.length} pedido{profile.orders.length !== 1 ? 's' : ''}
                   </p>
                 </div>
-                <span className="font-extrabold text-brand text-base">Bs {profile.total}</span>
+                <span className="font-extrabold text-brand text-sm">Bs {profile.total}</span>
               </div>
             </div>
-            <div className="p-3 space-y-2">
+            <div className="p-2 space-y-1.5">
               {profile.orders.map((order: any) => {
                 const firstItem = (order.items ?? [])[0];
                 const itemImage = firstItem?.image || firstItem?.imageUrl || webProductImages[String(firstItem?.productId ?? "")] || firstItem?.productImage || "";
                 const itemCount = (order.items ?? []).length || 0;
+                const isPending = order.status !== 'paid' && order.wa_proof_received;
                 return (
                   <button
                     key={`web-order-${order.id}`}
-                    onClick={() => firstItem && setWebPreview({ profile, order, item: firstItem, image: itemImage })}
-                    className="w-full flex items-center gap-2 rounded-xl bg-white border border-gray-100 px-2 py-1.5 text-left active:scale-[0.99]"
+                    onClick={() => setWebOrderDetail({ profile, order })}
+                    className={cn(
+                      "w-full flex items-center gap-2 rounded-xl border px-2 py-1.5 text-left active:scale-[0.99]",
+                      isPending ? "bg-violet-50/50 border-violet-100" : "bg-white border-gray-100"
+                    )}
                   >
-                    <div className="w-11 h-11 rounded-lg bg-gray-100 border border-gray-100 overflow-hidden flex-shrink-0">
+                    <div className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-100 overflow-hidden flex-shrink-0">
                       {itemImage ? (
                         <img src={itemImage} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                       ) : null}
@@ -3313,10 +3291,14 @@ function PaymentsView({
                     <div className="min-w-0 flex-1">
                       <p className="text-[11px] font-black text-gray-800 truncate">{firstItem?.productName || firstItem?.name || 'Producto tienda'}</p>
                       <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider">
-                        <span className={cn(order.status === 'paid' ? 'text-emerald-600' : order.status === 'cancelled' ? 'text-gray-400' : 'text-amber-500')}>
-                          {order.status === 'paid' ? 'Verificado' : order.status}
+                        <span className={cn(
+                          order.status === 'paid' ? 'text-emerald-600' :
+                          isPending ? 'text-violet-600' :
+                          order.status === 'cancelled' ? 'text-gray-400' : 'text-amber-500'
+                        )}>
+                          {order.status === 'paid' ? 'Verificado' : isPending ? 'Revisión manual' : order.status}
                         </span>
-                        {itemCount > 1 && <span className="text-gray-300">? +{itemCount - 1}</span>}
+                        {itemCount > 1 && <span className="text-gray-300">· +{itemCount - 1}</span>}
                       </div>
                     </div>
                     <span className="font-black text-brand text-sm shrink-0">Bs {order.total}</span>
@@ -3325,9 +3307,9 @@ function PaymentsView({
               })}
             </div>
           </div>
-        ))}
+        );})}
 
-        {paymentChannel === 'web' && webProfilesForDate.length === 0 && pendingWebOrders.length === 0 && (
+        {paymentChannel === 'web' && webProfilesForDate.length === 0 && (
           <div className="text-center py-24 opacity-20">
             <Wallet className="w-16 h-16 mx-auto mb-4" />
             <p className="text-sm font-bold uppercase tracking-[0.2em]">
@@ -3336,9 +3318,104 @@ function PaymentsView({
           </div>
         )}
 
+        {webOrderDetail && (() => {
+          const order = webOrderDetail.order;
+          const profile = webOrderDetail.profile;
+          const items: any[] = Array.isArray(order.items) ? order.items : [];
+          const needsManual = order.status !== 'paid' && order.wa_proof_received;
+          const isPaid = order.status === 'paid';
+          const headerColor = needsManual ? 'bg-violet-50 border-violet-100' : isPaid ? 'bg-emerald-50 border-emerald-100' : 'bg-gray-50 border-gray-100';
+          const badgeColor = needsManual ? 'bg-violet-100 text-violet-600' : isPaid ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-500';
+          return (
+          <div className="fixed inset-0 z-[230] flex items-stretch justify-center" onClick={() => setWebOrderDetail(null)}>
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+            <div
+              className="relative z-10 w-full max-w-md bg-white shadow-2xl overflow-y-auto sm:my-4 sm:rounded-[24px] sm:max-h-[92vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className={cn("px-4 py-3 border-b flex items-start justify-between gap-3 sticky top-0 z-10", headerColor)}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className={cn("text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider", badgeColor)}>WEB</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Pedido #{order.id}</span>
+                  </div>
+                  <p className="text-sm font-black text-gray-800 truncate">{profile.name || order.customer_name || 'Cliente tienda'}</p>
+                  <p className="text-[10px] font-bold text-gray-500 truncate">{profile.phone || order.customer_wa || 'Sin número'}</p>
+                </div>
+                <button onClick={() => setWebOrderDetail(null)} className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 shrink-0">
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="p-3 space-y-3">
+                <div className="flex items-center justify-between rounded-2xl bg-gray-50 px-3 py-2.5">
+                  <div>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Total del pedido</p>
+                    <p className="text-lg font-black text-brand leading-none mt-0.5">Bs {order.total}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">{items.length} prenda{items.length !== 1 ? 's' : ''}</p>
+                    <p className={cn(
+                      "text-[10px] font-black uppercase tracking-wider mt-1",
+                      isPaid ? "text-emerald-600" : needsManual ? "text-violet-600" : "text-amber-500"
+                    )}>
+                      {isPaid ? 'Verificado' : needsManual ? 'Revisión manual' : (order.status ?? 'pendiente')}
+                    </p>
+                  </div>
+                </div>
+
+                {needsManual && (
+                  <button
+                    onClick={(e) => verifyWebStoreOrder(order.id, e)}
+                    disabled={verifyingWebOrderId === order.id}
+                    className="w-full py-3 rounded-2xl bg-violet-600 text-white font-black uppercase tracking-widest text-[11px] disabled:opacity-50 active:scale-[0.98] shadow-md shadow-violet-200"
+                  >
+                    {verifyingWebOrderId === order.id ? 'Confirmando…' : 'Confirmar manualmente'}
+                  </button>
+                )}
+
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 px-1">Prendas del pedido</p>
+                  {items.length === 0 && (
+                    <p className="text-[11px] text-gray-400 px-1">Sin items registrados</p>
+                  )}
+                  {items.map((item: any, idx: number) => {
+                    const img = item?.image || item?.imageUrl || webProductImages[String(item?.productId ?? "")] || item?.productImage || "";
+                    return (
+                      <button
+                        key={`detail-item-${order.id}-${idx}`}
+                        onClick={() => setWebPreview({ profile, order, item, image: img })}
+                        className="w-full flex items-center gap-2 rounded-2xl bg-white border border-gray-100 px-2 py-2 text-left active:scale-[0.99]"
+                      >
+                        <div className="w-14 h-14 rounded-xl bg-gray-100 border border-gray-100 overflow-hidden flex-shrink-0">
+                          {img ? (
+                            <img src={img} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-300 text-[9px] font-black uppercase">Sin foto</div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-black text-gray-800 truncate">{item?.productName || item?.name || 'Producto tienda'}</p>
+                          <p className="text-[10px] text-gray-500 font-bold">
+                            {item?.quantity || 1} unid{(item?.quantity || 1) !== 1 ? 'ades' : 'ad'}
+                            {item?.size ? ` · Talla ${item.size}` : ''}
+                          </p>
+                        </div>
+                        {typeof item?.price === 'number' && (
+                          <span className="text-[11px] font-black text-brand shrink-0">Bs {item.price}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+          );
+        })()}
+
         {webPreview && (
           <div
-            className="fixed inset-0 z-[220] flex items-end sm:items-center justify-center p-3"
+            className="fixed inset-0 z-[240] flex items-end sm:items-center justify-center p-3"
             onClick={() => setWebPreview(null)}
           >
             <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />

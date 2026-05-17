@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -81,6 +82,43 @@ const phoneVariants = (...values: unknown[]) => {
 const publicStoreBaseUrl = (value?: string | null) => {
   const base = String(value || 'https://leidycandy.me').replace(/\s+/g, '').replace(/\/+$/, '');
   return base || 'https://leidycandy.me';
+};
+
+const normalizeMoney = (value: unknown) => {
+  const parsed = Number(String(value ?? '').replace(',', '.').replace(/[^\d.]/g, ''));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) / 100 : null;
+};
+
+const parseMacrodroidBankPayload = (payload: any) => {
+  const title = String(payload?.title ?? '');
+  const text = String(payload?.text ?? '');
+  const bigText = String(payload?.big_text ?? '');
+  const rawText = [title, text, bigText].filter(Boolean).join(' | ');
+  const amountMatch =
+    rawText.match(/(?:bs\.?|bob)\s*([0-9]+(?:[,.][0-9]{1,2})?)/i) ||
+    rawText.match(/([0-9]+(?:[,.][0-9]{1,2})?)\s*(?:bs\.?|bob)/i);
+  const amount = normalizeMoney(amountMatch?.[1]);
+
+  let senderName = '';
+  const nameMatch =
+    rawText.match(/^(.+?)\s+te\s+ha\s+enviado\b/i) ||
+    rawText.match(/^(.+?)\s+te\s+envio\b/i) ||
+    rawText.match(/^qr\s+de\s+(.+?)\s+te\s+/i);
+  if (nameMatch?.[1]) senderName = String(nameMatch[1]).trim();
+
+  const hashBase = [
+    payload?.raw_hash,
+    payload?.rawHash,
+    payload?.event_uuid,
+    payload?.captured_at_ms,
+    payload?.app_package,
+    title,
+    text,
+    bigText,
+  ].filter(Boolean).join('|');
+  const hash = crypto.createHash('sha256').update(hashBase || JSON.stringify(payload ?? {})).digest('hex');
+
+  return { amount, senderName, rawText, hash };
 };
 
 const isMissingDbObject = (error: any) => {
@@ -923,7 +961,7 @@ const PORT = Number(process.env.PORT || 3001);
 
       const [storeCustomers, storeOrders] = await Promise.all([
         safeSelect(supabaseStore, 'store_customers', 'id,whatsapp,display_name,total_orders,total_spent,created_at', (q) => q.order('created_at', { ascending: false }).limit(300)),
-        safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,items,payment_verified_at,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
+        safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,items,payment_verified_at,wa_proof_received,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
       ]);
 
       const productImageMap = new Map<string, string>();
@@ -2540,6 +2578,56 @@ const PORT = Number(process.env.PORT || 3001);
       .in('status', ['pending', 'cancelled']);
   }
 
+  async function captureStoreBankInbox(payload: any, paymentTime: Date) {
+    const parsed = parseMacrodroidBankPayload(payload);
+    if (!parsed.amount) return { captured: false, reason: 'missing_amount' };
+
+    const windowStart = new Date(paymentTime.getTime() - 35 * 60 * 1000).toISOString();
+    const windowEnd = new Date(paymentTime.getTime() + 5 * 60 * 1000).toISOString();
+    const { data: candidates, error: candidateError } = await supabaseStore
+      .from('store_orders')
+      .select('id,total,customer_wa,status,created_at')
+      .in('status', ['pending', 'cancelled'])
+      .eq('total', parsed.amount)
+      .gte('created_at', windowStart)
+      .lte('created_at', windowEnd)
+      .order('created_at', { ascending: false });
+
+    if (candidateError) {
+      console.warn('[store-bank-inbox] no se pudo buscar pedidos tienda:', candidateError.message);
+      return { captured: false, reason: 'candidate_error' };
+    }
+    if (!candidates?.length) return { captured: false, reason: 'no_store_candidate' };
+
+    const hash = `store-bank:${parsed.hash}`;
+    const { data: existing } = await supabaseStore
+      .from('payment_events')
+      .select('id')
+      .eq('hash', hash)
+      .maybeSingle();
+    if (existing) return { captured: true, duplicate: true, candidateCount: candidates.length };
+
+    const { error: insertError } = await supabaseStore.from('payment_events').insert({
+      source: 'macrodroid_bank_pending',
+      raw_text: parsed.rawText,
+      amount: parsed.amount,
+      sender_name: parsed.senderName,
+      sender_wa: '',
+      processed: false,
+      match_confidence: candidates.length === 1 ? 'pending_single_candidate' : 'pending_multiple_candidates',
+      hash,
+      matched_order_id: null,
+    } as any);
+
+    if (insertError) {
+      console.warn('[store-bank-inbox] no se pudo guardar pago tienda:', insertError.message);
+      return { captured: false, reason: 'insert_error' };
+    }
+
+    console.log(`[store-bank-inbox] pago guardado pendiente en tienda: ${parsed.amount} Bs, candidatos=${candidates.length}`);
+    return { captured: true, candidateCount: candidates.length };
+  }
+
   /**
    * Marca un pedido como pagado, oculta los productos vendidos,
    * y UNIFICA la identidad para inyectar el pedido a la pantalla de conteo (etiquetas).
@@ -2626,7 +2714,6 @@ const PORT = Number(process.env.PORT || 3001);
       }
 
       const waNumber = String(data.customer_wa || '').trim();
-      let globalCustomerId: number | null = null;
 
       if (waNumber && finalName) {
         const { data: updatedStoreCustomers, error: storeCustomerNameErr } = await supabaseStore
@@ -2651,165 +2738,64 @@ const PORT = Number(process.env.PORT || 3001);
       console.log(`[store-match] waNumber: ${waNumber}`);
       console.log(`[store-match] finalName: ${finalName || '(vacío)'}`);
 
-      if (waNumber) {
-        // Buscar si el cliente ya existe en el sistema físico (por teléfono, sin filtro de user_id)
-        const { data: existingCustomer } = await supabaseServer
-          .from('customers')
-          .select('id, full_name, phone')
-          .or(`phone.eq.${waNumber},canonical_name.eq.${String(finalName || '').toUpperCase().trim()}`)
+      // Registrar el pago en TiendaOnline (tabla pagos_tienda). La tienda
+      // queda 100% separada del sistema principal: ya no se crea cliente en
+      // ChehiAppAbril.customers ni pedido WEB-xxx en ChehiAppAbril.pedidos.
+      // Los pedidos web viven en TiendaOnline y se ven en la pestaña Pagos Web.
+      try {
+        const storeCustomerIdRef = data.customer_id ?? null;
+
+        const { data: existingStorePago, error: existingStorePagoErr } = await supabaseStore
+          .from('pagos_tienda')
+          .select('id')
+          .eq('store_order_id', orderId)
           .maybeSingle();
 
-        console.log(`[store-match] existingCustomer: ${existingCustomer ? `ID ${existingCustomer.id}` : 'null'}`);
+        if (existingStorePagoErr && existingStorePagoErr.code !== 'PGRST116') {
+          console.error(`[store-pago] ERROR buscando pago de tienda: ${existingStorePagoErr.message}`);
+        }
 
-        if (existingCustomer) {
-          globalCustomerId = existingCustomer.id;
-          console.log(`[store-match] Cliente existente encontrado, globalCustomerId: ${globalCustomerId}`);
-          // Actualizar nombre si antes no tenía o era muy corto, y ahora el banco nos dio uno real
-          const currentName = String(existingCustomer.full_name || '').trim();
-          await supabaseServer.from('customers').update({ user_id: ownerUserId, phone: existingCustomer.phone || waNumber } as any).eq('id', globalCustomerId);
-          if (finalName && (!currentName || currentName.toLowerCase().startsWith('cliente tienda'))) {
-            await supabaseServer.from('customers').update({
-              full_name: finalName,
-              normalized_name: finalName.toLowerCase().trim(),
-              canonical_name: finalName.toUpperCase().trim(),
-            } as any).eq('id', globalCustomerId);
-            console.log(`[store-match] Nombre actualizado para cliente ${globalCustomerId}`);
+        if (!existingStorePago) {
+          const pagoTiendaPayload: any = {
+            store_order_id: orderId,
+            store_customer_id: storeCustomerIdRef,
+            customer_name: finalName || data.customer_name || 'Cliente Tienda',
+            customer_wa: data.customer_wa ?? null,
+            amount: data.total,
+            method: 'Tienda Online',
+            status: 'completed',
+            payment_date: now,
+            owner_user_id: ownerUserId,
+          };
+
+          if (linkedPago?.id) {
+            pagoTiendaPayload.bank_sender_name = linkedPago.nombre ?? null;
+            console.log(`[store-pago] Pago bancario #${linkedPago.id} se traslada a TiendaOnline`);
+            const { error: deletePagoErr } = await supabaseServer
+              .from('pagos')
+              .delete()
+              .eq('id', linkedPago.id);
+            if (deletePagoErr) {
+              console.error(`[store-pago] ERROR borrando pago bancario #${linkedPago.id}: ${deletePagoErr.message}`);
+            }
+          }
+
+          const { data: newPagoTienda, error: pagoTiendaErr } = await supabaseStore
+            .from('pagos_tienda')
+            .insert(pagoTiendaPayload)
+            .select('id')
+            .single();
+
+          if (pagoTiendaErr) {
+            console.error(`[store-pago] ERROR al crear pago_tienda: ${pagoTiendaErr.message}`);
+          } else {
+            console.log(`[store-pago] 💰 Pago de tienda creado en TiendaOnline, ID: ${newPagoTienda?.id}`);
           }
         } else {
-          // Crear perfil unificado global con el user_id del operador
-          const name = finalName || data.customer_name || 'Cliente Tienda Web';
-          console.log(`[store-match] Creando nuevo cliente con name: ${name}, user_id: ${ownerUserId}`);
-          const { data: newCust, error: custErr } = await supabaseServer.from('customers').insert({
-            phone: waNumber,
-            full_name: name,
-            normalized_name: name.toLowerCase().trim(),
-            canonical_name: name.toUpperCase().trim(),
-            user_id: ownerUserId,
-          } as any).select('id').maybeSingle();
-
-          if (custErr) {
-            console.error(`[store-match] Error al crear cliente (phone=${waNumber}): ${custErr.message}`);
-            // Puede que ya exista por carrera o unique constraint — reintentar búsqueda
-            const { data: retryCustomer } = await supabaseServer
-              .from('customers')
-              .select('id, phone')
-              .or(`phone.eq.${waNumber},canonical_name.eq.${name.toUpperCase().trim()}`)
-              .maybeSingle();
-            if (retryCustomer) {
-              globalCustomerId = retryCustomer.id;
-              console.log(`[store-match] Cliente encontrado en reintento: #${globalCustomerId}`);
-              if (!retryCustomer.phone && waNumber) {
-                await supabaseServer
-                  .from('customers')
-                  .update({ phone: waNumber, user_id: ownerUserId } as any)
-                  .eq('id', globalCustomerId);
-              }
-            }
-          } else {
-            globalCustomerId = newCust?.id ?? null;
-            console.log(`[store-match] Cliente creado, globalCustomerId: ${globalCustomerId}`);
-          }
+          console.log(`[store-pago] ⏭️ Pago de tienda ya existe para pedido #${orderId}, omitido`);
         }
-      } else {
-        console.log(`[store-match] waNumber es null/undefined, saltando creación de cliente`);
-      }
-
-      if (!globalCustomerId) {
-        console.warn(`[store-match] Sin customer_id para pedido #${orderId} (phone="${waNumber}") — no se inyecta`);
-      }
-
-      // Inyectar el pedido en la cola física
-      if (globalCustomerId) {
-        const itemsList = data.items ?? [];
-        console.log(`[store-match] Inyectando pedido en sistema principal, customer_id: ${globalCustomerId}`);
-        await supabaseServer
-          .from('pedidos')
-          .delete()
-          .eq('label', `WEB-${orderId}`);
-        const { data: newPedido, error: pedidoErr } = await supabaseServer.from('pedidos').insert({
-          customer_id: globalCustomerId,
-          customer_name: finalName || 'Cliente Tienda',
-          status: 'procesar',  // Va directo a la Mesa de Preparación
-          total_amount: data.total,
-          date: now,
-          item_count: itemsList.reduce((acc: number, item: any) => acc + (item.quantity || 1), 0),
-          bag_count: 1, // Por defecto todo en 1 bolsa
-          label: `WEB-${orderId}`,
-          label_type: 'WEB', // Señal clave
-          source: 'WEB',     // Campo nuevo (024_add_web_fields)
-          web_items_list: itemsList, // Campo nuevo
-          user_id: ownerUserId,
-        } as any).select('id').single();
-        
-        if (pedidoErr) {
-          console.error(`[store-match] ERROR al inyectar pedido: ${pedidoErr.message}`);
-          throw new Error(`No se pudo inyectar pedido: ${pedidoErr.message}`);
-        }
-        console.log(`[store-match] Pedido inyectado, ID: ${newPedido?.id}`);
-
-        // 3. Registrar el pago en TiendaOnline (tabla pagos_tienda).
-        //    La tienda queda separada del sistema principal: ya NO se insertan
-        //    pagos en ChehiAppAbril.pagos con method='Tienda Online'.
-        //    Si hay match con notificación bancaria, su info se guarda como
-        //    metadatos del pago de tienda y se borra el registro bancario que
-        //    haya quedado en ChehiAppAbril para no contaminar el sistema principal.
-        try {
-          const storeCustomerIdRef = data.customer_id ?? null;
-
-          const { data: existingStorePago, error: existingStorePagoErr } = await supabaseStore
-            .from('pagos_tienda')
-            .select('id')
-            .eq('store_order_id', orderId)
-            .maybeSingle();
-
-          if (existingStorePagoErr && existingStorePagoErr.code !== 'PGRST116') {
-            console.error(`[store-pago] ERROR buscando pago de tienda: ${existingStorePagoErr.message}`);
-          }
-
-          if (!existingStorePago) {
-            const pagoTiendaPayload: any = {
-              store_order_id: orderId,
-              store_customer_id: storeCustomerIdRef,
-              customer_name: finalName || data.customer_name || 'Cliente Tienda',
-              customer_wa: data.customer_wa ?? null,
-              amount: data.total,
-              method: 'Tienda Online',
-              status: 'completed',
-              payment_date: now,
-              owner_user_id: ownerUserId,
-            };
-
-            if (linkedPago?.id) {
-              pagoTiendaPayload.bank_sender_name = linkedPago.nombre ?? null;
-              console.log(`[store-pago] Pago bancario #${linkedPago.id} se traslada a TiendaOnline`);
-              const { error: deletePagoErr } = await supabaseServer
-                .from('pagos')
-                .delete()
-                .eq('id', linkedPago.id);
-              if (deletePagoErr) {
-                console.error(`[store-pago] ERROR borrando pago bancario #${linkedPago.id}: ${deletePagoErr.message}`);
-              }
-            }
-
-            const { data: newPagoTienda, error: pagoTiendaErr } = await supabaseStore
-              .from('pagos_tienda')
-              .insert(pagoTiendaPayload)
-              .select('id')
-              .single();
-
-            if (pagoTiendaErr) {
-              console.error(`[store-pago] ERROR al crear pago_tienda: ${pagoTiendaErr.message}`);
-            } else {
-              console.log(`[store-pago] 💰 Pago de tienda creado en TiendaOnline, ID: ${newPagoTienda?.id}`);
-            }
-          } else {
-            console.log(`[store-pago] ⏭️ Pago de tienda ya existe para pedido #${orderId}, omitido`);
-          }
-        } catch (pagoErr) {
-          console.error('[store-pago] Error al crear pago en TiendaOnline:', pagoErr);
-        }
-      } else {
-        console.log(`[store-match] globalCustomerId es null, saltando inyección de pedido y pago`);
+      } catch (pagoErr) {
+        console.error('[store-pago] Error al crear pago en TiendaOnline:', pagoErr);
       }
 
     } catch (e) {
@@ -3265,12 +3251,53 @@ Responde solo JSON:
         }
 
         // Si ya había notificación bancaria → verificar con cuadrangulación completa
-        const { data: bankEvent } = await supabaseStore
+        let { data: bankEvent } = await supabaseStore
           .from('payment_events')
           .select('id')
           .eq('matched_order_id', result.order.id)
           .eq('processed', true)
           .maybeSingle();
+
+        const { data: pendingBankEvents } = await supabaseStore
+          .from('payment_events')
+          .select('id,sender_name,amount')
+          .eq('amount', orderTotal)
+          .eq('processed', false)
+          .is('matched_order_id', null)
+          .in('source', ['macrodroid_bank_pending', 'macrodroid'])
+          .order('id', { ascending: false })
+          .limit(10);
+
+        if (!bankEvent && pendingBankEvents?.length) {
+          const receiptNameForBank = cleanName(receipt?.cliente ?? '');
+          const byName = receiptNameForBank
+            ? pendingBankEvents.filter((event: any) => {
+                const bankName = cleanName(event.sender_name ?? '');
+                return bankName && (bankName === receiptNameForBank || bankName.includes(receiptNameForBank) || receiptNameForBank.includes(bankName));
+              })
+            : [];
+          const selectedBankEvent = byName.length === 1
+            ? byName[0]
+            : pendingBankEvents.length === 1
+              ? pendingBankEvents[0]
+              : null;
+
+          if (selectedBankEvent) {
+            const { data: updatedBankEvent } = await supabaseStore
+              .from('payment_events')
+              .update({
+                processed: true,
+                match_confidence: 'maxima',
+                matched_order_id: result.order.id,
+              } as any)
+              .eq('id', selectedBankEvent.id)
+              .select('id')
+              .maybeSingle();
+            bankEvent = updatedBankEvent ?? { id: selectedBankEvent.id };
+          } else {
+            console.warn(`[store-wa] ${pendingBankEvents.length} pagos bancarios pendientes de ${orderTotal} Bs; no se confirma sin nombre unico`);
+          }
+        }
 
         let mainBankPago: any = null;
         const orderCreatedAt = result.order.created_at
@@ -3319,7 +3346,9 @@ Responde solo JSON:
           }
           const linkedPagoForConfirm = mainBankPago
             ? { ...mainBankPago, nombre: receipt?.cliente || mainBankPago.nombre }
-            : null;
+            : receipt?.cliente
+              ? { nombre: receipt.cliente, pago: orderTotal }
+              : null;
           await confirmStoreOrder(result.order.id, `wa+bank:${fromWa}:maxima`, linkedPagoForConfirm);
         } else {
           // WA llegó primero que el banco → marcar como esperando banco
@@ -3815,6 +3844,14 @@ Responde solo JSON:
 
       const capturedAtMs = req.body?.captured_at_ms ? Number(req.body.captured_at_ms) : null;
       const paymentTime = capturedAtMs && Number.isFinite(capturedAtMs) ? new Date(capturedAtMs) : new Date();
+
+      // TiendaOnline tiene su propia bandeja bancaria. Guardar una copia
+      // pendiente antes del portero Live evita perder pagos web cuando Live esta apagado.
+      try {
+        await captureStoreBankInbox(req.body, paymentTime);
+      } catch (storeInboxErr: any) {
+        console.warn('[store-bank-inbox] error no bloqueante:', storeInboxErr?.message ?? storeInboxErr);
+      }
 
       const allowed = (sessions ?? []).some((s: any) => {
         if (s.status === 'live') return true; // Live activo siempre acepta
