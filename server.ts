@@ -2812,6 +2812,47 @@ const PORT = Number(process.env.PORT || 3001);
       console.error('[store-match] Error en fusión logística:', e);
     }
 
+    // 3. Limpiar pedido fantasma en ChehiAppAbril si el pago vino por el sistema Live.
+    //    Cuando Live está encendido y alguien compra en la tienda, el Edge Function puede crear
+    //    un pedido source='macrodroid' sin etiqueta ni items en el sistema principal.
+    //    Se borra SOLO si cumple todas las condiciones — para no tocar pedidos Live reales.
+    try {
+      const ghostWindowStart = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+      const nameToMatch = (finalName || data.customer_name || '').trim().toUpperCase();
+
+      if (nameToMatch && data.total) {
+        const { data: ghosts } = await supabaseServer
+          .from('pedidos')
+          .select('id, customer_name, total_amount')
+          .eq('source', 'macrodroid')
+          .eq('total_amount', data.total)
+          .eq('label', '')
+          .eq('label_type', '')
+          .eq('item_count', 0)
+          .is('web_items_list', null)
+          .eq('status', 'procesar')
+          .gte('created_at', ghostWindowStart);
+
+        const realGhosts = (ghosts ?? []).filter((p: any) =>
+          String(p.customer_name ?? '').trim().toUpperCase() === nameToMatch
+        );
+
+        for (const ghost of realGhosts) {
+          const { error: delErr } = await supabaseServer
+            .from('pedidos')
+            .delete()
+            .eq('id', ghost.id);
+          if (delErr) {
+            console.warn(`[store-ghost] No se pudo borrar pedido fantasma #${ghost.id}: ${delErr.message}`);
+          } else {
+            console.log(`[store-ghost] 🧹 Pedido fantasma #${ghost.id} eliminado (${ghost.customer_name}, ${ghost.total_amount} Bs)`);
+          }
+        }
+      }
+    } catch (ghostErr: any) {
+      console.warn('[store-ghost] Error limpiando pedido fantasma:', ghostErr?.message ?? ghostErr);
+    }
+
     // 4. Encolar el ÚNICO mensaje de WhatsApp para la clienta de tienda.
     //    Va al final para poder usar el nombre real (del banco si lo extrajimos).
     //    El operador NO disparará otro mensaje cuando toque "PEDIDO LISTO":
