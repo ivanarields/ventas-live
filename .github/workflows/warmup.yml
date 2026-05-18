@@ -1,0 +1,23 @@
+name: Keep Vercel warm
+
+on:
+  schedule:
+    # Cada 5 minutos — mantiene la función serverless caliente
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # también se puede disparar manualmente
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping tienda (evita cold start)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://leidycandy.me/api/products?limit=1")
+          echo "Estado HTTP: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "✓ Servidor caliente"
+          else
+            echo "⚠ Respuesta inesperada: $STATUS"
+            exit 1
+          fi
