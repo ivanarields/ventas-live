@@ -991,6 +991,32 @@ Rutas en: `server.ts` (antes del catch-all de index.html)
 
 ---
 
+## Rendimiento del servidor
+
+### Caché en memoria (server-side)
+
+Dos endpoints de solo lectura tienen caché en memoria con TTL de 5 minutos. Se invalidan automáticamente cuando el operador guarda cambios (PATCH).
+
+| Endpoint | Archivo | TTL | Se invalida en |
+|---|---|---|---|
+| `GET /api/store/settings` | `src/routes/store-settings.ts` | 5 min | `PATCH /api/store/settings` |
+| `GET /api/store/pickup-dates` | `server.ts` | 5 min | `PATCH /api/store/pickup-dates` |
+
+El caché es por instancia del servidor. En Vercel serverless, instancias distintas no comparten caché, pero dentro de una instancia caliente el beneficio es real.
+
+### Carga del perfil paralela
+
+`StoreProfile.tsx` usa `Promise.all` para correr las 4 llamadas de `loadProfile` en paralelo en vez de secuencial:
+
+```
+Antes (secuencial):   getStoreSettings → syncLocal → /me → /pickup-dates = ~1.8s
+Después (paralelo):   Promise.all([settings, syncLocal, /me, /pickup-dates]) = ~0.9s
+```
+
+Las 4 son independientes entre sí, por lo que el tiempo total es el de la más lenta, no la suma de todas.
+
+---
+
 ## Estado actual (2026-05-18)
 
 ### Funcionando correctamente

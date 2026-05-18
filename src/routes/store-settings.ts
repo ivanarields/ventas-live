@@ -4,6 +4,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
   const router = Router();
 
+  // Caché en memoria para settings (rara vez cambia, se invalida al hacer PATCH)
+  let settingsCache: { payload: Record<string, string>; ts: number } | null = null;
+  const SETTINGS_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
   const DEFAULT_SETTINGS: Record<string, string> = {
     store_name: 'Leidy Shop',
     store_phone: '59160003230',
@@ -117,6 +121,11 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
 
   // GET /api/store/settings
   router.get('/settings', async (_req: Request, res: Response) => {
+    const now = Date.now();
+    if (settingsCache && now - settingsCache.ts < SETTINGS_TTL_MS) {
+      res.setHeader('Cache-Control', 'public, max-age=30, s-maxage=120, stale-while-revalidate=300');
+      return res.json(settingsCache.payload);
+    }
     try {
       const { data, error } = await supabaseStore
         .from('store_settings')
@@ -129,6 +138,7 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
       for (const row of data || []) {
         settings[row.setting_key] = row.setting_value || '';
       }
+      settingsCache = { payload: settings, ts: now };
       res.setHeader('Cache-Control', 'public, max-age=30, s-maxage=120, stale-while-revalidate=300');
       res.json(settings);
     } catch (err: any) {
@@ -149,6 +159,7 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
           .from('store_settings')
           .upsert({ setting_key: key, setting_value: String(value) }, { onConflict: 'setting_key' });
       }
+      settingsCache = null; // invalidar caché
       res.json({ ok: true });
     } catch (err: any) {
       if (isMissingTable(err)) {

@@ -70,20 +70,24 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
   const loadProfile = async (token: string) => {
     setLoading(true);
     try {
-      try {
-        const phoneData = await getStoreSettings();
-        const num = String(phoneData?.official_wa_number || phoneData?.store_phone || '').replace(/\D/g, '');
-        if (num) setStorePhone(num);
-      } catch { /* no crítico */ }
-      await storeFavoritesApi.syncLocal();
-      const res = await fetch('/api/store-auth/me', { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const data = await res.json();
+      // Todas las llamadas son independientes → corren en paralelo (~0.9s vs ~1.8s secuencial)
+      const [phoneData, , meRes, pdRes] = await Promise.all([
+        getStoreSettings().catch(() => null),
+        storeFavoritesApi.syncLocal(),
+        fetch('/api/store-auth/me', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/store/pickup-dates'),
+      ]);
+
+      const num = String((phoneData as any)?.official_wa_number || (phoneData as any)?.store_phone || '').replace(/\D/g, '');
+      if (num) setStorePhone(num);
+
+      if (meRes.ok) {
+        const data = await meRes.json();
         setOrders(data.orders ?? []);
         setFavorites(data.favorites ?? []);
         storeFavoritesApi.saveLocal(Object.fromEntries((data.favorites ?? []).map((p: Product) => [String(p.id), p])));
       }
-      const pdRes = await fetch('/api/store/pickup-dates');
+
       if (pdRes.ok) {
         const pdData = await pdRes.json();
         setPickupDates(pdData.dates ?? []);

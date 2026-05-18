@@ -3511,8 +3511,16 @@ Responde solo JSON:
     return res.json({ ok: true });
   });
 
+  // Caché en memoria para pickup-dates (se invalida al hacer PATCH)
+  let pickupDatesCache: { payload: { dates: any[] }; ts: number } | null = null;
+  const PICKUP_DATES_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
   // Leer fechas de retiro disponibles (público)
   app.get('/api/store/pickup-dates', async (_req, res) => {
+    const now = Date.now();
+    if (pickupDatesCache && now - pickupDatesCache.ts < PICKUP_DATES_TTL_MS) {
+      return res.json(pickupDatesCache.payload);
+    }
     try {
       const { data } = await supabaseStore
         .from('store_settings')
@@ -3521,6 +3529,7 @@ Responde solo JSON:
         .maybeSingle();
       const raw = data?.setting_value;
       const dates = raw ? JSON.parse(raw) : [];
+      pickupDatesCache = { payload: { dates }, ts: now };
       return res.json({ dates });
     } catch {
       return res.json({ dates: [] });
@@ -3536,6 +3545,7 @@ Responde solo JSON:
         .from('store_settings')
         .upsert({ setting_key: 'pickup_dates', setting_value: JSON.stringify(dates) }, { onConflict: 'setting_key' });
       if (error) throw error;
+      pickupDatesCache = null; // invalidar caché
       return res.json({ ok: true });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
