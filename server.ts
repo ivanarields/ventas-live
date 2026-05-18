@@ -1938,9 +1938,7 @@ const PORT = Number(process.env.PORT || 3001);
         .single();
       if (error) throw error;
 
-      res.status(201).json(data);
-
-      // Publicar en Buffer después de responder (Vercel: await garantiza que no se corte)
+      // Publicar en Buffer antes de responder (Vercel corta el proceso al enviar la respuesta)
       if (data) {
         try {
           const results = await publishProductToBuffer(data);
@@ -1949,6 +1947,8 @@ const PORT = Number(process.env.PORT || 3001);
           console.warn("[buffer] Error en publicación:", err?.message);
         }
       }
+
+      res.status(201).json(data);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
