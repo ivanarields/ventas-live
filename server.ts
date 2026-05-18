@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { supabaseServer } from "./src/lib/supabaseServer.js";
 import { supabaseStore } from "./src/lib/supabaseStore.js";
 import { supabasePanel } from "./src/lib/supabasePanel.js";
+import { publishProductToBuffer, savePublicationResults } from "./src/services/bufferService.js";
 import { createAiRouter } from "./src/routes/ai-gateway.js";
 import { createIdentityRouter } from "./src/routes/identity.js";
 import { createLiveSalesRouter } from "./src/routes/live-sales.js";
@@ -1936,6 +1937,14 @@ const PORT = Number(process.env.PORT || 3001);
         .select()
         .single();
       if (error) throw error;
+
+      // Publicar en Buffer (TikTok, Facebook, Instagram) — no bloquea la respuesta
+      if (data) {
+        publishProductToBuffer(data).then((results) =>
+          savePublicationResults(supabaseStore, data.id, results)
+        ).catch((err) => console.warn("[buffer] Error en publicación:", err?.message));
+      }
+
       res.status(201).json(data);
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
