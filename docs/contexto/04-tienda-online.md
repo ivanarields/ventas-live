@@ -983,8 +983,8 @@ Para casos donde el operador o la IA no está segura de qué prendas le correspo
 
 No aparecen en el menú de la tienda. Solo accesibles por link directo. Requeridas para TikTok Developer.
 
-- `https://leidycandy.me/terminos` — Términos de Servicio
-- `https://leidycandy.me/privacidad` — Política de Privacidad
+- `https://leidycandy.me/tienda/terminos` — Términos de Servicio
+- `https://leidycandy.me/tienda/privacidad` — Política de Privacidad
 
 Archivos: `public/terminos.html`, `public/privacidad.html`
 Rutas en: `server.ts` (antes del catch-all de index.html)
