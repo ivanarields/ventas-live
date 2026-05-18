@@ -1938,14 +1938,17 @@ const PORT = Number(process.env.PORT || 3001);
         .single();
       if (error) throw error;
 
-      // Publicar en Buffer (TikTok, Facebook, Instagram) — no bloquea la respuesta
-      if (data) {
-        publishProductToBuffer(data).then((results) =>
-          savePublicationResults(supabaseStore, data.id, results)
-        ).catch((err) => console.warn("[buffer] Error en publicación:", err?.message));
-      }
-
       res.status(201).json(data);
+
+      // Publicar en Buffer después de responder (Vercel: await garantiza que no se corte)
+      if (data) {
+        try {
+          const results = await publishProductToBuffer(data);
+          await savePublicationResults(supabaseStore, data.id, results);
+        } catch (err: any) {
+          console.warn("[buffer] Error en publicación:", err?.message);
+        }
+      }
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }

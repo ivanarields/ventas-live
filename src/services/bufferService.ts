@@ -73,8 +73,8 @@ async function publishToChannel(
         text: $text
         assets: $assets
         metadata: $metadata
-        schedulingType: AUTOMATIC_PUBLISH
-        mode: SHARE_NOW
+        schedulingType: Now
+        mode: shareNow
       }) {
         ... on PostActionSuccess {
           post { id text }
