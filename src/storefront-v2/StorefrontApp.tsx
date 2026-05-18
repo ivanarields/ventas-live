@@ -224,8 +224,8 @@ export default function StorefrontApp() {
   };
 
   return (
-    <div className={`store-shell ${darkMode ? 'store-dark' : ''} bg-[#fdf5f7] min-h-screen font-sans sm:py-8`}>
-      <div className="max-w-[430px] mx-auto bg-white min-h-screen sm:min-h-[850px] shadow-2xl relative overflow-x-hidden sm:rounded-[40px]">
+    <div className={`store-shell ${darkMode ? 'store-dark' : ''} min-h-screen font-sans sm:py-8`} style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
+      <div className="max-w-[430px] mx-auto min-h-screen sm:min-h-[850px] shadow-2xl relative overflow-x-hidden sm:rounded-[40px]" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
 
         {view === 'welcome' && (
           <WelcomeScreen 
@@ -292,6 +292,7 @@ export default function StorefrontApp() {
                 onProductSelect={handleProductSelect}
                 onOpenCart={() => setView('cart')}
                 initialTab={profileInitialTab as any}
+                darkMode={darkMode}
               />
             )}
             {view === 'live-confirmation' && (

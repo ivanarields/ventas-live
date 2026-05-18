@@ -1,6 +1,6 @@
 # 04 — Tienda Online
 
-Actualizado: 2026-05-18 (Panel de Tienda rediseñado + Rediseño visual catálogo y perfil clienta)
+Actualizado: 2026-05-18 (Performance: lazy loading perfil, /me paralelo, singleton auth, dark mode completo)
 
 ---
 

@@ -24,6 +24,7 @@ interface Props {
   onProductSelect?: (product: Product) => void;
   onOpenCart?: () => void;
   initialTab?: Tab;
+  darkMode?: boolean;
 }
 
 type Tab = 'saved' | 'orders' | 'entrega' | 'confirmar' | 'settings';
@@ -36,15 +37,23 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 };
 
-export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, initialTab }: Props) {
+export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, initialTab, darkMode }: Props) {
   const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
+  // Pedidos: inicializamos vacío pero con caché de localStorage para mostrar inmediato
   const [orders, setOrders] = useState<StoreOrder[]>([]);
-  const [favorites, setFavorites] = useState<Product[]>([]);
+  // Favoritos: inicializamos desde caché local para que el contador aparezca al instante
+  const [favorites, setFavorites] = useState<Product[]>(() => {
+    try { return Object.values(storeFavoritesApi.readLocal()); } catch { return []; }
+  });
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+  const [loadingFavorites, setLoadingFavorites] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>(initialTab ?? 'orders');
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
   const [pickupDates, setPickupDates] = useState<Array<{ date: string; label: string; slots: string[] }>>([]);
+  const [pickupDatesLoaded, setPickupDatesLoaded] = useState(false);
+  const [loadingPickupDates, setLoadingPickupDates] = useState(false);
   const [selectedPickup, setSelectedPickup] = useState<{ date: string; slot: string } | null>(null);
   const [wantsOtherDate, setWantsOtherDate] = useState(false);
   const [customDate, setCustomDate] = useState('');
@@ -60,22 +69,62 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
     const session = storeAuth.getCurrentUserSync();
     if (!session) { setLoading(false); return; }
     setUser({ phone: session.phone, name: session.name ?? '' });
-    loadProfile(session.token);
+    loadProfile(session.token, session.phone);
   }, []);
 
   useEffect(() => {
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
 
-  const loadProfile = async (token: string) => {
-    setLoading(true);
+  // Carga lazy de favoritos — solo cuando la clienta abre esa pestaña
+  useEffect(() => {
+    if (tab !== 'saved' || favoritesLoaded || loadingFavorites) return;
+    const session = storeAuth.getCurrentUserSync();
+    if (!session) return;
+    setLoadingFavorites(true);
+    fetch('/api/store-favorites', { headers: { Authorization: `Bearer ${session.token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.products) {
+          setFavorites(data.products);
+          storeFavoritesApi.saveLocal(Object.fromEntries(data.products.map((p: Product) => [String(p.id), p])));
+        }
+        setFavoritesLoaded(true);
+      })
+      .catch(() => setFavoritesLoaded(true))
+      .finally(() => setLoadingFavorites(false));
+  }, [tab, favoritesLoaded, loadingFavorites]);
+
+  // Carga lazy de fechas de entrega — solo cuando la clienta abre esa pestaña
+  useEffect(() => {
+    if (tab !== 'entrega' || pickupDatesLoaded || loadingPickupDates) return;
+    setLoadingPickupDates(true);
+    fetch('/api/store/pickup-dates')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.dates) setPickupDates(data.dates);
+        setPickupDatesLoaded(true);
+      })
+      .catch(() => setPickupDatesLoaded(true))
+      .finally(() => setLoadingPickupDates(false));
+  }, [tab, pickupDatesLoaded, loadingPickupDates]);
+
+  // Solo carga pedidos y teléfono de la tienda — lo mínimo para mostrar la pantalla inicial
+  const loadProfile = async (token: string, phone: string) => {
+    // Mostrar caché de pedidos inmediatamente (sin spinner si ya hay datos)
+    const cacheKey = `tienda.orders.${phone}`;
     try {
-      // Todas las llamadas son independientes → corren en paralelo (~0.9s vs ~1.8s secuencial)
-      const [phoneData, , meRes, pdRes] = await Promise.all([
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        setOrders(JSON.parse(cached));
+        setLoading(false); // ya hay datos → no bloqueamos con spinner
+      }
+    } catch {}
+
+    try {
+      const [phoneData, meRes] = await Promise.all([
         getStoreSettings().catch(() => null),
-        storeFavoritesApi.syncLocal(),
         fetch('/api/store-auth/me', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/store/pickup-dates'),
       ]);
 
       const num = String((phoneData as any)?.official_wa_number || (phoneData as any)?.store_phone || '').replace(/\D/g, '');
@@ -84,13 +133,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
       if (meRes.ok) {
         const data = await meRes.json();
         setOrders(data.orders ?? []);
-        setFavorites(data.favorites ?? []);
-        storeFavoritesApi.saveLocal(Object.fromEntries((data.favorites ?? []).map((p: Product) => [String(p.id), p])));
-      }
-
-      if (pdRes.ok) {
-        const pdData = await pdRes.json();
-        setPickupDates(pdData.dates ?? []);
+        try { localStorage.setItem(cacheKey, JSON.stringify(data.orders ?? [])); } catch {}
       }
     } finally {
       setLoading(false);
@@ -140,7 +183,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
       if (!loginRes.ok || !loginData.session?.access_token) throw new Error(loginData.error || 'No se pudo ingresar.');
       storeAuth.saveSession(loginData.session.access_token, { id: loginData.user.id, phone: cleanPhone, name: '' }, loginData.session);
       setUser({ phone: cleanPhone, name: '' });
-      await loadProfile(loginData.session.access_token);
+      await loadProfile(loginData.session.access_token, cleanPhone);
     } catch (err: any) {
       setAuthError(err?.message || 'Error al ingresar.');
       setLoading(false);
@@ -181,7 +224,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
       });
       if (!res.ok) throw new Error('No se pudo confirmar el pedido.');
       setConfirmDone(true);
-      await loadProfile(session.token);
+      await loadProfile(session.token, session.phone);
     } catch (err: any) {
       setAuthError(err?.message || 'No se pudo confirmar el pedido.');
     } finally {
@@ -206,29 +249,75 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
 
   if (!user) {
     return (
-      <div className="flex flex-col min-h-screen bg-gradient-to-b from-[#ffe6ef] via-[#fffbfd] to-white">
+      <div className="flex flex-col min-h-screen" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
         <header className="px-5 py-4 flex items-center gap-3">
-          <button onClick={onBack} className="w-10 h-10 rounded-full bg-white/70 flex items-center justify-center shadow-sm" aria-label="Volver">
+          <button
+            onClick={onBack}
+            className="w-10 h-10 rounded-full flex items-center justify-center shadow-sm"
+            style={{ background: darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.70)' }}
+            aria-label="Volver"
+          >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
           </button>
           <div>
-            <h1 className="text-[18px] font-black text-gray-800">Mi perfil</h1>
-            <p className="text-[11px] text-gray-400 font-bold">WhatsApp y PIN para entrar</p>
+            <h1 className="text-[18px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Mi perfil</h1>
+            <p className="text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>WhatsApp y PIN para entrar</p>
           </div>
         </header>
         <main className="flex-1 px-5 pt-8">
-          <div className="rounded-[28px] bg-white/82 border border-white/70 shadow-sm p-5 space-y-4">
+          <div
+            className="rounded-[28px] shadow-sm p-5 space-y-4 border"
+            style={{
+              background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.75)',
+              borderColor: darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.70)',
+            }}
+          >
             <div>
-              <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider">WhatsApp</label>
-              <div className="mt-2 flex items-center border border-gray-200 rounded-2xl overflow-hidden bg-white">
-                <span className="px-3 py-3.5 text-[13px] font-black text-gray-400 bg-gray-50 border-r border-gray-200">+591</span>
-                <input value={phoneInput} onChange={e => setPhoneInput(e.target.value.replace(/\D/g, '').slice(0, 8))} inputMode="numeric" className="flex-1 px-3 py-3.5 text-[15px] font-bold outline-none" placeholder="60001234" />
+              <label className="text-[11px] font-black uppercase tracking-wider" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>WhatsApp</label>
+              <div
+                className="mt-2 flex items-center rounded-2xl overflow-hidden border"
+                style={{
+                  borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb',
+                  background: darkMode ? 'rgba(255,255,255,0.08)' : 'white',
+                }}
+              >
+                <span
+                  className="px-3 py-3.5 text-[13px] font-black border-r"
+                  style={{
+                    color: darkMode ? '#e8d0da' : '#9ca3af',
+                    background: darkMode ? 'rgba(255,255,255,0.08)' : '#f9fafb',
+                    borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb',
+                  }}
+                >+591</span>
+                <input
+                  value={phoneInput}
+                  onChange={e => setPhoneInput(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                  inputMode="numeric"
+                  className="flex-1 px-3 py-3.5 text-[15px] font-bold outline-none"
+                  style={{
+                    background: 'transparent',
+                    color: darkMode ? '#f0e0e8' : '#1f2937',
+                  }}
+                  placeholder="60001234"
+                />
               </div>
             </div>
             <div>
-              <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider">PIN de 4 digitos</label>
-              <input value={pinInput} onChange={e => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))} inputMode="numeric" type="password" className="mt-2 w-full px-4 py-3.5 border border-gray-200 rounded-2xl text-[20px] font-black text-center tracking-[0.55em] outline-none" placeholder="••••" />
-              <p className="mt-2 text-[11px] text-gray-400 font-bold">Si eres nueva, este PIN queda guardado.</p>
+              <label className="text-[11px] font-black uppercase tracking-wider" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>PIN de 4 digitos</label>
+              <input
+                value={pinInput}
+                onChange={e => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                inputMode="numeric"
+                type="password"
+                className="mt-2 w-full px-4 py-3.5 rounded-2xl text-[20px] font-black text-center tracking-[0.55em] outline-none border"
+                style={{
+                  background: darkMode ? 'rgba(255,255,255,0.08)' : 'white',
+                  borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb',
+                  color: darkMode ? '#f0e0e8' : '#1f2937',
+                }}
+                placeholder="••••"
+              />
+              <p className="mt-2 text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Si eres nueva, este PIN queda guardado.</p>
             </div>
             {authError && <p className="rounded-2xl bg-red-50 px-3 py-2 text-[12px] font-bold text-red-600">{authError}</p>}
             <button onClick={handleProfileAuth} disabled={loading || phoneInput.length < 8 || pinInput.length !== 4} className="w-full h-12 rounded-2xl bg-[#ff2d78] text-white text-[14px] font-black disabled:opacity-40">
@@ -241,9 +330,9 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
   }
 
   return (
-    <div className="flex flex-col min-h-screen relative">
-      {/* Fondo degradado rosado igual al inicio de la tienda */}
-      <div className="absolute inset-0 z-0" style={{ background: 'radial-gradient(circle at 50% 18%, #ffd4e4 0%, #fff0f6 34%, #fff8fb 62%, #ffffff 100%)' }} />
+    <div className="flex flex-col min-h-screen relative" style={{ background: darkMode ? '#1a0c12' : undefined }}>
+      {/* Fondo degradado rosado igual al inicio de la tienda — solo en light mode */}
+      {!darkMode && <div className="absolute inset-0 z-0" style={{ background: 'radial-gradient(circle at 50% 18%, #ffd4e4 0%, #fff0f6 34%, #fff8fb 62%, #ffffff 100%)' }} />}
 
       <div className="relative z-10 flex flex-col min-h-screen">
       <header className="px-5 pt-5 pb-4">
@@ -263,8 +352,8 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
             <img src="/logo.png" alt="Leidy American" className="w-full h-full object-cover" />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-[18px] font-black text-gray-800 leading-tight">Mi perfil</h1>
-            <p className="text-[12px] text-gray-500 font-bold">+591 {user?.phone}</p>
+            <h1 className="text-[18px] font-black leading-tight" style={{ color: darkMode ? 'white' : '#1f2937' }}>Mi perfil</h1>
+            <p className="text-[12px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>+591 {user?.phone}</p>
           </div>
         </div>
 
@@ -275,8 +364,8 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
             { label: 'Pedidos', value: activeOrders.length },
             { label: 'Total Bs', value: totalSpent.toFixed(0) },
           ].map(item => (
-            <div key={item.label} className="rounded-2xl p-2.5 text-center backdrop-blur-sm"
-              style={{ background: 'rgba(255,255,255,0.55)' }}>
+            <div key={item.label} className="rounded-2xl p-2.5 text-center"
+              style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.55)' }}>
               <p className="text-[18px] font-black text-[#ff2d78]">{item.value}</p>
               <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider">{item.label}</p>
             </div>
@@ -301,15 +390,19 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
           </div>
         ) : tab === 'saved' ? (
           <section className="space-y-3">
-            {favorites.length === 0 ? (
-              <EmptyState title="Sin favoritos todavia" text="Marca prendas con corazon para encontrarlas aqui." />
+            {loadingFavorites ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map(n => <div key={n} className="h-28 rounded-3xl animate-pulse" style={{ background: 'rgba(255,255,255,0.5)' }} />)}
+              </div>
+            ) : favorites.length === 0 ? (
+              <EmptyState title="Sin favoritos todavia" text="Marca prendas con corazon para encontrarlas aqui." darkMode={darkMode} />
             ) : favorites.map(product => (
-              <div key={product.id} className="rounded-3xl border border-white/60 shadow-sm p-3 flex gap-3 backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
+              <div key={product.id} className="rounded-3xl border border-white/60 shadow-sm p-3 flex gap-3" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                 <button onClick={() => onProductSelect?.(product)} className="w-20 h-24 rounded-2xl overflow-hidden bg-gray-100 flex-shrink-0">
                   <ProductThumb image={product.images[0]} className="w-full h-full object-cover" width={80} height={96} />
                 </button>
                 <div className="min-w-0 flex-1 py-1">
-                  <p className="text-[13px] font-black text-gray-800 leading-snug line-clamp-2">{product.title}</p>
+                  <p className="text-[13px] font-black leading-snug line-clamp-2" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{product.title}</p>
                   <p className="text-[11px] text-gray-400 font-bold mt-0.5">{product.category}</p>
                   <p className="text-[15px] font-black text-[#ff2d78] mt-2">{product.price.toFixed(2)} Bs</p>
                 </div>
@@ -325,7 +418,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
         ) : tab === 'orders' ? (
           <section className="space-y-2">
             {orders.length === 0 ? (
-              <EmptyState title="Sin pedidos" text="Tus compras apareceran aqui." />
+              <EmptyState title="Sin pedidos" text="Tus compras apareceran aqui." darkMode={darkMode} />
             ) : orders.map(order => {
               const statusStyle =
                 order.status === 'paid' || order.status === 'delivered' || order.status === 'ready'
@@ -336,7 +429,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
               const firstItem = order.items?.[0];
               const extraCount = (order.items?.length ?? 0) - 1;
               return (
-                <div key={order.id} className="rounded-3xl border border-white/60 shadow-sm p-3 flex gap-3 items-center backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
+                <div key={order.id} className="rounded-3xl border border-white/60 shadow-sm p-3 flex gap-3 items-center" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                   {/* Ícono prenda */}
                   <div className="w-14 h-[68px] rounded-2xl bg-[#fff0f5] flex items-center justify-center flex-shrink-0">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2">
@@ -351,7 +444,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                       </p>
                       <p className="text-[15px] font-black text-[#ff2d78] flex-shrink-0">{Number(order.total).toFixed(2)} Bs</p>
                     </div>
-                    <p className="text-[13px] font-black text-gray-800 truncate mt-0.5">
+                    <p className="text-[13px] font-black truncate mt-0.5" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>
                       {firstItem?.productName ?? '—'}
                       {firstItem?.size ? ` (${firstItem.size})` : ''}
                       {extraCount > 0 ? <span className="text-gray-400 font-bold"> +{extraCount}</span> : null}
@@ -367,12 +460,16 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
           </section>
         ) : tab === 'entrega' ? (
           <section className="space-y-3">
-            {deliverySaved ? (
-              <div className="rounded-3xl border border-white/60 shadow-sm p-5 text-center space-y-3 backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
+            {loadingPickupDates ? (
+              <div className="space-y-3">
+                {[1, 2].map(n => <div key={n} className="h-16 rounded-3xl animate-pulse" style={{ background: 'rgba(255,255,255,0.5)' }} />)}
+              </div>
+            ) : deliverySaved ? (
+              <div className="rounded-3xl border border-white/60 shadow-sm p-5 text-center space-y-3" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                 <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-500 flex items-center justify-center mx-auto">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-                <p className="text-[15px] font-black text-gray-800">¡Fecha guardada!</p>
+                <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>¡Fecha guardada!</p>
                 <p className="text-[12px] text-gray-400 font-bold">
                   {selectedPickup
                     ? `${pickupDates.find(d => d.date === selectedPickup.date)?.label ?? selectedPickup.date} — ${selectedPickup.slot}`
@@ -380,9 +477,9 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                 </p>
               </div>
             ) : (
-              <div className="rounded-3xl border border-white/60 shadow-sm p-4 space-y-4 backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
+              <div className="rounded-3xl border border-white/60 shadow-sm p-4 space-y-4" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                 <div>
-                  <p className="text-[15px] font-black text-gray-800">¿Cuándo retirás tu pedido?</p>
+                  <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>¿Cuándo retirás tu pedido?</p>
                   <p className="text-[12px] text-gray-400 font-bold">Elegí una de las fechas disponibles o pedí otro día.</p>
                 </div>
 
@@ -414,7 +511,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                             {isSelected && <div className="w-2.5 h-2.5 rounded-full bg-[#ff2d78]" />}
                           </div>
                           <div>
-                            <p className="text-[13px] font-black text-gray-800 capitalize">{option.label}</p>
+                            <p className="text-[13px] font-black capitalize" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{option.label}</p>
                             <p className="text-[11px] font-bold text-gray-400">{option.slot}</p>
                           </div>
                         </button>
@@ -479,13 +576,13 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
         ) : tab === 'confirmar' ? (
           <section className="space-y-3">
             {!nextOrder ? (
-              <EmptyState title="Sin pedidos activos" text="Cuando tengas un pedido pendiente aparecerá aquí para que puedas confirmarlo." />
+              <EmptyState title="Sin pedidos activos" text="Cuando tengas un pedido pendiente aparecerá aquí para que puedas confirmarlo." darkMode={darkMode} />
             ) : nextOrder.customer_selection?.confirmed ? (
-              <div className="rounded-3xl border border-white/60 shadow-sm p-5 text-center space-y-3 backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
+              <div className="rounded-3xl border border-white/60 shadow-sm p-5 text-center space-y-3" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                 <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-500 flex items-center justify-center mx-auto">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-                <p className="text-[16px] font-black text-gray-800">¡Prendas confirmadas!</p>
+                <p className="text-[16px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>¡Prendas confirmadas!</p>
                 <p className="text-[12px] text-gray-400 font-bold">
                   Confirmaste tu pedido #{nextOrder.id}. Ya estamos preparando todo para vos.
                 </p>
@@ -494,9 +591,9 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                 </span>
               </div>
             ) : (
-              <div className="rounded-3xl border border-white/60 shadow-sm p-4 space-y-4 backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
+              <div className="rounded-3xl border border-white/60 shadow-sm p-4 space-y-4" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                 <div>
-                  <p className="text-[15px] font-black text-gray-800">Confirmá tus prendas</p>
+                  <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Confirmá tus prendas</p>
                   <p className="text-[12px] text-gray-400 font-bold">Pedido #{nextOrder.id} · {Number(nextOrder.total).toFixed(2)} Bs</p>
                 </div>
                 <div className="space-y-2">
@@ -506,7 +603,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-black text-gray-800 truncate">{item.productName}</p>
+                        <p className="text-[13px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{item.productName}</p>
                         {item.size && <p className="text-[11px] font-bold text-gray-400">Talla: {item.size}</p>}
                       </div>
                       <p className="text-[13px] font-black text-[#ff2d78] flex-shrink-0">{item.price.toFixed(2)} Bs</p>
@@ -527,8 +624,8 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
           </section>
         ) : (
           <section className="space-y-3">
-            <div className="rounded-3xl border border-white/60 shadow-sm p-4 backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
-              <p className="text-[13px] font-black text-gray-800">Numero de WhatsApp</p>
+            <div className="rounded-3xl border border-white/60 shadow-sm p-4" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
+              <p className="text-[13px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Numero de WhatsApp</p>
               <p className="text-[13px] text-gray-500 font-bold mt-1">+591 {user?.phone}</p>
             </div>
             <button onClick={handleLogout} className="w-full h-12 rounded-2xl font-black text-[13px]" style={{ background: 'rgba(255,255,255,0.55)', color: '#9ca3af' }}>Cerrar sesion</button>
@@ -540,14 +637,14 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
   );
 }
 
-function EmptyState({ title, text }: { title: string; text: string }) {
+function EmptyState({ title, text, darkMode }: { title: string; text: string; darkMode?: boolean }) {
   return (
-    <div className="rounded-3xl border border-white/60 shadow-sm p-8 text-center backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.65)' }}>
+    <div className="rounded-3xl border border-white/60 shadow-sm p-8 text-center" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
       <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-[#fff0f5] text-[#ff2d78] flex items-center justify-center">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
       </div>
-      <p className="text-[15px] font-black text-gray-800">{title}</p>
-      <p className="mt-1 text-[12px] text-gray-400 font-bold">{text}</p>
+      <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>{title}</p>
+      <p className="mt-1 text-[12px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>{text}</p>
     </div>
   );
 }

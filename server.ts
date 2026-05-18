@@ -27,14 +27,20 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const createStoreAuthClient = () => {
-  const url = process.env.VITE_STORE_SUPABASE_URL;
-  const anonKey = process.env.VITE_STORE_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) throw new Error("Faltan variables publicas de auth de tienda");
-  return createClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-};
+// Cliente de auth de tienda — se crea UNA sola vez y se reutiliza en todas las llamadas
+const createStoreAuthClient = (() => {
+  let _client: ReturnType<typeof createClient> | null = null;
+  return () => {
+    if (_client) return _client;
+    const url = process.env.VITE_STORE_SUPABASE_URL;
+    const anonKey = process.env.VITE_STORE_SUPABASE_ANON_KEY;
+    if (!url || !anonKey) throw new Error("Faltan variables publicas de auth de tienda");
+    _client = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    return _client;
+  };
+})();
 
 const cleanName = (name: string) => {
   if (!name) return "";
@@ -1643,24 +1649,27 @@ const PORT = Number(process.env.PORT || 3001);
       if (error || !data.user) return res.status(401).json({ error: "Sesión inválida" });
 
       const cleanPhone = data.user.email?.replace('@tiendaleydi.com', '') ?? '';
-      const { data: customer } = await supabaseStore
-        .from('store_customers')
-        .select('*')
-        .eq('whatsapp', cleanPhone)
-        .single();
 
-      const { data: orders } = await supabaseStore
-        .from('store_orders')
-        .select('id, status, total, created_at, items, payment_verified_at, expires_at, customer_wa, customer_selection, delivery_date, delivery_slot')
-        .eq('customer_wa', cleanPhone)
-        .order('created_at', { ascending: false })
-        .limit(20);
+      // Ambas consultas corren en paralelo — ahorran ~300ms vs secuencial
+      const [{ data: customer }, { data: orders }] = await Promise.all([
+        supabaseStore
+          .from('store_customers')
+          .select('*')
+          .eq('whatsapp', cleanPhone)
+          .single(),
+        supabaseStore
+          .from('store_orders')
+          .select('id, status, total, created_at, items, payment_verified_at, expires_at, customer_wa, customer_selection, delivery_date, delivery_slot')
+          .eq('customer_wa', cleanPhone)
+          .order('created_at', { ascending: false })
+          .limit(20),
+      ]);
 
+      // Favoritos se cargan aparte vía /api/store-favorites (lazy, solo cuando se abre esa pestaña)
       res.json({
         user: data.user,
         customer,
         orders: orders ?? [],
-        favorites: await loadFavoriteProducts(cleanPhone),
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Error interno" });

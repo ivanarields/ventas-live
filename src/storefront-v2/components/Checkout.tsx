@@ -320,20 +320,20 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
   if (screen === 'loading') {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-white">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
         <div className="w-10 h-10 border-4 border-t-transparent rounded-full animate-spin"
           style={{ borderColor: BRAND, borderTopColor: 'transparent' }} />
-        <p className="text-sm font-bold text-gray-400">Preparando tu pedido...</p>
+        <p className="text-sm font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Preparando tu pedido...</p>
       </div>
     );
   }
 
   if (screen === 'empty_cart') {
     return (
-      <div className="flex flex-col min-h-screen bg-white items-center justify-center p-6 text-center">
+      <div className="flex flex-col min-h-screen items-center justify-center p-6 text-center" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
         <div className="text-5xl mb-4">🛍️</div>
-        <h2 className="text-xl font-black text-gray-800 mb-2">Tu carrito está vacío</h2>
-        <p className="text-sm text-gray-400 mb-6">Agrega prendas para poder pagar.</p>
+        <h2 className="text-xl font-black mb-2" style={{ color: darkMode ? 'white' : '#1f2937' }}>Tu carrito está vacío</h2>
+        <p className="text-sm mb-6" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Agrega prendas para poder pagar.</p>
         <button onClick={onBack} className="px-8 py-3 rounded-2xl font-black text-white"
           style={{ background: BRAND }}>
           Ver catálogo
@@ -344,16 +344,16 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
   if (screen === 'verified') {
     return (
-      <div className="flex flex-col min-h-screen bg-white items-center justify-center p-6 text-center">
+      <div className="flex flex-col min-h-screen items-center justify-center p-6 text-center" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
         <div className="w-24 h-24 rounded-full flex items-center justify-center mb-6 animate-bounce"
           style={{ background: '#d1fae5' }}>
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <h1 className="text-2xl font-black text-gray-800 mb-2">¡Pago Verificado!</h1>
-        <p className="text-gray-500 text-sm mb-1">Pedido <strong>#{orderId}</strong> confirmado.</p>
-        <p className="text-gray-400 text-xs mb-8">Tus prendas están apartadas. ✨</p>
+        <h1 className="text-2xl font-black mb-2" style={{ color: darkMode ? 'white' : '#1f2937' }}>¡Pago Verificado!</h1>
+        <p className="text-sm mb-1" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>Pedido <strong>#{orderId}</strong> confirmado.</p>
+        <p className="text-xs mb-8" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Tus prendas están apartadas. ✨</p>
         <button onClick={onOrderComplete}
           className="w-full max-w-xs h-14 rounded-2xl font-black text-white"
           style={{ background: BRAND }}>
@@ -366,10 +366,10 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
   if (screen === 'payment') {
     if (!orderId) {
       return (
-        <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-white">
+        <div className="min-h-screen flex flex-col items-center justify-center gap-3" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
           <div className="w-10 h-10 border-4 border-t-transparent rounded-full animate-spin"
             style={{ borderColor: BRAND, borderTopColor: 'transparent' }} />
-          <p className="text-sm font-bold text-gray-400">Creando tu pedido...</p>
+          <p className="text-sm font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Creando tu pedido...</p>
         </div>
       );
     }
@@ -409,15 +409,15 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
     };
 
     return (
-      <div className="flex flex-col bg-gradient-to-b from-[#ffe6ef] via-[#fffbfd] to-white relative overflow-y-auto" style={{ height: '100dvh', maxHeight: '100dvh' }}>
+      <div className="flex flex-col relative overflow-y-auto" style={{ height: '100dvh', maxHeight: '100dvh', background: darkMode ? '#1a0c12' : '#fef1f5' }}>
         {/* Header minimalista */}
         <div className="px-5 pt-[max(14px,env(safe-area-inset-top))] pb-1 flex justify-between items-center relative z-10 flex-shrink-0">
-          <button onClick={onBack} className="w-9 h-9 rounded-full bg-white/60 flex items-center justify-center shadow-sm">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
+          <button onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center shadow-sm" style={{ background: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.60)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={darkMode ? '#ff2d78' : 'currentColor'} strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
           </button>
 
           {!expired ? (
-            <div className="flex items-center gap-1.5 bg-white/80 px-3 py-1.5 rounded-full shadow-sm border border-pink-50">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-sm border border-pink-50" style={{ background: darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.80)' }}>
               <span className="text-[12px] font-black text-[#ff2d78] uppercase tracking-wider">⏳ {mins}:{secs}</span>
             </div>
           ) : (
@@ -432,11 +432,11 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
           {/* Monto y Resumen */}
           <div className="mb-3">
-            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Total a Pagar</p>
-            <p className="font-black leading-none text-gray-800 tracking-tight" style={{ fontSize: 'clamp(38px, 9dvh, 52px)' }}>
+            <p className="text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>Total a Pagar</p>
+            <p className="font-black leading-none tracking-tight" style={{ fontSize: 'clamp(38px, 9dvh, 52px)', color: darkMode ? 'white' : '#1f2937' }}>
               {payableTotal.toFixed(2)} <span className="text-[20px] text-[#ff2d78]">Bs</span>
             </p>
-            <p className="text-[12px] text-gray-400 font-medium mt-2">
+            <p className="text-[12px] font-medium mt-2" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>
               Pedido {orderId ? `#${orderId}` : 'creando'} - {itemCount} articulo(s)
             </p>
           </div>
@@ -449,7 +449,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
                 borderColor: darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.75)',
               }}
             >
-              <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-2">Resumen · {itemCount} prendas</p>
+              <p className="text-[11px] font-black uppercase tracking-wider mb-2" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Resumen · {itemCount} prendas</p>
               <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
                 {items.flatMap(item =>
                   Array.from({ length: item.quantity }, (_, qi) => ({ img: item.product.images?.[0], title: item.product.title, key: `${item.product.id}-${qi}` }))
@@ -463,7 +463,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
                   </div>
                 ))}
               </div>
-              <p className="text-[11px] font-bold text-gray-500 mt-1.5">Retiro coordinado</p>
+              <p className="text-[11px] font-bold mt-1.5" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>Retiro coordinado</p>
             </div>
           ) : (
             <div
@@ -481,11 +481,11 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Resumen</p>
-                <p className="text-[13px] font-black text-gray-800 truncate">
+                <p className="text-[11px] font-black uppercase tracking-wider" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Resumen</p>
+                <p className="text-[13px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>
                   {primaryItem ? primaryItem.product.title : 'Pedido Leidy Shop'}
                 </p>
-                <p className="text-[11px] font-bold text-gray-500">1 prenda - Retiro coordinado</p>
+                <p className="text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>1 prenda - Retiro coordinado</p>
               </div>
             </div>
           )}
@@ -499,8 +499,8 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
           {/* Beneficiario */}
           <div className="mb-4">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Beneficiario</p>
-            <p className="text-[14px] font-black text-gray-800">Leidy Candy Diaz Sanchez</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Beneficiario</p>
+            <p className="text-[14px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Leidy Candy Diaz Sanchez</p>
           </div>
 
           {bankDetected && !verified && (
@@ -531,7 +531,14 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
                 <button
                   onClick={sendWA}
-                  className="h-11 px-5 rounded-2xl font-black text-[13px] text-gray-700 bg-white border border-gray-100 shadow-sm active:scale-95 transition-all flex items-center gap-1.5"
+                  className="h-11 px-5 rounded-2xl font-black text-[13px] shadow-sm active:scale-95 transition-all flex items-center gap-1.5"
+                  style={{
+                    background: darkMode ? 'rgba(255,255,255,0.12)' : 'white',
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: darkMode ? 'rgba(255,255,255,0.15)' : '#f3f4f6',
+                    color: darkMode ? 'white' : '#374151',
+                  }}
                 >
                   <span>💬</span>
                   Ya pagué
@@ -550,40 +557,50 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
   // ── PANTALLA: Identificación (solo si no hay sesión) ──────────
   return (
-    <div className="flex flex-col min-h-screen bg-gradient-to-b from-[#ffe6ef] via-[#fffbfd] to-white">
+    <div className="flex flex-col min-h-screen" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
       <div className="sticky top-0 z-10 px-5 py-4 flex items-center gap-3">
         <button onClick={onBack}
-          className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-50">
+          className="w-10 h-10 rounded-full flex items-center justify-center transition-colors"
+          style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+          onMouseEnter={e => !darkMode && (e.currentTarget.style.background = '#f9fafb')}
+          onMouseLeave={e => !darkMode && (e.currentTarget.style.background = 'transparent')}
+        >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <path d="m15 18-6-6 6-6" />
           </svg>
         </button>
         <div>
-          <h2 className="text-[17px] font-black text-gray-800">Confirmar pedido</h2>
-          <p className="text-[11px] text-gray-400">Numero y PIN para apartar</p>
+          <h2 className="text-[17px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Confirmar pedido</h2>
+          <p className="text-[11px]" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Numero y PIN para apartar</p>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 pt-2 pb-5 flex flex-col justify-start space-y-4">
         {/* Resumen compacto */}
-        <div className="bg-white/80 rounded-3xl p-4 shadow-sm border border-white/70">
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-2">Tu pedido</p>
+        <div
+          className="rounded-3xl p-4 shadow-sm border"
+          style={{
+            background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.80)',
+            borderColor: darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.70)',
+          }}
+        >
+          <p className="text-[10px] font-black uppercase tracking-wider mb-2" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Tu pedido</p>
           {items.map((item, idx) => (
             <div key={idx} className="flex items-center gap-2 py-1">
               {item.product.images?.[0] && (
                 <ProductThumb image={item.product.images[0]} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-white" width={40} height={40} />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-[12px] font-black text-gray-800 truncate">{item.product.title}</p>
-                {item.size && <p className="text-[10px] text-gray-400">Talla {item.size} · ×{item.quantity}</p>}
+                <p className="text-[12px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{item.product.title}</p>
+                {item.size && <p className="text-[10px]" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Talla {item.size} · ×{item.quantity}</p>}
               </div>
-              <p className="text-[12px] font-black text-gray-800 flex-shrink-0">
+              <p className="text-[12px] font-black flex-shrink-0" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>
                 {(item.product.price * item.quantity).toFixed(2)} Bs
               </p>
             </div>
           ))}
-          <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between">
-            <span className="text-[11px] text-gray-500 font-bold">Total</span>
+          <div className="border-t mt-2 pt-2 flex justify-between" style={{ borderColor: darkMode ? 'rgba(255,255,255,0.12)' : '#e5e7eb' }}>
+            <span className="text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>Total</span>
             <span className="text-[16px] font-black" style={{ color: BRAND }}>{total.toFixed(2)} Bs</span>
           </div>
         </div>
@@ -591,16 +608,30 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
         <div className="space-y-4">
           {/* WhatsApp */}
           <div>
-            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">
+            <label className="text-[11px] font-black uppercase tracking-wider mb-1.5 block" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>
               WhatsApp
             </label>
-            <p className="text-[10px] text-gray-400 mb-2 leading-relaxed">Tu numero para ordenar.</p>
-            <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden focus-within:border-pink-400 transition-colors">
-              <span className="px-3 text-[13px] font-black text-gray-400 bg-gray-50 border-r border-gray-200 py-3.5">+591</span>
+            <p className="text-[10px] mb-2 leading-relaxed" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Tu numero para ordenar.</p>
+            <div
+              className="flex items-center rounded-xl overflow-hidden border focus-within:border-pink-400 transition-colors"
+              style={{ borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb' }}
+            >
+              <span
+                className="px-3 text-[13px] font-black border-r py-3.5"
+                style={{
+                  color: darkMode ? '#e8d0da' : '#9ca3af',
+                  background: darkMode ? 'rgba(255,255,255,0.08)' : '#f9fafb',
+                  borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb',
+                }}
+              >+591</span>
               <input
                 type="tel" inputMode="numeric" placeholder="60001234"
                 value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                className="flex-1 px-3 py-3.5 text-[15px] font-bold bg-white outline-none"
+                className="flex-1 px-3 py-3.5 text-[15px] font-bold outline-none"
+                style={{
+                  background: darkMode ? 'rgba(255,255,255,0.05)' : 'white',
+                  color: darkMode ? '#f0e0e8' : '#1f2937',
+                }}
                 maxLength={8} autoFocus={phone.length !== 8}
               />
             </div>
@@ -608,14 +639,19 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
 
           {/* PIN */}
           <div>
-            <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider mb-1.5 block">
+            <label className="text-[11px] font-black uppercase tracking-wider mb-1.5 block" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>
               PIN de 4 digitos
             </label>
-            <p className="text-[10px] text-gray-400 mb-2 leading-relaxed">Si eres nueva, este PIN queda guardado.</p>
+            <p className="text-[10px] mb-2 leading-relaxed" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Si eres nueva, este PIN queda guardado.</p>
             <input
               type="password" inputMode="numeric" placeholder="• • • •"
               value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-[22px] font-black text-center tracking-[0.6em] outline-none focus:border-pink-400 transition-colors"
+              className="w-full px-4 py-3.5 rounded-xl text-[22px] font-black text-center tracking-[0.6em] outline-none border focus:border-pink-400 transition-colors"
+              style={{
+                background: darkMode ? 'rgba(255,255,255,0.05)' : 'white',
+                borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb',
+                color: darkMode ? '#f0e0e8' : '#1f2937',
+              }}
               maxLength={4} autoFocus={phone.length === 8}
             />
           </div>
@@ -629,7 +665,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
             </div>
           )}
 
-          <p className="text-[10px] text-gray-400 text-center leading-relaxed">Pago seguro por QR.</p>
+          <p className="text-[10px] text-center leading-relaxed" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Pago seguro por QR.</p>
 
           <button onClick={handleIdentify}
             disabled={authLoading || pin.length !== 4 || phone.replace(/\D/g, '').length < 8}
