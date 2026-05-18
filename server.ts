@@ -4048,10 +4048,10 @@ Responde solo JSON:
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("/tienda/terminos", (_req, res) => {
-      res.sendFile(path.join(process.cwd(), "public/terminos.html"));
+      res.sendFile(path.join(distPath, "terminos.html"));
     });
     app.get("/tienda/privacidad", (_req, res) => {
-      res.sendFile(path.join(process.cwd(), "public/privacidad.html"));
+      res.sendFile(path.join(distPath, "privacidad.html"));
     });
     app.get(["/tienda", "/tienda/*"], (_req, res) => {
       res.sendFile(path.join(distPath, "tienda.html"));
