@@ -33,10 +33,13 @@ function buildPostText(product: Product): string {
     : "";
 
   const lines: string[] = [];
-  lines.push(`${icon} ${product.name}`);
+  lines.push("✨ ¡Nuevo en tienda!");
+  lines.push("", `${icon} ${product.name}`);
   if (product.description) lines.push("", product.description.trim());
   lines.push("", `💵 Precio: Bs ${Number(product.price).toFixed(2)}`);
-  lines.push("", `${hashCategory}#Moda #Bolivia #TiendaOnline`);
+  lines.push("", "👉 Visitá nuestra tienda y pedí el tuyo:");
+  lines.push("https://leidycandy.me/tienda");
+  lines.push("", `${hashCategory}#Moda #Bolivia #TiendaOnline #NuevoProducto`);
   return lines.join("\n");
 }
 
@@ -70,8 +73,8 @@ async function publishToChannel(
         text: $text
         assets: $assets
         metadata: $metadata
-        schedulingType: automatic
-        mode: addToQueue
+        schedulingType: AUTOMATIC_PUBLISH
+        mode: SHARE_NOW
       }) {
         ... on PostActionSuccess {
           post { id text }

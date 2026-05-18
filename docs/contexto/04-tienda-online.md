@@ -1,6 +1,6 @@
 # 04 — Tienda Online
 
-Actualizado: 2026-05-17 (documentación completa verificada en código)
+Actualizado: 2026-05-17 (Buffer integration documentada)
 
 ---
 
@@ -40,6 +40,12 @@ STORE_URL                       URL pública de la tienda (ej: https://leidydiaz
 STORE_PUBLIC_URL                Misma URL pública (usada para links en mensajes WA)
 STORE_OWNER_USER_ID             ID del usuario operador (para encolar mensajes WA)
 VITE_STORE_WA_NUMBER            Número WA del operador (default: 59160003230)
+
+# Buffer — publicación automática en redes sociales al crear producto
+BUFFER_API_KEY                  Personal access token de Buffer
+BUFFER_CHANNEL_ID_FACEBOOK      ID del canal Facebook en Buffer
+BUFFER_CHANNEL_ID_INSTAGRAM     ID del canal Instagram en Buffer
+BUFFER_CHANNEL_ID_TIKTOK        ID del canal TikTok en Buffer
 ```
 
 ---
@@ -1001,6 +1007,14 @@ Para casos donde el operador o la IA no está segura de qué prendas le correspo
 - Categorías del catálogo sin parpadeo (espera store_chips antes de pintar chips)
 - Pagos de tienda en su propia tabla pagos_tienda (separados del sistema principal)
 - Clasificador de imágenes: solo registra fotos si IA extrajo nombre o monto
+
+- Publicación automática en Buffer (Facebook, Instagram, TikTok) al crear un producto nuevo
+  - `src/services/bufferService.ts` — lógica de publicación
+  - Se llama desde `server.ts` después del INSERT de productos (fire-and-forget)
+  - Modo: `SHARE_NOW` (instantáneo)
+  - Post incluye: emoji por categoría, nombre, descripción, precio en Bs, link `https://leidycandy.me/tienda`, hashtags
+  - Resultados guardados en `TiendaOnline.buffer_publications`
+  - Si no hay `BUFFER_API_KEY`, la publicación se omite silenciosamente sin romper el flujo
 
 ### Pendiente / no implementado todavía
 
