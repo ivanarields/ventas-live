@@ -39,7 +39,9 @@ function buildPostText(product: Product): string {
   lines.push("", `💵 Precio: Bs ${Number(product.price).toFixed(2)}`);
   lines.push("", "👉 Visitá nuestra tienda y pedí el tuyo:");
   lines.push("https://leidycandy.me/tienda");
-  lines.push("", "#Ropa #Moda #Bolivia #LeidyCandy #TiendaOnline");
+  const tagPrenda = product.category && product.category !== "General"
+    ? `#${product.category.replace(/\s+/g, "")}` : "#Moda";
+  lines.push("", `#TiendaOnline #LeidyCandy #SantaCruz ${tagPrenda}`);
   return lines.join("\n");
 }
 
