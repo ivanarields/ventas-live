@@ -159,24 +159,23 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
   };
 
   return (
-    <div ref={galleryScrollRef} onScroll={handleScroll} className="flex flex-col h-[100dvh] overflow-y-auto bg-gradient-to-b from-[#fff0f5] via-white to-white">
-      <header className={`sticky top-0 z-50 bg-white/82 backdrop-blur-md border-b border-[#ff2d78]/8 transition-transform duration-300 ${headerHidden && !searchOpen ? '-translate-y-full' : 'translate-y-0'}`}>
-        <div className="flex items-center gap-3 px-5 h-14">
-          <button onClick={onBack} className="w-9 h-9 rounded-full bg-gray-50 flex items-center justify-center flex-shrink-0" aria-label="Volver">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6"/></svg>
+    <div ref={galleryScrollRef} onScroll={handleScroll} className="flex flex-col h-[100dvh] overflow-y-auto" style={{ background: '#fef1f5' }}>
+      <header className={`sticky top-0 z-50 backdrop-blur-md border-b transition-transform duration-300 ${headerHidden && !searchOpen ? '-translate-y-full' : 'translate-y-0'}`} style={{ background: 'rgba(254,241,245,0.78)', borderColor: 'rgba(255,45,120,0.08)' }}>
+        <div className="flex items-center gap-3 px-5 h-12">
+          <button onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.65)' }} aria-label="Volver">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5"><path d="m15 18-6-6 6-6"/></svg>
           </button>
           <div className="flex-1 min-w-0">
-            <p className="font-black text-[18px] text-gray-800 leading-none">Catalogo</p>
-            <p className="text-[11px] font-black" style={{ color: '#ff2d78' }}>Leidy Shop</p>
+            <p className="font-black text-[17px] leading-none" style={{ color: '#ff2d78' }}>Leidy Shop</p>
           </div>
-          <button onClick={onToggleDarkMode} className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-gray-50 transition-colors" title="Modo visual">
+          <button onClick={onToggleDarkMode} className="w-9 h-9 rounded-full flex items-center justify-center transition-colors" style={{ background: 'rgba(255,255,255,0.65)' }} title="Modo visual">
             {darkMode ? (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.4"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
             ) : (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8z"/></svg>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.4"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8z"/></svg>
             )}
           </button>
-          <button onClick={onOpenCart} className="relative w-9 h-9 rounded-full flex items-center justify-center bg-[#fff0f5] text-[#ff2d78] transition-colors" aria-label="Ver carrito">
+          <button onClick={onOpenCart} className="relative w-9 h-9 rounded-full flex items-center justify-center text-[#ff2d78] transition-colors" style={{ background: 'rgba(255,255,255,0.65)' }} aria-label="Ver carrito">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
               <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
@@ -188,9 +187,9 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
         </div>
 
         {searchOpen && (
-          <div className="px-5 pb-3">
-            <div className="flex items-center gap-2 bg-gray-50 rounded-2xl px-4 h-10">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-gray-300 flex-shrink-0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <div className="px-5 pb-2">
+            <div className="flex items-center gap-2 rounded-2xl px-4 h-9" style={{ background: 'rgba(255,255,255,0.65)' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5" className="flex-shrink-0" style={{ opacity: 0.5 }}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
               <input
                 ref={searchInputRef}
                 value={searchQuery}
@@ -199,8 +198,8 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
                 className="flex-1 bg-transparent text-[14px] font-medium outline-none text-gray-800"
               />
               {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="text-gray-300 hover:text-gray-600 transition-colors flex-shrink-0" aria-label="Limpiar busqueda">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                <button onClick={() => setSearchQuery('')} className="transition-colors flex-shrink-0" aria-label="Limpiar busqueda">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff2d78" style={{ opacity: 0.5 }}><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
               )}
             </div>
@@ -208,13 +207,13 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
         )}
 
         {visibleChips.length > 0 && (
-          <div className="flex gap-5 px-5 pb-2 overflow-x-auto scrollbar-hide">
+          <div className="flex gap-4 px-5 pb-1.5 overflow-x-auto scrollbar-hide">
             {visibleChips.map(chip => (
               <button
                 key={chip.id}
                 onClick={() => setFilter(filter === chip.value ? '' : chip.value)}
-                className="relative flex-shrink-0 py-2 text-[11px] font-black uppercase tracking-[0.08em] transition-colors"
-                style={{ color: filter === chip.value ? '#ff2d78' : darkMode ? '#bdaeb8' : '#8a8f98' }}
+                className="relative flex-shrink-0 py-1 text-[10px] font-black uppercase tracking-[0.08em] transition-colors"
+                style={{ color: filter === chip.value ? '#ff2d78' : darkMode ? '#bdaeb8' : '#c48fa8' }}
               >
                 {chip.label}
                 {filter === chip.value && <span className="absolute left-0 right-0 -bottom-0.5 mx-auto h-0.5 rounded-full bg-[#ff2d78]" />}
@@ -305,8 +304,8 @@ const ProductCard = memo(function ProductCard({
     <article>
       <div
         onClick={() => product.stock > 0 && !reserved && onSelect(product)}
-        className="relative aspect-[3/4] rounded-[22px] bg-gray-100 overflow-hidden cursor-pointer"
-        style={{ boxShadow: darkMode ? 'none' : '0 2px 10px rgba(0,0,0,0.06)' }}
+        className="relative aspect-[3/4] rounded-[22px] overflow-hidden cursor-pointer"
+        style={{ background: 'rgba(255,255,255,0.75)', boxShadow: darkMode ? 'none' : '0 2px 12px rgba(255,45,120,0.10)' }}
       >
         <img
           src={imageSrc}

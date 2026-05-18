@@ -1,6 +1,6 @@
 # 04 — Tienda Online
 
-Actualizado: 2026-05-18 (Panel de Tienda rediseñado)
+Actualizado: 2026-05-18 (Panel de Tienda rediseñado + Rediseño visual catálogo y perfil clienta)
 
 ---
 
@@ -310,12 +310,16 @@ Banner PWA: borde #ff2d78/10, ícono bg-[#ff2d78]
 
 ### Catálogo (ProductGallery)
 ```
-Fondo: from-[#fff0f5] via-white to-white
-Header sticky: bg-white/82, backdrop-blur-md, border-[#ff2d78]/8
-Título "Catalogo": text-gray-800
-Subtítulo "Leidy Shop": color #ff2d78
+Fondo: #fef1f5 (rosa suave persistente, no degradado)
+Header sticky: rgba(254,241,245,0.78) + backdrop-blur-md (transparente, fusionado con fondo rosa)
+Título principal: "Leidy Shop" en color #ff2d78, font-black, 17px (sin texto "Catalogo")
+Flecha volver: ícono #ff2d78, fondo rgba(255,255,255,0.65)
+Ícono modo oscuro: stroke #ff2d78, fondo rgba(255,255,255,0.65)
+Ícono carrito: texto #ff2d78, fondo rgba(255,255,255,0.65)
+Barra de búsqueda: fondo rgba(255,255,255,0.65), ícono lupa #ff2d78
 Chip de categoría activo: color #ff2d78, underline #ff2d78
-Chip de categoría inactivo: color #8a8f98 (modo claro) / #bdaeb8 (modo oscuro)
+Chip de categoría inactivo: color #c48fa8 (modo claro) / #bdaeb8 (modo oscuro)
+Tarjeta producto: fondo rgba(255,255,255,0.75), sombra rgba(255,45,120,0.10)
 Precio del producto: color #ff2d78 (fuente muy gruesa, "font-black")
 Corazón de favorito: stroke/fill #ff2d78 siempre
 Badge "Vendido": bg-red-600, texto blanco, rotado -12 grados
@@ -357,18 +361,22 @@ Botón "Ver mis pedidos": background #ff2d78
 
 ### Perfil de clienta (StoreProfile)
 ```
-Fondo no logueada: from-[#ffe6ef] via-[#fffbfd] to-white
-Fondo logueada: bg-[#fdf5f7]
-Avatar: gradient linear 135deg #ff2d78 → #ff6fa3, letras "LA"
-Stats: bg-gray-50, valor en #ff2d78, etiqueta en gray-400
+Fondo: radial-gradient rosa absoluto + overlay blanco (efecto glassmorphism global)
+Avatar: logo circular /logo.png, 56×56px, borde white/80, sombra rgba(255,45,120,0.18)
+Header perfil: flex horizontal — avatar circular a la izquierda, nombre+teléfono a la derecha
+Nombre: "Mi perfil" text-[18px] font-black text-gray-800
+Teléfono: "+591 XXXX" text-[12px] text-gray-500 font-bold
+Tarjetas (pedidos, favoritos, entrega, ajustes): fondo rgba(255,255,255,0.65) + backdrop-blur-sm + border-white/60
 Tabs activo: color #ff2d78, underline #ff2d78
 Tabs inactivo: color #9ca3af
-Estado "Esperando pago": text
-Estado "Pago verificado": text
-Estado "Listo": text
-Estado "Entregado": text
-Estado "Cancelado": text
-Badge de estado en tarjeta: bg-[#fff0f5], texto #ff2d78
+Tab "Confirmar": aparece SOLO si hay un pedido pendiente sin selección confirmada (lógica needsConfirmation)
+Tarjeta pedido: compacta con ícono corazón, badge color según estado
+  - "Esperando pago": bg-amber-50 text-amber-600
+  - "Pago verificado": bg-blue-50 text-blue-600
+  - "Listo para retirar": bg-green-50 text-green-600
+  - "Entregado": bg-gray-50 text-gray-500
+  - "Cancelado": bg-red-50 text-red-500
+Stats: bg-white/50 backdrop-blur-sm, valor en #ff2d78, etiqueta en gray-400
 Botón "Comprar" en favoritos: bg-[#ff2d78], texto blanco
 Botón confirmar prendas: gradient 135deg #ff2d78 → #ff6fa3
 Fecha elegida seleccionada: border #ff2d78, bg-[#fff0f5]
