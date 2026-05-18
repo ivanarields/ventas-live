@@ -4032,6 +4032,12 @@ Responde solo JSON:
       app.get(["/tienda", "/tienda/*"], (req, res, next) => {
         renderViteHtml(req, res, next, "tienda.html");
       });
+      app.get("/terminos", (_req, res) => {
+        res.sendFile(path.join(process.cwd(), "public/terminos.html"));
+      });
+      app.get("/privacidad", (_req, res) => {
+        res.sendFile(path.join(process.cwd(), "public/privacidad.html"));
+      });
       app.get("*", async (req, res, next) => {
         renderViteHtml(req, res, next, "index.html");
       });
@@ -4043,6 +4049,12 @@ Responde solo JSON:
     app.use(express.static(distPath));
     app.get(["/tienda", "/tienda/*"], (_req, res) => {
       res.sendFile(path.join(distPath, "tienda.html"));
+    });
+    app.get("/terminos", (_req, res) => {
+      res.sendFile(path.join(process.cwd(), "public/terminos.html"));
+    });
+    app.get("/privacidad", (_req, res) => {
+      res.sendFile(path.join(process.cwd(), "public/privacidad.html"));
     });
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

@@ -979,7 +979,19 @@ Para casos donde el operador o la IA no está segura de qué prendas le correspo
 
 ---
 
-## Estado actual (2026-05-17)
+## Páginas legales (ocultas)
+
+No aparecen en el menú de la tienda. Solo accesibles por link directo. Requeridas para TikTok Developer.
+
+- `https://leidycandy.me/terminos` — Términos de Servicio
+- `https://leidycandy.me/privacidad` — Política de Privacidad
+
+Archivos: `public/terminos.html`, `public/privacidad.html`
+Rutas en: `server.ts` (antes del catch-all de index.html)
+
+---
+
+## Estado actual (2026-05-18)
 
 ### Funcionando correctamente
 
