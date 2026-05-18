@@ -128,9 +128,9 @@ export async function publishProductToBuffer(
   }
 
   const channels: Array<{ id: string; name: "facebook" | "instagram" | "tiktok" }> = [
-    { id: process.env.BUFFER_CHANNEL_ID_FACEBOOK ?? "", name: "facebook" },
-    { id: process.env.BUFFER_CHANNEL_ID_INSTAGRAM ?? "", name: "instagram" },
-    { id: process.env.BUFFER_CHANNEL_ID_TIKTOK ?? "", name: "tiktok" },
+    { id: (process.env.BUFFER_CHANNEL_ID_FACEBOOK ?? "").trim(), name: "facebook" },
+    { id: (process.env.BUFFER_CHANNEL_ID_INSTAGRAM ?? "").trim(), name: "instagram" },
+    { id: (process.env.BUFFER_CHANNEL_ID_TIKTOK ?? "").trim(), name: "tiktok" },
   ];
 
   const results: PublishResult[] = [];
