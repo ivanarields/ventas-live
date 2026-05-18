@@ -1,6 +1,6 @@
 # 04 — Tienda Online
 
-Actualizado: 2026-05-17 (Buffer integration documentada)
+Actualizado: 2026-05-18 (Panel admin mejorado: modal flotante, drag-and-drop imágenes)
 
 ---
 
@@ -1010,11 +1010,17 @@ Para casos donde el operador o la IA no está segura de qué prendas le correspo
 
 - Publicación automática en Buffer (Facebook, Instagram, TikTok) al crear un producto nuevo
   - `src/services/bufferService.ts` — lógica de publicación
-  - Se llama desde `server.ts` después del INSERT de productos (fire-and-forget)
-  - Modo: `SHARE_NOW` (instantáneo)
+  - Se llama desde `server.ts` ANTES de responder (Vercel corta procesos después de res.json())
+  - Modo: `schedulingType: automatic, mode: shareNow` (instantáneo)
   - Post incluye: emoji por categoría, nombre, descripción, precio en Bs, link `https://leidycandy.me/tienda`, hashtags
   - Resultados guardados en `TiendaOnline.buffer_publications`
   - Si no hay `BUFFER_API_KEY`, la publicación se omite silenciosamente sin romper el flujo
+
+- Panel admin de tienda mejorado (`src/components/AdminTiendaView.tsx`)
+  - Formulario de producto como ventana flotante (bottom sheet) con backdrop
+  - Fotos arrastrables: primera foto = portada (badge PORTADA en rosado)
+  - Tarjetas de productos: badge numérico sobre la imagen cuando hay varias fotos (ej: "+2")
+  - Botón "Nuevo Producto" sigue mostrando "Cancelar" mientras el modal está abierto
 
 ### Pendiente / no implementado todavía
 

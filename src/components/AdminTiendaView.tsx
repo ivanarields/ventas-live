@@ -138,6 +138,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [saveError, setSaveError] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [orderFilter, setOrderFilter] = useState<'all' | 'pending' | 'paid' | 'cancelled'>('all');
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [storeProfiles, setStoreProfiles] = useState<any[]>([]);
   const [macroHealth, setMacroHealth] = useState<{ alert: boolean; lastIngestAgeSec: number | null; pendingCount: number } | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
@@ -382,7 +383,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     setUrlInput('');
     setTalla('');
     setShowForm(true);
-    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
   const openEdit = (p: StoreProduct) => {
@@ -400,7 +400,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     setUrlInput('');
     setTalla('');
     setShowForm(true);
-    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
   const addTalla = (t: string) => {
@@ -627,115 +626,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
             </button>
           </div>
 
-          {/* Formulario */}
-          {showForm && (
-            <div ref={formRef} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-              <p className="text-sm font-black text-gray-800">
-                {editingId ? '✏️ Editar producto' : '➕ Nuevo producto'}
-              </p>
-
-              {/* Error */}
-              {saveError && (
-                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-                  <AlertCircle size={14} className="text-red-500 flex-shrink-0" />
-                  <p className="text-xs font-bold text-red-600">{saveError}</p>
-                </div>
-              )}
-
-              {/* 1. Fotos y Botón IA */}
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 space-y-3">
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-wider">
-                  1. Sube fotos ({form.images.length}/{MAX_PHOTOS})
-                </label>
-                
-                <div className="flex gap-2 flex-wrap">
-                  {form.images.map((img, idx) => (
-                    <div key={idx} className="relative w-16 h-16 rounded-xl overflow-hidden border-2" style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}>
-                      <img src={img} alt="" className="w-full h-full object-cover" />
-                      <button type="button" onClick={() => removeImage(idx)} className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center shadow">
-                        <X size={8} />
-                      </button>
-                    </div>
-                  ))}
-
-                  {form.images.length < MAX_PHOTOS && (
-                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={compressing} className="w-16 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50" style={{ borderColor: BRAND, background: 'white' }}>
-                      {compressing ? <Loader2 size={16} className="animate-spin" style={{ color: BRAND }} /> : <Camera size={16} style={{ color: BRAND }} />}
-                    </button>
-                  )}
-                </div>
-
-                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
-
-                {/* Botón IA */}
-                <button
-                  type="button"
-                  onClick={handleAiFill}
-                  disabled={form.images.length === 0 || aiStatus === 'loading' || compressing}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl font-black text-[13px] transition-all disabled:opacity-50"
-                  style={form.images.length === 0 || aiStatus === 'loading'
-                    ? { background: '#e5e7eb', color: '#9ca3af' }
-                    : { background: 'linear-gradient(135deg, #a855f7, #ec4899)', color: 'white', boxShadow: '0 2px 8px rgba(168,85,247,0.3)' }
-                  }
-                >
-                  {aiStatus === 'loading' ? <><Loader2 size={14} className="animate-spin" /> Analizando...</> : <><span>✨</span> 2. Rellenar con IA</>}
-                </button>
-                {aiStatus === 'success' && <p className="text-[10px] font-bold text-green-600 text-center">¡Listo! Revisa los datos abajo ↓</p>}
-                {aiStatus === 'error' && <p className="text-[10px] font-bold text-red-500 text-center">{aiError}</p>}
-              </div>
-
-              {/* 2. Datos del Producto */}
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-gray-400 uppercase">Nombre *</label>
-                  <input type="text" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[13px] font-medium outline-none focus:border-pink-400" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase">Precio (Bs)*</label>
-                  <input type="number" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[13px] font-medium outline-none focus:border-pink-400" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase">Categoría</label>
-                  <select className="w-full mt-1 rounded-lg border border-gray-200 px-2 py-1.5 text-[12px] font-medium outline-none bg-white" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-                    {formCategoryOptions.map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase">Tallas</label>
-                  <div className="mt-1 flex items-center">
-                    <input type="text" placeholder="Ej: S, M" className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-[12px] font-medium outline-none" value={form.sizes.join(', ')} onChange={e => setForm(f => ({ ...f, sizes: e.target.value.split(',').map(s=>s.trim()).filter(Boolean) }))} />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase">Descripción</label>
-                <textarea rows={2} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] font-medium outline-none resize-none" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-              </div>
-
-              {/* Toggle disponible */}
-              <button type="button" onClick={() => setForm(f => ({ ...f, available: !f.available }))} className="flex items-center gap-2">
-                <div className="w-8 h-4 rounded-full transition-all flex items-center px-0.5" style={{ background: form.available ? BRAND : '#e5e7eb' }}>
-                  <div className="w-3 h-3 rounded-full bg-white shadow-sm transition-all" style={{ transform: form.available ? 'translateX(16px)' : 'translateX(0)' }} />
-                </div>
-                <span className="text-[12px] font-bold text-gray-600">{form.available ? 'Visible en tienda' : 'Oculto'}</span>
-              </button>
-
-              {/* Botón guardar */}
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving || !form.name.trim() || !form.price}
-                className="w-full h-11 rounded-xl font-black text-sm text-white transition-all active:scale-95 disabled:opacity-40"
-                style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
-              >
-                {saving ? 'Guardando...' : editingId ? '✓ Actualizar Producto' : '✓ Crear Producto'}
-              </button>
-            </div>
-          )}
 
           {/* Lista */}
           {loading ? (
@@ -753,9 +643,16 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               {products.map(p => (
                 <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex gap-3">
                   {/* Foto */}
-                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
+                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100 relative">
                     {p.images?.[0] || p.image_url ? (
-                      <img src={p.images?.[0] || p.image_url} alt="" className="w-full h-full object-cover" />
+                      <>
+                        <img src={p.images?.[0] || p.image_url} alt="" className="w-full h-full object-cover" />
+                        {(p.images?.length ?? 0) > 1 && (
+                          <span className="absolute bottom-1 right-1 text-[8px] font-black text-white rounded px-1 py-0.5 leading-none" style={{ background: 'rgba(0,0,0,0.55)' }}>
+                            +{p.images.length - 1}
+                          </span>
+                        )}
+                      </>
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
                         <ImageIcon size={20} className="text-gray-300" />
@@ -797,9 +694,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                           <span key={s} className="text-[9px] font-black bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{s}</span>
                         ))}
                       </div>
-                    )}
-                    {p.images?.length > 1 && (
-                      <p className="text-[10px] text-blue-500 font-bold mt-0.5">{p.images.length} fotos</p>
                     )}
                   </div>
 
@@ -1178,6 +1072,162 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
             </div>
           )}
         </div>
+      )}
+
+      {/* ─── MODAL FORMULARIO ─── */}
+      {showForm && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            style={{ background: 'rgba(0,0,0,0.45)' }}
+            onClick={() => { setShowForm(false); setEditingId(null); }}
+          />
+          <div
+            className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-2xl overflow-hidden"
+            style={{ maxHeight: '92dvh' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 relative">
+              <div className="absolute left-1/2 -translate-x-1/2 top-2 w-10 h-1 bg-gray-200 rounded-full" />
+              <p className="text-base font-black text-gray-900 mt-1">
+                {editingId ? 'Editar producto' : 'Nuevo producto'}
+              </p>
+              <button
+                onClick={() => { setShowForm(false); setEditingId(null); }}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <X size={16} className="text-gray-500" />
+              </button>
+            </div>
+
+            {/* Contenido con scroll */}
+            <div className="overflow-y-auto p-4 space-y-3 pb-8" style={{ maxHeight: 'calc(92dvh - 56px)' }}>
+              {saveError && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  <AlertCircle size={14} className="text-red-500 flex-shrink-0" />
+                  <p className="text-xs font-bold text-red-600">{saveError}</p>
+                </div>
+              )}
+
+              {/* Fotos */}
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 space-y-3">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-wider">
+                  1. Fotos — arrastrá para reordenar ({form.images.length}/{MAX_PHOTOS})
+                </label>
+                <div className="flex gap-2 flex-wrap">
+                  {form.images.map((img, idx) => (
+                    <div
+                      key={idx}
+                      draggable
+                      onDragStart={() => setDragIdx(idx)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (dragIdx === null || dragIdx === idx) { setDragIdx(null); return; }
+                        const imgs = [...form.images];
+                        const [moved] = imgs.splice(dragIdx, 1);
+                        imgs.splice(idx, 0, moved);
+                        setForm(f => ({ ...f, images: imgs }));
+                        setDragIdx(null);
+                      }}
+                      onDragEnd={() => setDragIdx(null)}
+                      className="relative w-20 h-20 rounded-xl overflow-hidden border-2 cursor-grab active:cursor-grabbing transition-opacity"
+                      style={{
+                        borderColor: idx === 0 ? BRAND : '#e5e7eb',
+                        opacity: dragIdx === idx ? 0.4 : 1,
+                      }}
+                    >
+                      <img src={img} alt="" className="w-full h-full object-cover pointer-events-none" />
+                      {idx === 0 && (
+                        <div className="absolute bottom-0 left-0 right-0 text-[8px] font-black text-center text-white py-0.5" style={{ background: BRAND }}>
+                          PORTADA
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(idx)}
+                        className="absolute top-1 right-1 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center"
+                      >
+                        <X size={8} />
+                      </button>
+                    </div>
+                  ))}
+                  {form.images.length < MAX_PHOTOS && (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={compressing}
+                      className="w-20 h-20 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 disabled:opacity-50"
+                      style={{ borderColor: BRAND, background: 'white' }}
+                    >
+                      {compressing
+                        ? <Loader2 size={18} className="animate-spin" style={{ color: BRAND }} />
+                        : <Camera size={18} style={{ color: BRAND }} />}
+                      {!compressing && <span className="text-[9px] font-black" style={{ color: BRAND }}>Agregar</span>}
+                    </button>
+                  )}
+                </div>
+                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
+                <button
+                  type="button"
+                  onClick={handleAiFill}
+                  disabled={form.images.length === 0 || aiStatus === 'loading' || compressing}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-[13px] transition-all disabled:opacity-50"
+                  style={form.images.length === 0 || aiStatus === 'loading'
+                    ? { background: '#e5e7eb', color: '#9ca3af' }
+                    : { background: 'linear-gradient(135deg, #a855f7, #ec4899)', color: 'white', boxShadow: '0 2px 8px rgba(168,85,247,0.3)' }
+                  }
+                >
+                  {aiStatus === 'loading' ? <><Loader2 size={14} className="animate-spin" /> Analizando...</> : <><span>✨</span> 2. Rellenar con IA</>}
+                </button>
+                {aiStatus === 'success' && <p className="text-[10px] font-bold text-green-600 text-center">¡Listo! Revisa los datos abajo ↓</p>}
+                {aiStatus === 'error' && <p className="text-[10px] font-bold text-red-500 text-center">{aiError}</p>}
+              </div>
+
+              {/* Datos */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Nombre *</label>
+                  <input type="text" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-2 text-[13px] font-medium outline-none focus:border-pink-400" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Precio (Bs)*</label>
+                  <input type="number" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-2 text-[13px] font-medium outline-none focus:border-pink-400" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Categoría</label>
+                  <select className="w-full mt-1 rounded-lg border border-gray-200 px-2 py-2 text-[12px] font-medium outline-none bg-white" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+                    {formCategoryOptions.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Tallas</label>
+                  <input type="text" placeholder="S, M, L, XL" className="w-full mt-1 rounded-lg border border-gray-200 px-2 py-2 text-[12px] font-medium outline-none" value={form.sizes.join(', ')} onChange={e => setForm(f => ({ ...f, sizes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase">Descripción</label>
+                <textarea rows={2} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-2 text-[12px] font-medium outline-none resize-none" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+              </div>
+              <button type="button" onClick={() => setForm(f => ({ ...f, available: !f.available }))} className="flex items-center gap-2">
+                <div className="w-8 h-4 rounded-full transition-all flex items-center px-0.5" style={{ background: form.available ? BRAND : '#e5e7eb' }}>
+                  <div className="w-3 h-3 rounded-full bg-white shadow-sm transition-all" style={{ transform: form.available ? 'translateX(16px)' : 'translateX(0)' }} />
+                </div>
+                <span className="text-[12px] font-bold text-gray-600">{form.available ? 'Visible en tienda' : 'Oculto'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !form.name.trim() || !form.price}
+                className="w-full h-12 rounded-xl font-black text-sm text-white transition-all active:scale-95 disabled:opacity-40"
+                style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
+              >
+                {saving ? 'Guardando...' : editingId ? '✓ Actualizar Producto' : '✓ Crear Producto'}
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* ─── CONFIGURACION ─── */}
