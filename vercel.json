@@ -8,6 +8,14 @@
       "destination": "/api/index.ts"
     },
     {
+      "source": "/tienda/terminos",
+      "destination": "/terminos.html"
+    },
+    {
+      "source": "/tienda/privacidad",
+      "destination": "/privacidad.html"
+    },
+    {
       "source": "/tienda",
       "destination": "/tienda.html"
     },
