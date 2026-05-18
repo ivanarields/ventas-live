@@ -3,7 +3,6 @@ import { syncPedidoLabel, releasePedidoLabel, getCurrentLabelByFirebaseId } from
 import { ShieldAlert, FileSearch, AlertTriangle } from 'lucide-react';
 import { PaymentHistoryTape } from './components/PaymentHistoryTape';
 import { OrderChatPhotoSelector, prefetchOrderChatPhotos, type OrderChatPhoto } from './components/OrderChatPhotoSelector';
-import { PanelPedidos } from './components/PanelPedidos';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -1990,7 +1989,6 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
   const [isCleaningTests, setIsCleaningTests] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState<'casilleros' | 'pedidos'>('casilleros');
 
   const activos = pedidos.filter(p => {
     const s = (p.status ?? '').toLowerCase();
@@ -2082,32 +2080,8 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
             <Wrench className="w-3 h-3" />
             <span className="text-[10px] font-bold">{isCleaningTests ? 'Limpiando' : 'Reset'}</span>
           </button>
-          <button
-            onClick={() => setActiveSubTab('casilleros')}
-            className="flex items-center gap-1 rounded-full px-2.5 py-1 transition-all"
-            style={activeSubTab === 'casilleros'
-              ? { background: '#ff2d78', color: 'white' }
-              : { background: '#f3f4f6', color: '#6b7280' }}
-          >
-            <div className="w-2 h-2 rounded-full bg-blue-400/80" />
-            <span className="text-[10px] font-bold">Etiquetas</span>
-          </button>
-          <button
-            onClick={() => setActiveSubTab('pedidos')}
-            className="flex items-center gap-1 rounded-full px-2.5 py-1 transition-all"
-            style={activeSubTab === 'pedidos'
-              ? { background: '#ff2d78', color: 'white' }
-              : { background: '#f3f4f6', color: '#6b7280' }}
-          >
-            <div className="w-2 h-2 rounded-full" style={{ background: activeSubTab === 'pedidos' ? 'rgba(255,255,255,0.6)' : '#ff2d78' }} />
-            <span className="text-[10px] font-bold">Comprobantes Live</span>
-          </button>
         </div>
       </div>
-
-      {activeSubTab === 'pedidos' && <PanelPedidos />}
-
-      {activeSubTab === 'casilleros' && <>
 
       {/* ── NUMÉRICOS activos ── */}
       {NUMERIC.some(code => byLabel(code).length > 0) && (
@@ -2270,7 +2244,6 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
         </div>
       )}
 
-      </>}
     </motion.div>
   );
 }
