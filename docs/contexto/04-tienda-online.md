@@ -1,6 +1,6 @@
 # 04 — Tienda Online
 
-Actualizado: 2026-05-17 (Buffer integration documentada)
+Actualizado: 2026-05-18 (Panel de Tienda rediseñado)
 
 ---
 
@@ -375,6 +375,38 @@ Fecha elegida seleccionada: border #ff2d78, bg-[#fff0f5]
 Botón "Avisarle a Leidy Shop": bg: #25D366 (verde WhatsApp)
 Botón "Confirmar fecha de retiro": gradient #ff2d78 → #ff6fa3
 ```
+
+### Panel admin — AdminTiendaView (pestaña Tienda en la app principal)
+
+El panel de administración de la tienda tiene 3 sub-pestañas: **Productos**, **Pedidos**, **Config**.
+
+#### Sub-pestaña Productos
+
+- Filtros: Activos / Reservados / Vendidos / Ocultos / Todos
+- Cada tarjeta muestra: foto miniatura, nombre, categoría·tallas·precio·cantidad de fotos, badge de estado, acciones
+- Botón **ojo**: toggle rápido visible/oculto sin abrir el formulario
+- Botón **flecha circular**: vuelve a poner a la venta un producto vendido u oculto (relist)
+- Botón **papelera**: elimina el producto
+
+Formulario de nuevo/editar producto:
+- Grid de 3 casillas numeradas para fotos (portada = posición 1, se puede reordenar)
+- Las fotos se comprimen automáticamente a max 800px en WebP 80% antes de subirse
+- Botón **IA Rellenar**: analiza las fotos con Gemini y completa nombre, descripción, categoría y tallas
+- Campos: Nombre, Precio (Bs), Categoría (dropdown dinámico desde store_chips), Tallas, Descripción
+- Toggle: Visible en tienda / Oculto
+
+#### Sub-pestaña Pedidos
+
+- Stats rápidas: Hoy / Pendientes / Verificados
+- Filtro: Todos / Pend. / Pagados / Canc.
+- Cada pedido es expandible: muestra items, total, acciones según estado
+- Banner rojo si MacroDroid lleva más de 10 minutos sin enviar notificaciones bancarias
+
+#### Sub-pestaña Config
+
+- Chips del catálogo (categorías y promos): agregar, editar, activar/desactivar, eliminar, restaurar defaults
+- Nombre de la tienda, URL del QR de pago (con subida de imagen), dirección, nota de entregas
+- Fechas de retiro disponibles: agregar fechas con horarios Mañana/Tarde/Noche
 
 ### Panel admin — Pagos Web (en la app principal)
 

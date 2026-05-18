@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ExternalLink, Plus, Edit2, Trash2, Package, ShoppingBag,
   Check, X, Image as ImageIcon, ChevronDown, ChevronUp,
-  Send, AlertCircle, RefreshCw, Camera, Loader2, Copy, Users, RotateCcw,
+  Send, AlertCircle, RefreshCw, Camera, Loader2, Users, RotateCcw,
 } from 'lucide-react';
 import { DEFAULT_STORE_CHIPS, StoreChip, parseStoreChips, serializeStoreChips } from '../storefront-v2/config/storefrontConfig';
 
@@ -94,6 +94,7 @@ interface StoreOrder {
 const CATEGORIAS = ['General', 'Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos', 'Accesorios', 'Pantalones', 'Faldas'];
 const TALLAS_COMUNES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '34', '36', '38', '40', '42', 'Único'];
 const BRAND = '#ff2d78';
+type ProductFilter = 'active' | 'reserved' | 'sold' | 'hidden' | 'all';
 
 const catColor = (cat: string) => {
   const colors: Record<string, string> = {
@@ -114,6 +115,8 @@ const EMPTY_FORM = {
   available: true,
 };
 
+const isSoldProduct = (product: StoreProduct) => Number(product.stock ?? 1) <= 0;
+
 export function AdminTiendaView({ userId, authToken }: { userId: string; authToken: string }) {
   const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'clientes' | 'confirmaciones' | 'config'>('productos');
   const [pickupDates, setPickupDates] = useState<Array<{ date: string; label: string; slots: string[] }>>([]);
@@ -128,6 +131,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [productFilter, setProductFilter] = useState<ProductFilter>('active');
   const [talla, setTalla] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -146,6 +150,27 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     .filter(chip => chip.kind === 'category' && chip.active && chip.value !== 'Todos')
     .map(chip => chip.value);
   const formCategoryOptions = categoryOptions.length > 0 ? categoryOptions : CATEGORIAS;
+  const reservedProductIds = new Set(
+    orders
+      .filter(order => order.status === 'pending')
+      .flatMap(order => order.items.map(item => String(item.productId)))
+  );
+  const productCounts = {
+    active: products.filter(product => product.available && !isSoldProduct(product) && !reservedProductIds.has(String(product.id))).length,
+    reserved: products.filter(product => reservedProductIds.has(String(product.id))).length,
+    sold: products.filter(isSoldProduct).length,
+    hidden: products.filter(product => !product.available && !isSoldProduct(product)).length,
+    all: products.length,
+  };
+  const visibleProducts = products.filter(product => {
+    const reserved = reservedProductIds.has(String(product.id));
+    const sold = isSoldProduct(product);
+    if (productFilter === 'active') return product.available && !sold && !reserved;
+    if (productFilter === 'reserved') return reserved;
+    if (productFilter === 'sold') return sold;
+    if (productFilter === 'hidden') return !product.available && !sold;
+    return true;
+  });
 
   // Auto-refresco de pedidos cada 15 segundos cuando se está en la pestaña
   useEffect(() => {
@@ -420,6 +445,23 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   };
 
   const removeImage = (idx: number) => setForm(f => ({ ...f, images: f.images.filter((_, i) => i !== idx) }));
+  const moveImage = (idx: number, direction: -1 | 1) => {
+    setForm(f => {
+      const nextIndex = idx + direction;
+      if (nextIndex < 0 || nextIndex >= f.images.length) return f;
+      const images = [...f.images];
+      [images[idx], images[nextIndex]] = [images[nextIndex], images[idx]];
+      return { ...f, images };
+    });
+  };
+  const makeCoverImage = (idx: number) => {
+    setForm(f => {
+      if (idx <= 0 || idx >= f.images.length) return f;
+      const images = [...f.images];
+      const [cover] = images.splice(idx, 1);
+      return { ...f, images: [cover, ...images] };
+    });
+  };
 
   const handleSave = async () => {
     if (!form.name.trim() || !form.price) return;
@@ -515,15 +557,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     if (res.ok) await loadAll();
   };
 
-  const [copied, setCopied] = useState(false);
-  const storeUrl = `${window.location.origin}/tienda`;
-  const handleCopy = () => {
-    navigator.clipboard.writeText(storeUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
   return (
     <div className="space-y-4 pb-8">
       {/* Header */}
@@ -533,15 +566,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
           <p className="text-xs text-gray-400 font-medium">Leidy Shop</p>
         </div>
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-black border transition-all"
-            style={{ borderColor: '#e5e7eb', color: copied ? '#10b981' : '#9ca3af', background: 'white' }}
-            title="Copiar link de tienda"
-          >
-            {copied ? <Check size={12} /> : <Copy size={12} />}
-            {copied ? 'Copiado' : 'Copiar'}
-          </button>
           <a
             href="/tienda"
             target="_blank"
@@ -586,16 +610,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
           )}
         </button>
         <button
-          onClick={() => { setSubTab('clientes'); loadStoreProfiles(); }}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-black transition-all"
-          style={subTab === 'clientes'
-            ? { background: 'white', color: BRAND, boxShadow: '0 1px 6px rgba(0,0,0,0.08)' }
-            : { color: '#9ca3af' }}
-        >
-          <Users size={14} />
-          Clientes
-        </button>
-        <button
           onClick={() => { setSubTab('config'); loadSettings(); }}
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-black transition-all"
           style={subTab === 'config'
@@ -610,23 +624,6 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       {/* ─── PRODUCTOS ─── */}
       {subTab === 'productos' && (
         <div className="space-y-3">
-          <div className="flex gap-2">
-            <button
-              onClick={showForm ? () => { setShowForm(false); setEditingId(null); } : openNew}
-              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl font-black text-sm text-white transition-all active:scale-[0.98]"
-              style={{ background: showForm ? '#6b7280' : `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
-            >
-              {showForm ? <X size={15} /> : <Plus size={15} />}
-              {showForm ? 'Cancelar' : 'Nuevo Producto'}
-            </button>
-            <button
-              onClick={loadAll}
-              className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors"
-            >
-              <RefreshCw size={15} />
-            </button>
-          </div>
-
           {/* Formulario */}
           {showForm && (
             <div ref={formRef} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
@@ -643,26 +640,50 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               )}
 
               {/* 1. Fotos y Botón IA */}
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 space-y-3">
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-wider">
-                  1. Sube fotos ({form.images.length}/{MAX_PHOTOS})
-                </label>
-                
-                <div className="flex gap-2 flex-wrap">
-                  {form.images.map((img, idx) => (
-                    <div key={idx} className="relative w-16 h-16 rounded-xl overflow-hidden border-2" style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}>
-                      <img src={img} alt="" className="w-full h-full object-cover" />
-                      <button type="button" onClick={() => removeImage(idx)} className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center shadow">
-                        <X size={8} />
-                      </button>
-                    </div>
-                  ))}
-
-                  {form.images.length < MAX_PHOTOS && (
-                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={compressing} className="w-16 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50" style={{ borderColor: BRAND, background: 'white' }}>
-                      {compressing ? <Loader2 size={16} className="animate-spin" style={{ color: BRAND }} /> : <Camera size={16} style={{ color: BRAND }} />}
-                    </button>
-                  )}
+              <div className="grid grid-cols-[1fr_96px] gap-2 rounded-xl border border-gray-100 bg-gray-50 p-2.5">
+                <div className="grid grid-cols-3 gap-1.5">
+                  {Array.from({ length: MAX_PHOTOS }).map((_, idx) => {
+                    const img = form.images[idx];
+                    return (
+                      <div key={idx} className="relative aspect-[4/5] overflow-hidden rounded-xl border bg-white shadow-sm" style={{ borderColor: idx === 0 ? BRAND : '#e5e7eb' }}>
+                        {img ? (
+                          <>
+                            <img src={img} alt="" className="h-full w-full object-cover" />
+                            <button type="button" onClick={() => removeImage(idx)} className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white shadow">
+                              <X size={8} />
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={compressing} className="flex h-full w-full items-center justify-center text-pink-500 disabled:opacity-50">
+                            {compressing ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          title={`Foto ${idx + 1}`}
+                          onClick={() => img && makeCoverImage(idx)}
+                          disabled={!img || idx === 0}
+                          className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/75 px-1 text-[10px] font-black text-white disabled:cursor-default"
+                        >
+                          {idx + 1}
+                        </button>
+                        {img && form.images.length > 1 && (
+                          <div className="absolute bottom-1 left-1 right-1 flex justify-center gap-1">
+                            {idx > 0 && (
+                              <button type="button" title="Subir en orden" onClick={() => moveImage(idx, -1)} className="h-5 rounded-md bg-white/90 px-1.5 text-[10px] font-black text-gray-700 shadow-sm">
+                                -
+                              </button>
+                            )}
+                            {idx < form.images.length - 1 && (
+                              <button type="button" title="Bajar en orden" onClick={() => moveImage(idx, 1)} className="h-5 rounded-md bg-white/90 px-1.5 text-[10px] font-black text-gray-700 shadow-sm">
+                                +
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
@@ -672,16 +693,19 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   type="button"
                   onClick={handleAiFill}
                   disabled={form.images.length === 0 || aiStatus === 'loading' || compressing}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl font-black text-[13px] transition-all disabled:opacity-50"
+                  className="flex h-full min-h-[92px] w-full flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-center font-black text-[12px] leading-tight transition-all disabled:opacity-50"
                   style={form.images.length === 0 || aiStatus === 'loading'
                     ? { background: '#e5e7eb', color: '#9ca3af' }
                     : { background: 'linear-gradient(135deg, #a855f7, #ec4899)', color: 'white', boxShadow: '0 2px 8px rgba(168,85,247,0.3)' }
                   }
                 >
-                  {aiStatus === 'loading' ? <><Loader2 size={14} className="animate-spin" /> Analizando...</> : <><span>✨</span> 2. Rellenar con IA</>}
+                  {aiStatus === 'loading' ? <><Loader2 size={14} className="animate-spin" /> Analizando...</> : <><span>IA</span><span>Rellenar</span></>}
                 </button>
-                {aiStatus === 'success' && <p className="text-[10px] font-bold text-green-600 text-center">¡Listo! Revisa los datos abajo ↓</p>}
-                {aiStatus === 'error' && <p className="text-[10px] font-bold text-red-500 text-center">{aiError}</p>}
+                {(aiStatus === 'success' || aiStatus === 'error') && (
+                  <p className={`col-span-2 text-center text-[10px] font-bold ${aiStatus === 'success' ? 'text-green-600' : 'text-red-500'}`}>
+                    {aiStatus === 'success' ? 'Listo. Revisa los datos.' : aiError}
+                  </p>
+                )}
               </div>
 
               {/* 2. Datos del Producto */}
@@ -737,23 +761,65 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
             </div>
           )}
 
+          <div className="grid grid-cols-5 gap-1">
+            {([
+              ['active', 'Activos', productCounts.active],
+              ['reserved', 'Reservados', productCounts.reserved],
+              ['sold', 'Vendidos', productCounts.sold],
+              ['hidden', 'Ocultos', productCounts.hidden],
+            ] as Array<[ProductFilter, string, number]>).map(([key, label, count]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setProductFilter(key)}
+                className="min-w-0 rounded-xl px-1.5 py-2 text-[10px] font-black transition-colors"
+                style={productFilter === key
+                  ? { background: BRAND, color: 'white', boxShadow: '0 4px 12px rgba(255,45,120,0.22)' }
+                  : { background: 'white', color: '#6b7280', border: '1px solid #eef0f4' }}
+              >
+                <span className="truncate">{label}</span> <span className={productFilter === key ? 'text-white/80' : 'text-gray-400'}>{count}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={showForm ? () => { setShowForm(false); setEditingId(null); } : openNew}
+              className="min-w-0 flex items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[10px] font-black text-white transition-all active:scale-[0.98]"
+              style={{ background: showForm ? '#6b7280' : `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}
+            >
+              {showForm ? <X size={12} /> : <Plus size={12} />}
+              {showForm ? 'Cancelar' : 'Nuevo'}
+            </button>
+          </div>
+
           {/* Lista */}
           {loading ? (
             <div className="space-y-2">
-              {[1, 2, 3].map(n => <div key={n} className="h-20 rounded-2xl bg-gray-100 animate-pulse" />)}
+              {[1, 2, 3, 4].map(n => <div key={n} className="h-[76px] rounded-2xl bg-gray-100 animate-pulse" />)}
             </div>
-          ) : products.length === 0 ? (
+          ) : visibleProducts.length === 0 ? (
             <div className="text-center py-10 text-gray-400">
               <Package size={40} className="mx-auto mb-3 opacity-30" />
               <p className="font-black text-sm">Sin productos aún</p>
               <p className="text-xs mt-1">Crea tu primer producto arriba</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {products.map(p => (
-                <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex gap-3">
+            <div className="space-y-1.5">
+              {visibleProducts.map(p => {
+                const isReserved = reservedProductIds.has(String(p.id));
+                const sold = isSoldProduct(p);
+                const status = sold ? 'Vendido' : isReserved ? 'Reservado' : p.available ? 'Activo' : 'Oculto';
+                const statusColor = sold ? '#ef4444' : isReserved ? '#3b82f6' : p.available ? '#10b981' : '#9ca3af';
+                const photoCount = p.images?.length ?? 0;
+                const meta = [
+                  p.category,
+                  ...(p.sizes ?? []),
+                  `${p.price} Bs`,
+                  `${photoCount} foto${photoCount === 1 ? '' : 's'}`,
+                ];
+                return (
+                <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm px-2.5 py-2 flex gap-2.5 items-center">
                   {/* Foto */}
-                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
+                  <div className="w-[58px] h-[66px] rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
                     {p.images?.[0] || p.image_url ? (
                       <img src={p.images?.[0] || p.image_url} alt="" className="w-full h-full object-cover" />
                     ) : (
@@ -764,61 +830,38 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   </div>
 
                   {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-1 mb-0.5">
-                      <p className="font-black text-sm text-gray-900 leading-tight flex-1 truncate">{p.name}</p>
-                      {(() => {
-                        const isReserved = orders.some(o => o.status === 'pending' && o.items.some(i => String(i.productId) === String(p.id)));
-                        if (isReserved) {
-                          return <span className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white bg-blue-500">Reservado</span>;
-                        }
-                        return (
-                          <span
-                            className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
-                            style={{ background: p.available ? '#10b981' : '#9ca3af' }}
-                          >
-                            {p.available ? 'Activo' : 'Oculto'}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                    <div className="flex items-center gap-1.5">
+                  <div className="flex-1 min-w-0 self-stretch flex flex-col justify-center">
+                    <div className="flex items-start gap-2">
+                      <p className="font-black text-[13px] text-gray-950 leading-[1.15] flex-1 line-clamp-2">{p.name}</p>
                       <span
-                        className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
-                        style={{ background: catColor(p.category) }}
+                        className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
+                        style={{ background: statusColor }}
                       >
-                        {p.category}
+                        {status}
                       </span>
-                      <span className="text-sm font-black" style={{ color: BRAND }}>{p.price} Bs</span>
                     </div>
-                    {p.sizes?.length > 0 && (
-                      <div className="flex gap-1 mt-1 flex-wrap">
-                        {p.sizes.map(s => (
-                          <span key={s} className="text-[9px] font-black bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{s}</span>
-                        ))}
-                      </div>
-                    )}
-                    {p.images?.length > 1 && (
-                      <p className="text-[10px] text-blue-500 font-bold mt-0.5">{p.images.length} fotos</p>
-                    )}
+                    <p className="mt-1 text-[11px] font-bold text-gray-500 truncate">
+                      {meta.filter(Boolean).join(' · ')}
+                    </p>
                   </div>
 
                   {/* Acciones */}
-                  <div className="flex flex-col gap-1.5 flex-shrink-0">
-                    {(!p.available || Number(p.stock ?? 1) <= 0) && (
+                  <div className="flex items-center justify-end gap-2 flex-shrink-0">
+                    {(!p.available || sold) && (
                       <button
                         title="Volver a poner a la venta con código nuevo"
                         onClick={() => handleRelist(p.id, p.name)}
-                        className="w-8 h-8 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center hover:bg-pink-100 transition-colors"
-                      >
-                        <RotateCcw size={13} />
+                          className="w-7 h-7 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center hover:bg-pink-100 transition-colors"
+                        >
+                          <RotateCcw size={12} />
                       </button>
                     )}
                     <button
+                      title="Editar"
                       onClick={() => openEdit(p)}
-                      className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 transition-colors"
-                    >
-                      <Edit2 size={13} />
+                        className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 transition-colors"
+                      >
+                        <Edit2 size={13} />
                     </button>
                     {/* Toggle disponibilidad: un toque oculta/muestra en tienda */}
                     <button
@@ -831,23 +874,24 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                         });
                         setProducts(ps => ps.map(x => x.id === p.id ? { ...x, available: !x.available } : x));
                       }}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
                       style={{ background: p.available ? '#dcfce7' : '#f3f4f6', color: p.available ? '#16a34a' : '#9ca3af' }}
                     >
                       {p.available
-                        ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                          ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                          : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
                       }
                     </button>
                     <button
                       onClick={() => handleDelete(p.id, p.name)}
-                      className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors"
-                    >
-                      <Trash2 size={13} />
+                        className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors"
+                      >
+                        <Trash2 size={13} />
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1226,7 +1270,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   <select
                     value={chip.kind}
                     onChange={e => {
-                      const next = storeChips.map((c, i) => i === idx ? { ...c, kind: e.target.value === 'promo' ? 'promo' : 'category' } : c);
+                      const next = storeChips.map((c, i) => i === idx ? { ...c, kind: (e.target.value === 'promo' ? 'promo' : 'category') as 'promo' | 'category' } : c);
                       setStoreChips(next);
                       saveStoreChips(next);
                     }}
