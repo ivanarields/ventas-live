@@ -360,13 +360,11 @@ function WelcomeScreen({ onEnter, isInstallable, onInstall }: { onEnter: () => v
       <div className="relative flex flex-col items-center justify-center flex-1 px-8 text-center z-10">
         <div className="mb-7">
           <div className="w-20 h-20 mx-auto mb-5 overflow-hidden">
-            <img src="/logo.png" alt="Leidy American" className="w-full h-full object-contain" loading="eager" decoding="async" />
+            <img src="/logo.png" alt="LeidyCandy" className="w-full h-full object-contain" loading="eager" decoding="async" />
           </div>
-          <h1 className="text-[32px] font-black text-gray-800 tracking-tight leading-none">
-            Leidy
-          </h1>
-          <h1 className="text-[32px] font-black tracking-tight leading-none" style={{ color: '#ff2d78' }}>
-            American
+          <h1 className="text-[32px] font-black tracking-tight leading-none">
+            <span style={{ color: '#ff2d78' }}>Leidy</span>{' '}
+            <span style={{ color: '#6b7280' }}>Candy</span>
           </h1>
           <p className="text-[13px] text-gray-400 font-medium mt-3 leading-relaxed">
             Moda femenina con estilo y calidad
@@ -390,8 +388,12 @@ function WelcomeScreen({ onEnter, isInstallable, onInstall }: { onEnter: () => v
       </div>
 
       <div className="relative pb-10 text-center z-10">
+        <div className="mb-3 flex items-center justify-center gap-4 text-[11px] font-bold">
+          <a href="/tienda/terminos" className="text-[#ff2d78] underline underline-offset-2">Terms of Service</a>
+          <a href="/tienda/privacidad" className="text-[#ff2d78] underline underline-offset-2">Privacy Policy</a>
+        </div>
         <p className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">
-          Leidy American © 2026
+          LeidyCandy © 2026
         </p>
       </div>
     </div>

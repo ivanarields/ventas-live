@@ -1,6 +1,6 @@
 # 04 — Tienda Online
 
-Actualizado: 2026-05-18 (Performance: lazy loading perfil, /me paralelo, singleton auth, dark mode completo)
+Actualizado: 2026-05-19 (Estilo: separación del nombre Leidy Candy en rosa y gris con espacio)
 
 ---
 
@@ -301,8 +301,8 @@ processed
 ```
 Fondo: radial-gradient(circle at 50% 18%,
   #ffd4e4 0%, #fff0f5 34%, #fff8fb 62%, #ffffff 100%)
-Título "Leidy": color gray-800
-Título "American": color #ff2d78
+Título "Leidy": color #ff2d78 (rosa vibrante)
+Título "Candy": color #6b7280 (gris) con espacio separador
 Subtítulo: text-gray-400
 Botón "Ver catálogo": background #ff2d78, texto blanco
 Banner PWA: borde #ff2d78/10, ícono bg-[#ff2d78]
@@ -312,7 +312,7 @@ Banner PWA: borde #ff2d78/10, ícono bg-[#ff2d78]
 ```
 Fondo: #fef1f5 (rosa suave persistente, no degradado)
 Header sticky: rgba(254,241,245,0.78) + backdrop-blur-md (transparente, fusionado con fondo rosa)
-Título principal: "Leidy Shop" en color #ff2d78, font-black, 17px (sin texto "Catalogo")
+Título principal: "Leidy Candy" con "Leidy" en color #ff2d78 (rosa) y "Candy" en color #6b7280 (gris en modo claro) o #bdaeb8 (gris en modo oscuro), font-black, 17px (sin texto "Catalogo")
 Flecha volver: ícono #ff2d78, fondo rgba(255,255,255,0.65)
 Ícono modo oscuro: stroke #ff2d78, fondo rgba(255,255,255,0.65)
 Ícono carrito: texto #ff2d78, fondo rgba(255,255,255,0.65)

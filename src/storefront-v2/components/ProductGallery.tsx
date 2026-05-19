@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect, useRef, useCallback } from 'react';
+import React, { memo, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { productsApi, Product, storeDirectThumbUrl, storeImageFallbackUrl } from '../services/productsApi';
 import { StoreChip, parseStoreChips } from '../config/storefrontConfig';
 import { storeFavoritesApi } from '../services/storeFavoritesApi';
@@ -15,6 +15,12 @@ interface Props {
   darkMode?: boolean;
   onToggleDarkMode?: () => void;
 }
+
+type MosaicVariant = 'normal' | 'tall';
+
+const MOSAIC_PATTERN: MosaicVariant[] = ['tall', 'normal', 'normal', 'tall', 'normal', 'tall'];
+const isDiscountProduct = (product: Product) =>
+  product.category === 'Descuento' && Number(product.compare_at_price) > Number(product.price);
 
 export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProfile, cartCount, darkMode, onToggleDarkMode }: Props) {
   const cachedProducts = productsApi.getCachedProducts();
@@ -38,6 +44,17 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
   const lastScrollTopRef = useRef(0);
 
   const favoriteCount = Object.keys(favorites).length;
+  const mosaicColumns = useMemo(() => {
+    const columns: Array<Array<{ product: Product; index: number; variant: MosaicVariant }>> = [[], []];
+
+    products.forEach((product, index) => {
+      const variant = MOSAIC_PATTERN[index % MOSAIC_PATTERN.length];
+      const target = index % 2;
+      columns[target].push({ product, index, variant });
+    });
+
+    return columns;
+  }, [products]);
 
   const favoritesRef = useRef(favorites);
   useEffect(() => {
@@ -159,23 +176,31 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
   };
 
   return (
-    <div ref={galleryScrollRef} onScroll={handleScroll} className="flex flex-col h-[100dvh] overflow-y-auto" style={{ background: '#fef1f5' }}>
-      <header className={`sticky top-0 z-50 backdrop-blur-md border-b transition-transform duration-300 ${headerHidden && !searchOpen ? '-translate-y-full' : 'translate-y-0'}`} style={{ background: 'rgba(254,241,245,0.78)', borderColor: 'rgba(255,45,120,0.08)' }}>
+    <div ref={galleryScrollRef} onScroll={handleScroll} className="flex flex-col h-[100dvh] overflow-y-auto" style={{ background: darkMode ? '#1a0c12' : '#fff8fb' }}>
+      <header
+        className={`sticky top-0 z-50 backdrop-blur-md transition-transform duration-300 ${headerHidden && !searchOpen ? '-translate-y-full' : 'translate-y-0'}`}
+        style={{
+          background: darkMode ? 'rgba(26,12,18,0.90)' : 'rgba(255,248,251,0.82)',
+        }}
+      >
         <div className="flex items-center gap-3 px-5 h-12">
-          <button onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.65)' }} aria-label="Volver">
+          <button onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.65)' }} aria-label="Volver">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5"><path d="m15 18-6-6 6-6"/></svg>
           </button>
           <div className="flex-1 min-w-0">
-            <p className="font-black text-[17px] leading-none" style={{ color: '#ff2d78' }}>Leidy Shop</p>
+            <p className="font-black text-[17px] leading-none">
+              <span style={{ color: '#ff2d78' }}>Leidy</span>{' '}
+              <span style={{ color: darkMode ? '#bdaeb8' : '#6b7280' }}>Candy</span>
+            </p>
           </div>
-          <button onClick={onToggleDarkMode} className="w-9 h-9 rounded-full flex items-center justify-center transition-colors" style={{ background: 'rgba(255,255,255,0.65)' }} title="Modo visual">
+          <button onClick={onToggleDarkMode} className="w-9 h-9 rounded-full flex items-center justify-center transition-colors" style={{ background: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.65)' }} title="Modo visual">
             {darkMode ? (
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.4"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
             ) : (
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.4"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8z"/></svg>
             )}
           </button>
-          <button onClick={onOpenCart} className="relative w-9 h-9 rounded-full flex items-center justify-center text-[#ff2d78] transition-colors" style={{ background: 'rgba(255,255,255,0.65)' }} aria-label="Ver carrito">
+          <button onClick={onOpenCart} className="relative w-9 h-9 rounded-full flex items-center justify-center text-[#ff2d78] transition-colors" style={{ background: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.65)' }} aria-label="Ver carrito">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
               <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
@@ -188,14 +213,15 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
 
         {searchOpen && (
           <div className="px-5 pb-2">
-            <div className="flex items-center gap-2 rounded-2xl px-4 h-9" style={{ background: 'rgba(255,255,255,0.65)' }}>
+            <div className="flex items-center gap-2 rounded-2xl px-4 h-9" style={{ background: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.65)' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5" className="flex-shrink-0" style={{ opacity: 0.5 }}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
               <input
                 ref={searchInputRef}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Buscar producto..."
-                className="flex-1 bg-transparent text-[14px] font-medium outline-none text-gray-800"
+                className="flex-1 bg-transparent text-[14px] font-medium outline-none"
+                style={{ color: darkMode ? '#e8d0da' : '#1f2937' }}
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')} className="transition-colors flex-shrink-0" aria-label="Limpiar busqueda">
@@ -226,31 +252,45 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
       <div className="flex-1 px-4 pt-4 pb-24 overflow-visible">
         {loading ? (
           <div className="grid grid-cols-2 gap-3">
-            {[1, 2, 3, 4].map(n => <div key={n} className="bg-gray-100 rounded-[22px] aspect-[3/4] animate-pulse" />)}
+            {(['tall', 'normal', 'normal', 'tall'] as MosaicVariant[]).map((variant, n) => (
+              <div
+                key={`${variant}-${n}`}
+                className="bg-gray-100 rounded-[22px] animate-pulse"
+                style={{ aspectRatio: variant === 'tall' ? '9 / 16' : '2 / 3' }}
+              />
+            ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2.5">
-            {products.map((p, idx) => {
-              const liked = Boolean(favorites[p.id]);
-              return (
-                <ProductCard
-                  key={p.id}
-                  product={p}
-                  index={idx}
-                  liked={liked}
-                  reserved={Boolean(reservedMap[String(p.id)])}
-                  darkMode={darkMode}
-                  onSelect={onProductSelect}
-                  onToggleFavorite={toggleFavorite}
-                />
-              );
-            })}
+          <div className="grid grid-cols-2 gap-3 items-start">
+            {mosaicColumns.map((column, columnIndex) => (
+              <div key={columnIndex} className="flex flex-col gap-4">
+                {column.map(({ product, index, variant }) => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    index={index}
+                    variant={variant}
+                    liked={Boolean(favorites[product.id])}
+                    reserved={Boolean(reservedMap[String(product.id)])}
+                    darkMode={darkMode}
+                    onSelect={onProductSelect}
+                    onToggleFavorite={toggleFavorite}
+                  />
+                ))}
+              </div>
+            ))}
           </div>
         )}
 
         {loadingMore && (
           <div className="grid grid-cols-2 gap-3 mt-3">
-            {[1, 2].map(n => <div key={n} className="bg-gray-100 rounded-[22px] aspect-[3/4] animate-pulse" />)}
+            {(['normal', 'tall'] as MosaicVariant[]).map((variant, n) => (
+              <div
+                key={`${variant}-${n}`}
+                className="bg-gray-100 rounded-[22px] animate-pulse"
+                style={{ aspectRatio: variant === 'tall' ? '9 / 16' : '2 / 3' }}
+              />
+            ))}
           </div>
         )}
         <div ref={loadMoreRef} className="h-20 w-full" />
@@ -278,6 +318,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
 const ProductCard = memo(function ProductCard({
   product,
   index,
+  variant,
   liked,
   reserved,
   darkMode,
@@ -286,6 +327,7 @@ const ProductCard = memo(function ProductCard({
 }: {
   product: Product;
   index: number;
+  variant: MosaicVariant;
   liked: boolean;
   reserved: boolean;
   darkMode?: boolean;
@@ -304,8 +346,12 @@ const ProductCard = memo(function ProductCard({
     <article>
       <div
         onClick={() => product.stock > 0 && !reserved && onSelect(product)}
-        className="relative aspect-[3/4] rounded-[22px] overflow-hidden cursor-pointer"
-        style={{ background: 'rgba(255,255,255,0.75)', boxShadow: darkMode ? 'none' : '0 2px 12px rgba(255,45,120,0.10)' }}
+        className="relative rounded-[22px] overflow-hidden cursor-pointer"
+        style={{
+          aspectRatio: variant === 'tall' ? '9 / 16' : '2 / 3',
+          background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.75)',
+          boxShadow: darkMode ? 'none' : '0 2px 12px rgba(255,45,120,0.10)',
+        }}
       >
         <img
           src={imageSrc}
@@ -325,7 +371,7 @@ const ProductCard = memo(function ProductCard({
             event.stopPropagation();
             onToggleFavorite(product);
           }}
-          className="absolute right-2 bottom-2 w-7 h-7 rounded-full bg-white/90 backdrop-blur flex items-center justify-center shadow-sm active:scale-90 transition-transform"
+          className="absolute right-2 bottom-2 w-7 h-7 rounded-full bg-white/72 backdrop-blur flex items-center justify-center shadow-sm active:scale-90 transition-transform"
           aria-label={liked ? 'Quitar de favoritos' : 'Agregar a favoritos'}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill={liked ? '#ff2d78' : 'none'} stroke={liked ? '#ff2d78' : '#ff2d78'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -343,9 +389,20 @@ const ProductCard = memo(function ProductCard({
           </div>
         ) : null}
       </div>
-      <p className="mt-2 px-1 font-black text-[14px] leading-none" style={{ color: '#ff2d78' }}>
-        {product.price} <span className="text-[10px] text-gray-400 font-bold">Bs</span>
-      </p>
+      {isDiscountProduct(product) ? (
+        <div className="mt-2 px-0.5 flex items-baseline gap-1.5">
+          <span className="text-[12px] font-medium line-through" style={{ color: darkMode ? '#b99aa8' : '#9ca3af' }}>
+            {Number(product.compare_at_price).toFixed(0)} Bs
+          </span>
+          <span className="text-[14px] font-medium leading-none" style={{ color: darkMode ? '#ff7bab' : '#ff2d78' }}>
+            {Number(product.price).toFixed(0)} Bs
+          </span>
+        </div>
+      ) : (
+        <p className="mt-2 px-0.5 text-[14px] font-medium leading-none" style={{ color: darkMode ? '#ff7bab' : '#ff2d78' }}>
+          {Number(product.price).toFixed(0)} Bs
+        </p>
+      )}
     </article>
   );
 });
