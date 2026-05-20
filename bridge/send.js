@@ -62,7 +62,7 @@ export async function handleBridgeApiRoute(req, res, client, isConnected) {
     }
 
     try {
-      const { phone, message } = await readJsonBody(req);
+      const { phone, message, linkPreview } = await readJsonBody(req);
       if (!phone || !message) {
         sendJson(res, 400, { error: 'Se requieren phone y message' });
         return true;
@@ -72,7 +72,7 @@ export async function handleBridgeApiRoute(req, res, client, isConnected) {
       const chatId = `${rawPhone}@c.us`;
 
       console.log(`Enviando mensaje a ${chatId}...`);
-      await client.sendMessage(chatId, message);
+      await client.sendMessage(chatId, message, { linkPreview: linkPreview !== false });
       console.log(`Mensaje enviado a ${chatId}`);
 
       sendJson(res, 200, { ok: true, chatId, sent_at: new Date().toISOString() });

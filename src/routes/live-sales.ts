@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   ensureMainCustomerForLive,
   ensureMainDailyPedido,
+  markMainCustomerVerified,
   namesMatch,
   normalizeLivePhone,
   parseLiveMonto,
@@ -716,6 +717,13 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
       if (updateError) throw updateError;
 
       const order = await recomputeAndSync(userId, pagoLive.pedido_live_id);
+      await markMainCustomerVerified(supabaseMain, {
+        userId,
+        customerId: Number(customer.id),
+        name: nombre,
+        phone: pagoLive.phone,
+        source: 'manual',
+      });
       await syncPanelClientEstado(String(pagoLive.cliente_id), order);
       res.json({ ok: true, payment: updatedPago, order });
     } catch (err: any) {

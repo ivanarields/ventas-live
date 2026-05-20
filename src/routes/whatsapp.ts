@@ -400,7 +400,11 @@ export async function processNextWhatsappQueueMessage(
         'Content-Type': 'application/json',
         'x-webhook-secret': WEBHOOK_SECRET,
       },
-      body: JSON.stringify({ phone: message.phone, message: message.message_body }),
+      body: JSON.stringify({
+        phone: message.phone,
+        message: message.message_body,
+        linkPreview: message.reference_type === 'store_order' ? false : undefined,
+      }),
       signal: controller.signal,
     });
     clearTimeout(timeout);

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { CheckCircle2 } from 'lucide-react';
 import { storeAuth } from '../services/storeAuth';
 import { Product } from '../services/productsApi';
 import { storeFavoritesApi } from '../services/storeFavoritesApi';
@@ -16,6 +17,13 @@ interface StoreOrder {
   created_at: string;
   customer_wa: string;
   customer_selection: { confirmed?: boolean; confirmed_at?: string; confirmed_by?: string } | null;
+}
+
+interface ProfileUser {
+  phone: string;
+  name: string;
+  is_verified_customer?: boolean;
+  verified_source?: string | null;
 }
 
 interface Props {
@@ -38,7 +46,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, initialTab, darkMode }: Props) {
-  const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
+  const [user, setUser] = useState<ProfileUser | null>(null);
   // Pedidos: inicializamos vacío pero con caché de localStorage para mostrar inmediato
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   // Favoritos: inicializamos desde caché local para que el contador aparezca al instante
@@ -132,6 +140,13 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
 
       if (meRes.ok) {
         const data = await meRes.json();
+        const customer = data.customer ?? {};
+        setUser(prev => ({
+          phone: prev?.phone ?? phone,
+          name: String(customer.display_name || prev?.name || '').trim(),
+          is_verified_customer: !!customer.is_verified_customer,
+          verified_source: customer.verified_source ?? null,
+        }));
         setOrders(data.orders ?? []);
         try { localStorage.setItem(cacheKey, JSON.stringify(data.orders ?? [])); } catch {}
       }
@@ -235,6 +250,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
   const activeOrders = orders.filter(order => order.status !== 'cancelled');
   const totalSpent = activeOrders.reduce((sum, order) => sum + Number(order.total), 0);
   const nextOrder = activeOrders[0];
+  const displayName = user?.name?.trim() || 'Mi perfil';
 
   // La pestaña Confirmar solo aparece cuando hay un pedido activo sin confirmar
   const needsConfirmation = !!nextOrder && !nextOrder.customer_selection?.confirmed;
@@ -349,10 +365,17 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
         <div className="flex items-center gap-3 mb-4">
           <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 border-2 border-white/80"
             style={{ boxShadow: '0 4px 16px rgba(255,45,120,0.18)' }}>
-            <img src="/logo.png" alt="Leidy American" className="w-full h-full object-cover" />
+            <img src="/logo.png" alt="LeidyCandy" className="w-full h-full object-cover" />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-[18px] font-black leading-tight" style={{ color: darkMode ? 'white' : '#1f2937' }}>Mi perfil</h1>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <h1 className="text-[18px] font-black leading-tight truncate" style={{ color: darkMode ? 'white' : '#1f2937' }}>{displayName}</h1>
+              {user?.is_verified_customer && (
+                <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white" title="Cliente verificado">
+                  <CheckCircle2 size={14} strokeWidth={3} />
+                </span>
+              )}
+            </div>
             <p className="text-[12px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>+591 {user?.phone}</p>
           </div>
         </div>
@@ -404,7 +427,14 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                 <div className="min-w-0 flex-1 py-1">
                   <p className="text-[13px] font-black leading-snug line-clamp-2" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{product.title}</p>
                   <p className="text-[11px] text-gray-400 font-bold mt-0.5">{product.category}</p>
-                  <p className="text-[15px] font-black text-[#ff2d78] mt-2">{product.price.toFixed(2)} Bs</p>
+                  {product.category === 'Descuento' && Number(product.compare_at_price) > Number(product.price) ? (
+                    <div className="mt-2 flex items-baseline gap-1.5">
+                      <span className="text-[12px] font-bold text-gray-400 line-through">{Number(product.compare_at_price).toFixed(0)} Bs</span>
+                      <span className="text-[15px] font-black text-[#ff2d78]">{product.price.toFixed(2)} Bs</span>
+                    </div>
+                  ) : (
+                    <p className="text-[15px] font-black text-[#ff2d78] mt-2">{product.price.toFixed(2)} Bs</p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-2">
                   <button onClick={() => onProductSelect?.(product)} className="px-3 py-2 rounded-full bg-[#ff2d78] text-white text-[11px] font-black">Comprar</button>
@@ -554,7 +584,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                         className="w-full h-12 rounded-2xl font-black text-[13px] text-white flex items-center justify-center gap-2"
                         style={{ background: '#25D366' }}
                       >
-                        <span>💬</span> Avisarle a Leidy Shop
+                        <span>💬</span> Avisarle a LeidyCandy
                       </button>
                     )}
                   </div>

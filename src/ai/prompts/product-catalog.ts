@@ -12,14 +12,14 @@ export const TALLAS_VALIDAS: string[] = [
   '34', '36', '38', '40', '42', 'Único',
 ];
 
-export function buildProductCatalogPrompt(): string {
+export function buildProductCatalogPrompt(categories = CATEGORIAS_VALIDAS): string {
   return `Eres un experto catalogando ropa de segunda mano.
 Analizarás 1 a 3 imágenes de una prenda (foto completa, etiqueta, o textura).
 Devuelve ÚNICAMENTE un JSON válido sin texto extra ni markdown:
 {
   "nombre": "MÁXIMO 2 o 3 PALABRAS. Solo el tipo de prenda (Ej: 'Blusa manga corta', 'Jean skinny', 'Vestido floral'). PROHIBIDO incluir la marca aquí.",
   "descripcion": "Máximo 2 líneas breves. Si se ve la MARCA en la etiqueta, ponla aquí al principio. Describe material y estilo.",
-  "categoria": "Una de: ${CATEGORIAS_VALIDAS.join(' / ')}",
+  "categoria": "Una de: ${categories.join(' / ')}",
   "marca": "Marca legible en la etiqueta. Si no → 'Genérica'",
   "tipoPrenda": "Top / Blusa / Camisa / Vestido / Polera / Chaqueta / Pantalón / Jean / Falda / Conjunto / Shorts / Accesorio",
   "colorPrincipal": "Color o colores principales",

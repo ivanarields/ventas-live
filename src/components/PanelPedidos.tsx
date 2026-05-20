@@ -710,6 +710,7 @@ export function PanelPedidos() {
               const displayName = c.nombre || fmt(c.phone);
               const initial = (c.nombre ? c.nombre[0] : fmt(c.phone)[0]).toUpperCase();
               const pedidoLive = pedidosLivePorCliente[c.id];
+              const clienteVerificado = c.estado === 'pagado_verificado' || pedidoLive?.estado === 'pagos_verificados';
 
               return (
                 <button key={c.id} onClick={() => setDetalle(c)}
@@ -720,7 +721,14 @@ export function PanelPedidos() {
                       {initial}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-black text-slate-800 text-sm truncate">{displayName}</p>
+                      <p className="font-black text-slate-800 text-sm truncate flex items-center gap-1">
+                        <span className="truncate">{displayName}</span>
+                        {clienteVerificado && (
+                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white flex-shrink-0" title="Cliente verificado">
+                            <CheckCircle size={11} strokeWidth={4} />
+                          </span>
+                        )}
+                      </p>
                       {c.nombre && (
                         <p className="text-[10px] text-slate-400 font-mono truncate">{fmt(c.phone)}</p>
                       )}

@@ -75,6 +75,7 @@ interface StoreProduct {
   available: boolean;
   stock?: number;
   priority_order: number;
+  compare_at_price?: number | null;
 }
 
 interface StoreOrder {
@@ -89,11 +90,13 @@ interface StoreOrder {
   wa_sent: boolean;
   created_at: string;
   expires_at: string | null;
+  is_verified_customer?: boolean;
+  verified_source?: string | null;
 }
 
-const CATEGORIAS = ['General', 'Blusas', 'Vestidos', 'Chaquetas', 'Conjuntos', 'Accesorios', 'Pantalones', 'Faldas'];
 const TALLAS_COMUNES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '34', '36', '38', '40', '42', 'Único'];
 const BRAND = '#ff2d78';
+const DISCOUNT_CATEGORY = 'Descuento';
 type ProductFilter = 'active' | 'reserved' | 'sold' | 'hidden' | 'all';
 
 const catColor = (cat: string) => {
@@ -108,8 +111,9 @@ const catColor = (cat: string) => {
 const EMPTY_FORM = {
   name: '',
   price: '',
+  compare_at_price: '',
   description: '',
-  category: 'General',
+  category: 'Blusas',
   sizes: [] as string[],
   images: [] as string[],
   available: true,
@@ -119,6 +123,7 @@ const isSoldProduct = (product: StoreProduct) => Number(product.stock ?? 1) <= 0
 
 export function AdminTiendaView({ userId, authToken }: { userId: string; authToken: string }) {
   const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'clientes' | 'confirmaciones' | 'config'>('productos');
+  const [configTab, setConfigTab] = useState<'categorias' | 'tienda' | 'retiros'>('categorias');
   const [pickupDates, setPickupDates] = useState<Array<{ date: string; label: string; slots: string[] }>>([]);
   const [pickupSaving, setPickupSaving] = useState(false);
   const [products, setProducts] = useState<StoreProduct[]>([]);
@@ -135,6 +140,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const [talla, setTalla] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [reorderSaving, setReorderSaving] = useState(false);
   const [compressing, setCompressing] = useState(false);
   const [qrUploading, setQrUploading] = useState(false);
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -147,9 +153,11 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   const formRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const categoryOptions = storeChips
-    .filter(chip => chip.kind === 'category' && chip.active && chip.value !== 'Todos')
+    .filter(chip => (chip.kind === 'category' || chip.kind === 'discount') && chip.active && chip.value !== 'Todos')
     .map(chip => chip.value);
-  const formCategoryOptions = categoryOptions.length > 0 ? categoryOptions : CATEGORIAS;
+  const formCategoryOptions = categoryOptions.length > 0 ? categoryOptions : DEFAULT_STORE_CHIPS.filter(chip => chip.active).map(chip => chip.value);
+  const firstOfficialCategory = formCategoryOptions[0] ?? DISCOUNT_CATEGORY;
+  const isDiscountProduct = form.category === DISCOUNT_CATEGORY;
   const reservedProductIds = new Set(
     orders
       .filter(order => order.status === 'pending')
@@ -232,7 +240,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       const res = await fetch('/api/ai/product-from-images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
-        body: JSON.stringify({ imageUrls: form.images }),
+        body: JSON.stringify({ imageUrls: form.images, categories: formCategoryOptions }),
       });
 
       const json = await res.json().catch(() => ({ ok: false, error: 'Respuesta inválida del servidor' }));
@@ -246,7 +254,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       const ai = json.data;
 
       // Mapear categoría contra las opciones disponibles
-      const catMatch = formCategoryOptions.includes(ai.categoria) ? ai.categoria : 'General';
+      const catMatch = formCategoryOptions.includes(ai.categoria) ? ai.categoria : firstOfficialCategory;
 
       // Mapear tallas: solo las que coincidan con las opciones disponibles
       const tallasValidas = (ai.tallas as string[]).filter(
@@ -381,7 +389,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     setLoading(true);
     try {
       const [pRes, oRes] = await Promise.all([
-        fetch('/api/products?admin=true', { headers: { 'x-user-id': userId } }),
+        fetch('/api/products?admin=true&limit=500', { headers: { 'x-user-id': userId } }),
         fetch('/api/store-orders/admin', { headers: { 'x-user-id': userId, Authorization: `Bearer ${authToken}` } }),
       ]);
       if (pRes.ok) {
@@ -399,7 +407,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   useEffect(() => { loadAll(); }, []);
 
   const openNew = () => {
-    setForm({ ...EMPTY_FORM });
+    setForm({ ...EMPTY_FORM, category: firstOfficialCategory });
     setEditingId(null);
     setSaveError('');
     setAiStatus('idle');
@@ -411,11 +419,13 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
   };
 
   const openEdit = (p: StoreProduct) => {
+    const officialCategory = formCategoryOptions.includes(p.category) ? p.category : firstOfficialCategory;
     setForm({
       name: p.name,
       price: String(p.price),
+      compare_at_price: p.compare_at_price ? String(p.compare_at_price) : '',
       description: p.description ?? '',
-      category: p.category,
+      category: officialCategory,
       sizes: [...(p.sizes ?? [])],
       images: [...(p.images ?? [])],
       available: p.available,
@@ -465,12 +475,21 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
 
   const handleSave = async () => {
     if (!form.name.trim() || !form.price) return;
+    if (form.category === DISCOUNT_CATEGORY) {
+      const before = Number(form.compare_at_price);
+      const final = Number(form.price);
+      if (!Number.isFinite(before) || before <= final) {
+        setSaveError('En Descuento, el precio antes debe ser mayor que el precio final.');
+        return;
+      }
+    }
     setSaving(true);
     setSaveError('');
     try {
       const body = {
         name: form.name.trim(),
         price: Number(form.price),
+        compare_at_price: form.category === DISCOUNT_CATEGORY ? Number(form.compare_at_price) : null,
         description: form.description.trim(),
         category: form.category,
         sizes: form.sizes,
@@ -490,7 +509,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       }
       setShowForm(false);
       setEditingId(null);
-      setForm({ ...EMPTY_FORM });
+      setForm({ ...EMPTY_FORM, category: firstOfficialCategory });
       setAiStatus('idle');
       setAiError('');
       await loadAll();
@@ -548,6 +567,51 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
     }
   };
 
+  const moveActiveProduct = async (productId: number, direction: -1 | 1) => {
+    if (reorderSaving) return;
+    const activeProducts = products.filter(product => {
+      const reserved = reservedProductIds.has(String(product.id));
+      const sold = isSoldProduct(product);
+      return product.available && !sold && !reserved;
+    });
+    const currentIndex = activeProducts.findIndex(product => product.id === productId);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= activeProducts.length) return;
+
+    const reorderedActive = [...activeProducts];
+    [reorderedActive[currentIndex], reorderedActive[nextIndex]] = [reorderedActive[nextIndex], reorderedActive[currentIndex]];
+    const nextPriorities = new Map(reorderedActive.map((product, index) => [product.id, (index + 1) * 10]));
+    const previousProducts = products;
+
+    setProducts(prev => {
+      const activeSet = new Set(reorderedActive.map(product => product.id));
+      const inactive = prev.filter(product => !activeSet.has(product.id));
+      return [
+        ...reorderedActive.map(product => ({ ...product, priority_order: nextPriorities.get(product.id) ?? product.priority_order })),
+        ...inactive,
+      ];
+    });
+
+    setReorderSaving(true);
+    try {
+      const res = await fetch('/api/products/reorder', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ productIds: reorderedActive.map(product => product.id) }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'No se pudo guardar el orden');
+      }
+    } catch (err) {
+      console.error(err);
+      setProducts(previousProducts);
+      alert(err instanceof Error ? err.message : 'No se pudo guardar el orden. Intenta de nuevo.');
+    } finally {
+      setReorderSaving(false);
+    }
+  };
+
   const updateOrder = async (id: number, body: object) => {
     const res = await fetch(`/api/store-orders/${id}`, {
       method: 'PATCH',
@@ -563,7 +627,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-black text-gray-900">Panel de Tienda</h2>
-          <p className="text-xs text-gray-400 font-medium">Leidy Shop</p>
+          <p className="text-xs text-gray-400 font-medium">LeidyCandy</p>
         </div>
         <div className="flex items-center gap-1.5">
           <a
@@ -715,7 +779,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   <input type="text" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[13px] font-medium outline-none focus:border-pink-400" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase">Precio (Bs)*</label>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">{isDiscountProduct ? 'Precio final (Bs)*' : 'Precio (Bs)*'}</label>
                   <input type="number" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[13px] font-medium outline-none focus:border-pink-400" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
                 </div>
               </div>
@@ -723,7 +787,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] font-black text-gray-400 uppercase">Categoría</label>
-                  <select className="w-full mt-1 rounded-lg border border-gray-200 px-2 py-1.5 text-[12px] font-medium outline-none bg-white" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+                  <select className="w-full mt-1 rounded-lg border border-gray-200 px-2 py-1.5 text-[12px] font-medium outline-none bg-white" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value, compare_at_price: e.target.value === DISCOUNT_CATEGORY ? f.compare_at_price : '' }))}>
                     {formCategoryOptions.map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
@@ -734,6 +798,13 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                   </div>
                 </div>
               </div>
+
+              {isDiscountProduct && (
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Precio antes (Bs)</label>
+                  <input type="number" className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[13px] font-medium outline-none focus:border-pink-400" value={form.compare_at_price} onChange={e => setForm(f => ({ ...f, compare_at_price: e.target.value }))} />
+                </div>
+              )}
 
               <div>
                 <label className="text-[10px] font-black text-gray-400 uppercase">Descripción</label>
@@ -804,16 +875,17 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
             </div>
           ) : (
             <div className="space-y-1.5">
-              {visibleProducts.map(p => {
+              {visibleProducts.map((p, visibleIndex) => {
                 const isReserved = reservedProductIds.has(String(p.id));
                 const sold = isSoldProduct(p);
                 const status = sold ? 'Vendido' : isReserved ? 'Reservado' : p.available ? 'Activo' : 'Oculto';
                 const statusColor = sold ? '#ef4444' : isReserved ? '#3b82f6' : p.available ? '#10b981' : '#9ca3af';
                 const photoCount = p.images?.length ?? 0;
+                const canReorder = productFilter === 'active' && !isReserved && !sold && p.available;
                 const meta = [
                   p.category,
                   ...(p.sizes ?? []),
-                  `${p.price} Bs`,
+                  p.category === DISCOUNT_CATEGORY && p.compare_at_price ? `${p.compare_at_price}→${p.price} Bs` : `${p.price} Bs`,
                   `${photoCount} foto${photoCount === 1 ? '' : 's'}`,
                 ];
                 return (
@@ -847,6 +919,26 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
 
                   {/* Acciones */}
                   <div className="flex items-center justify-end gap-2 flex-shrink-0">
+                    {canReorder && (
+                      <div className="flex flex-col gap-1">
+                        <button
+                          title="Subir en la tienda"
+                          disabled={visibleIndex === 0 || reorderSaving}
+                          onClick={() => moveActiveProduct(p.id, -1)}
+                          className="w-7 h-7 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed hover:bg-gray-100 transition-colors"
+                        >
+                          <ChevronUp size={13} />
+                        </button>
+                        <button
+                          title="Bajar en la tienda"
+                          disabled={visibleIndex === visibleProducts.length - 1 || reorderSaving}
+                          onClick={() => moveActiveProduct(p.id, 1)}
+                          className="w-7 h-7 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed hover:bg-gray-100 transition-colors"
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+                      </div>
+                    )}
                     {(!p.available || sold) && (
                       <button
                         title="Volver a poner a la venta con código nuevo"
@@ -978,6 +1070,11 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                         <p className="text-sm font-black text-gray-800">#{order.id}</p>
+                        {order.is_verified_customer && (
+                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white" title="Cliente verificado">
+                            <Check size={11} strokeWidth={4} />
+                          </span>
+                        )}
                         <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: cfg.bg, color: cfg.text }}>
                           {cfg.label}
                         </span>
@@ -995,6 +1092,12 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                         {new Date(order.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         {order.customer_wa && <span className="ml-1 text-gray-500">· {order.customer_wa}</span>}
                       </p>
+                      {order.customer_name && (
+                        <p className="text-[11px] text-gray-600 font-bold truncate flex items-center gap-1">
+                          <span className="truncate">{order.customer_name}</span>
+                          {order.is_verified_customer && <Check size={12} className="text-emerald-500 flex-shrink-0" strokeWidth={4} />}
+                        </p>
+                      )}
                       <p className="text-[14px] font-black mt-0.5" style={{ color: BRAND }}>{Number(order.total).toFixed(2)} Bs
                         <span className="text-[10px] text-gray-400 font-medium ml-1">{order.items?.length ?? 0} prenda{(order.items?.length ?? 0) !== 1 ? 's' : ''}</span>
                       </p>
@@ -1037,7 +1140,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                       {/* Acciones según estado */}
                       {order.status === 'pending' && (
                         <div className="grid grid-cols-2 gap-1.5">
-                          <button onClick={() => updateOrder(order.id, { status: 'confirmed', hideProducts: true })}
+                          <button onClick={() => updateOrder(order.id, { status: 'paid', hideProducts: true })}
                             className="flex items-center justify-center gap-1 py-2 rounded-xl font-black text-[11px] text-white" style={{ background: BRAND }}>
                             <Check size={12} /> Vendido + Ocultar
                           </button>
@@ -1187,6 +1290,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 const name = profile.name || 'Cliente tienda';
                 const orderCount = profile.orders?.length ?? 0;
                 const total = Number(profile.total ?? 0);
+                const verified = !!profile.is_verified_customer;
                 return (
                   <div key={profile.key || idx} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3">
                     {/* Avatar */}
@@ -1195,7 +1299,14 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                       {name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-black text-gray-800 truncate">{name}</p>
+                      <p className="text-sm font-black text-gray-800 truncate flex items-center gap-1">
+                        <span className="truncate">{name}</span>
+                        {verified && (
+                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white flex-shrink-0" title="Cliente verificado">
+                            <Check size={11} strokeWidth={4} />
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[11px] text-gray-400">{phone ? `+591 ${phone}` : 'Sin teléfono'}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
@@ -1227,8 +1338,24 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
       {/* ─── CONFIGURACION ─── */}
       {subTab === 'config' && (
         <div className="space-y-3">
-          <p className="text-sm font-black text-gray-800">Configuracion de tienda</p>
+          <div className="grid grid-cols-3 gap-1 rounded-2xl bg-gray-100 p-1">
+            {[
+              { key: 'categorias', label: 'Categorias' },
+              { key: 'tienda', label: 'Tienda' },
+              { key: 'retiros', label: 'Retiros' },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setConfigTab(tab.key as 'categorias' | 'tienda' | 'retiros')}
+                className={`h-9 rounded-xl text-[11px] font-black transition-all ${configTab === tab.key ? 'bg-white text-[#ff2d78] shadow-sm' : 'text-gray-400'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
+          {configTab === 'categorias' && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1260,24 +1387,26 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                       const nextLabel = e.target.value;
                       const next = storeChips.map((c, i) => {
                         if (i !== idx) return c;
+                        if (c.kind === 'discount') return { ...c, label: DISCOUNT_CATEGORY, value: DISCOUNT_CATEGORY };
                         const shouldMoveValue = c.id.startsWith('chip-') || c.value === c.label;
                         return { ...c, label: nextLabel, value: shouldMoveValue ? nextLabel : c.value };
                       });
                       setStoreChips(next);
                     }}
+                    readOnly={chip.kind === 'discount'}
                     className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] font-bold outline-none"
                   />
                   <select
                     value={chip.kind}
                     onChange={e => {
-                      const next = storeChips.map((c, i) => i === idx ? { ...c, kind: (e.target.value === 'promo' ? 'promo' : 'category') as 'promo' | 'category' } : c);
+                      const next = storeChips.map((c, i) => i === idx ? { ...c, kind: (e.target.value === 'discount' ? 'discount' : 'category') as 'discount' | 'category', label: e.target.value === 'discount' ? DISCOUNT_CATEGORY : c.label, value: e.target.value === 'discount' ? DISCOUNT_CATEGORY : c.value } : c);
                       setStoreChips(next);
                       saveStoreChips(next);
                     }}
                     className="rounded-lg border border-gray-200 bg-white px-1.5 py-1.5 text-[11px] font-black outline-none"
                   >
                     <option value="category">Cat.</option>
-                    <option value="promo">Promo</option>
+                    <option value="discount">Desc.</option>
                   </select>
                   <button
                     type="button"
@@ -1315,7 +1444,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               }}
               className="w-full h-10 rounded-xl border border-dashed border-pink-200 bg-pink-50 text-[12px] font-black text-[#ff2d78] disabled:opacity-50"
             >
-              Agregar categoria o promo
+              Agregar categoria
             </button>
             <button
               type="button"
@@ -1326,11 +1455,31 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               Guardar categorias
             </button>
             <p className="text-[10px] text-gray-400 leading-relaxed">
-              Nota: por ahora cada producto conserva una categoria principal. Los botones Promo/Rebajas funcionan como categorias comerciales ligeras sin agregar peso al catalogo.
+              Nota: las categorias de esta lista mandan en el catalogo y en crear/editar productos. Descuento muestra precio antes y precio final.
             </p>
           </div>
+          )}
 
+          {configTab === 'tienda' && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-black text-gray-800">Publicar productos en redes</p>
+                <p className="text-[11px] text-gray-400 font-medium">Cuando esta activo, los productos nuevos se envian a Buffer.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => saveSetting('buffer_publish_enabled', settings.buffer_publish_enabled === 'false' ? 'true' : 'false')}
+                className="h-8 w-14 rounded-full p-1 transition-colors"
+                style={{ background: settings.buffer_publish_enabled === 'false' ? '#e5e7eb' : BRAND }}
+                aria-pressed={settings.buffer_publish_enabled !== 'false'}
+              >
+                <span
+                  className="block h-6 w-6 rounded-full bg-white shadow-sm transition-transform"
+                  style={{ transform: settings.buffer_publish_enabled === 'false' ? 'translateX(0)' : 'translateX(24px)' }}
+                />
+              </button>
+            </div>
             <div>
               <label className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Nombre tienda</label>
               <input type="text" value={settings.store_name || ''}
@@ -1373,8 +1522,10 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                 className="w-full mt-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] font-medium outline-none focus:border-pink-400 resize-none" />
             </div>
           </div>
+          )}
 
           {/* ─── Fechas de retiro disponibles ─── */}
+          {configTab === 'retiros' && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
             <div>
               <p className="text-sm font-black text-gray-800">Fechas de retiro disponibles</p>
@@ -1435,6 +1586,7 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               className="w-full h-10 rounded-xl bg-[#ff2d78] text-[12px] font-black text-white shadow-sm disabled:opacity-50"
             >{pickupSaving ? 'Guardando...' : 'Guardar fechas'}</button>
           </div>
+          )}
         </div>
       )}
     </div>

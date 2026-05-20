@@ -1693,6 +1693,8 @@ const PORT = Number(process.env.PORT || 3001);
         stock: row.stock ?? 1,
         category: row.category ?? 'General',
         priority_order: row.priority_order ?? 0,
+        views: Number(row.views ?? 0),
+        likes: Number(row.likes ?? 0),
       }));
   };
 
@@ -1919,6 +1921,40 @@ const PORT = Number(process.env.PORT || 3001);
       if (!data) return res.status(404).json({ error: "Producto no encontrado" });
       res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
       res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  app.post("/api/products/:id/view", async (req, res) => {
+    try {
+      const productId = Number(req.params.id);
+      const { data, error } = await supabaseStore
+        .from("products")
+        .select("views")
+        .eq("id", productId)
+        .single();
+      if (error || !data) return res.status(404).json({ error: "Producto no encontrado" });
+      const newViews = (data.views || 0) + 1;
+      await supabaseStore.from("products").update({ views: newViews }).eq("id", productId);
+      res.json({ success: true, views: newViews });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
+  app.post("/api/products/:id/like", async (req, res) => {
+    try {
+      const productId = Number(req.params.id);
+      const { data, error } = await supabaseStore
+        .from("products")
+        .select("likes")
+        .eq("id", productId)
+        .single();
+      if (error || !data) return res.status(404).json({ error: "Producto no encontrado" });
+      const newLikes = (data.likes || 0) + 1;
+      await supabaseStore.from("products").update({ likes: newLikes }).eq("id", productId);
+      res.json({ success: true, likes: newLikes });
     } catch (err: any) {
       res.status(500).json({ error: err?.message ?? "Error interno" });
     }
@@ -4084,6 +4120,42 @@ Responde solo JSON:
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT}`);
       console.log(`Endpoint for mobile payments: http://localhost:${PORT}/api/pagos`);
+
+      // Correr migración de la base de datos de la tienda para la columna 'likes'
+      (async () => {
+        const url = process.env.VITE_STORE_SUPABASE_URL;
+        const key = process.env.STORE_SUPABASE_SERVICE_ROLE_KEY;
+        if (!url || !key) return;
+        try {
+          const res = await fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/exec_sql`, {
+            method: 'POST',
+            headers: {
+              'apikey': key,
+              'Authorization': `Bearer ${key}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ sql: "ALTER TABLE products ADD COLUMN IF NOT EXISTS likes INTEGER DEFAULT 0;" })
+          });
+          if (res.ok) {
+            console.log("✅ Base de datos de tienda migrada con éxito (columna 'likes').");
+          } else {
+            const res2 = await fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/exec`, {
+              method: 'POST',
+              headers: {
+                'apikey': key,
+                'Authorization': `Bearer ${key}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ query: "ALTER TABLE products ADD COLUMN IF NOT EXISTS likes INTEGER DEFAULT 0;" })
+            });
+            if (res2.ok) {
+              console.log("✅ Base de datos de tienda migrada con éxito (columna 'likes' via exec).");
+            }
+          }
+        } catch (err: any) {
+          console.warn("⚠️ Nota: No se pudo auto-migrar la base de datos de la tienda:", err.message);
+        }
+      })();
     });
   }
 

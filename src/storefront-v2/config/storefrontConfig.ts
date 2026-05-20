@@ -1,4 +1,4 @@
-export type StoreChipKind = 'category' | 'promo';
+export type StoreChipKind = 'category' | 'discount';
 
 export interface StoreChip {
   id: string;
@@ -15,16 +15,11 @@ export const DEFAULT_STORE_CHIPS: StoreChip[] = [
   { id: 'blusas', label: 'Blusas', value: 'Blusas', kind: 'category', icon: 'Blusa', active: true, sort: 10 },
   { id: 'vestidos', label: 'Vestidos', value: 'Vestidos', kind: 'category', icon: 'Vestido', active: true, sort: 20 },
   { id: 'chaquetas', label: 'Chaquetas', value: 'Chaquetas', kind: 'category', icon: 'Chaq.', active: true, sort: 30 },
-  { id: 'conjuntos', label: 'Conjuntos', value: 'Conjuntos', kind: 'category', icon: 'Set', active: true, sort: 40 },
-  { id: 'pantalones', label: 'Pantalones', value: 'Pantalones', kind: 'category', icon: 'Pant.', active: true, sort: 50 },
-  { id: 'general', label: 'General', value: 'General', kind: 'category', icon: 'Gen.', active: true, sort: 60 },
-  { id: 'rebajas', label: 'Rebajas', value: 'Rebajas', kind: 'promo', icon: '-%', active: true, sort: 100 },
-  { id: 'promos', label: 'Promos', value: 'Promos', kind: 'promo', icon: 'Promo', active: true, sort: 110 },
-  { id: 'nuevo', label: 'Nuevo', value: 'Nuevo', kind: 'promo', icon: 'New', active: true, sort: 120 },
+  { id: 'descuento', label: 'Descuento', value: 'Descuento', kind: 'discount', icon: '-%', active: true, sort: 40 },
 ];
 
 function cleanChipLabel(label: string, value: string, kind: StoreChipKind): string {
-  if (kind !== 'category') return label;
+  if (kind !== 'category') return value === 'Descuento' ? 'Descuento' : label;
   return label.endsWith(` ${value}`) ? value : label;
 }
 
@@ -33,13 +28,17 @@ export function parseStoreChips(raw?: string | null): StoreChip[] {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return DEFAULT_STORE_CHIPS;
-    return parsed
+    const chips = parsed
       .map((item, index) => {
-        const kind: StoreChipKind = item.kind === 'promo' ? 'promo' : 'category';
-        const value = String(item.value || item.label || 'General').trim();
+        const rawKind = String(item.kind || '').toLowerCase();
+        const rawValue = String(item.value || item.label || 'Blusas').trim();
+        const isOldPromo = ['Promo', 'Promos', 'Rebajas'].includes(rawValue);
+        const isDiscount = rawKind === 'discount' || rawValue === 'Descuento' || isOldPromo;
+        const kind: StoreChipKind = isDiscount ? 'discount' : 'category';
+        const value = isDiscount ? 'Descuento' : rawValue;
         const rawLabel = String(item.label || item.value || 'Categoria').trim();
         return {
-          id: String(item.id || item.value || item.label || `chip-${index}`).trim() || `chip-${index}`,
+          id: isDiscount ? 'descuento' : (String(item.id || item.value || item.label || `chip-${index}`).trim() || `chip-${index}`),
           label: cleanChipLabel(rawLabel, value, kind),
           value,
           kind,
@@ -52,6 +51,10 @@ export function parseStoreChips(raw?: string | null): StoreChip[] {
       .filter(item => item.label && item.value)
       .filter(item => item.id !== 'all' && item.value !== 'Todos')
       .sort((a, b) => a.sort - b.sort);
+    if (!chips.some(chip => chip.value === 'Descuento')) {
+      chips.push({ id: 'descuento', label: 'Descuento', value: 'Descuento', kind: 'discount', icon: '-%', image: '', active: true, sort: chips.length * 10 });
+    }
+    return chips.sort((a, b) => a.sort - b.sort);
   } catch {
     return DEFAULT_STORE_CHIPS;
   }

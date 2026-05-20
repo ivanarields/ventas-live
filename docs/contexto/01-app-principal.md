@@ -45,7 +45,7 @@ Muestra todas las etiquetas activas con pedidos asignados.
 - **"Etiquetas de 1 bolsa"** — etiquetas numéricas (1–100), fondo azul, 1 bolsa por pedido
 - **"Etiquetas de 2+ bolsas"** — etiquetas alfabéticas (A–Z), fondo fucsia, múltiples bolsas
 - Cada etiqueta muestra el nombre de la clienta y los pedidos dentro
-- Tocar un pedido abre un modal con: etiqueta grande, "Etiqueta exclusiva" (letra) o "Etiqueta compartida" (número), cantidad de bolsas y prendas, botón entregar
+- Tocar un pedido abre un modal centrado con diseño de tarjeta moderna y premium (no a pantalla completa ni abajo): muestra la etiqueta grande con degradado, el nombre de la clienta destacado, etiquetas de tipo de pedido/exclusividad, contadores visuales con íconos para bolsas y prendas, botón de entregar con degradado, botón para ver perfil y opción de cerrar.
 - Estado vacío: "Sin etiquetas asignadas"
 
 ### Sub-pestaña "Comprobantes Live" (segunda)

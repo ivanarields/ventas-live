@@ -28,14 +28,14 @@ export function CustomerCenter({ onBack }: Props) {
         <button onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-50">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
         </button>
-        <h2 className="text-[18px] font-black text-gray-800">Leidy Shop</h2>
+        <h2 className="text-[18px] font-black text-gray-800">LeidyCandy</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
         {/* Aviso principal */}
         <div className="bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] rounded-2xl p-5 text-white">
           <p className="text-[11px] font-black uppercase tracking-widest opacity-80 mb-1">Bienvenida</p>
-          <h3 className="text-lg font-black">{settings.store_name || 'Leidy Shop'}</h3>
+          <h3 className="text-lg font-black">{settings.store_name || 'LeidyCandy'}</h3>
           <p className="text-[13px] font-medium opacity-90 mt-1">Moda femenina con estilo y calidad</p>
         </div>
 

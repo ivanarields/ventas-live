@@ -20,6 +20,7 @@ export function createStoreSettingsRouter(supabaseStore: SupabaseClient) {
     address: 'Consulta por WhatsApp',
     store_chips: '',
     payment_qr_url: '/qr-leidy-shop.jpg',
+    buffer_publish_enabled: 'true',
   };
 
   const DEFAULT_DELIVERY_SLOTS = [

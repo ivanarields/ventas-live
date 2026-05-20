@@ -18,27 +18,47 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart, cartCount =
   const [activeImg, setActiveImg]     = useState(0);
   const [selectedSize, setSelectedSize] = useState<string>(product.sizes[0] ?? '');
   const [liked, setLiked]             = useState(() => Boolean(storeFavoritesApi.readLocal()[product.id]));
-  const [likes, setLikes]             = useState(Math.floor(Math.random() * 80 + 12));
-  const [views]                       = useState(Math.floor(Math.random() * 400 + 80));
+  const [likesCount, setLikesCount]   = useState(product.likes || 0);
+  const [viewsCount, setViewsCount]   = useState(product.views || 0);
+  const isDiscountProduct = product.category === 'Descuento' && Number(product.compare_at_price) > Number(product.price);
 
   useEffect(() => {
     storeFavoritesApi.list()
       .then(items => setLiked(items.some(item => String(item.id) === String(product.id))))
       .catch(() => {});
+
+    // Incrementar vista al montar/abrir el detalle del producto
+    fetch(`/api/products/${product.id}/view`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && typeof data.views === 'number') {
+          setViewsCount(data.views);
+        }
+      })
+      .catch(() => {});
   }, [product.id]);
 
   const handleLike = async () => {
-    const nextLiked = !liked;
-    setLiked(nextLiked);
-    setLikes(n => nextLiked ? n + 1 : Math.max(0, n - 1));
-    await storeFavoritesApi.set(product, nextLiked);
+    setLiked(true);
+    try {
+      const res = await fetch(`/api/products/${product.id}/like`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success && typeof data.likes === 'number') {
+        setLikesCount(data.likes);
+      } else {
+        setLikesCount(n => n + 1);
+      }
+    } catch {
+      setLikesCount(n => n + 1);
+    }
+    await storeFavoritesApi.set(product, true);
   };
 
   const handleShare = () => {
     const url = `https://leidycandy.me/tienda#producto/${product.id}`;
     const text = `${product.title} — ${product.price} Bs`;
     if (navigator.share) {
-      navigator.share({ title: 'Leidy Shop', text, url });
+      navigator.share({ title: 'LeidyCandy', text, url });
     } else {
       navigator.clipboard?.writeText(url);
     }
@@ -168,10 +188,16 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart, cartCount =
             {product.title}
           </h1>
           <div className="flex-shrink-0 text-right">
-            {/* Precio en el color de la marca (rosado) */}
-            <p className="text-[21px] font-black leading-none mt-0.5" style={{ color: BRAND }}>
-              <span className="text-[14px] font-bold mr-0.5">Bs</span>{product.price}
-            </p>
+            {isDiscountProduct ? (
+              <div className="flex items-baseline gap-2">
+                <span className="text-[14px] font-bold line-through text-gray-400">{Number(product.compare_at_price).toFixed(0)} Bs</span>
+                <span className="text-[21px] font-black leading-none mt-0.5" style={{ color: BRAND }}>{Number(product.price).toFixed(0)} Bs</span>
+              </div>
+            ) : (
+              <p className="text-[21px] font-black leading-none mt-0.5" style={{ color: BRAND }}>
+                <span className="text-[14px] font-bold mr-0.5">Bs</span>{product.price}
+              </p>
+            )}
           </div>
         </div>
 
@@ -193,7 +219,7 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart, cartCount =
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
               </svg>
-              <span className="text-[11px] font-bold">{views}</span>
+              <span className="text-[11px] font-bold">{10 + viewsCount * 10}</span>
             </div>
 
             {/* Like */}
@@ -201,7 +227,7 @@ export function ProductDetail({ product, onBack, onBuy, onAddToCart, cartCount =
               <svg width="15" height="15" viewBox="0 0 24 24" fill={liked ? BRAND : 'none'} stroke={liked ? BRAND : 'currentColor'} strokeWidth="2.5">
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
               </svg>
-              <span className="text-[11px] font-bold" style={{ color: liked ? BRAND : '#9ca3af' }}>{likes}</span>
+              <span className="text-[11px] font-bold" style={{ color: liked ? BRAND : '#9ca3af' }}>{10 + likesCount * 10}</span>
             </button>
 
             {/* Compartir */}

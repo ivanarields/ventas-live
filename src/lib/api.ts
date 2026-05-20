@@ -33,6 +33,8 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 export const authApi = {
   login: (email: string, password: string) =>
     apiFetch("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  simpleLogin: (username: string, pin: string) =>
+    apiFetch("/api/auth/simple-login", { method: "POST", body: JSON.stringify({ username, pin }) }),
   logout: () =>
     apiFetch("/api/auth/logout", { method: "POST" }),
   me: () =>

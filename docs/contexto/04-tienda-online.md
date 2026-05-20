@@ -1,6 +1,6 @@
 # 04 — Tienda Online
 
-Actualizado: 2026-05-19 (Estilo: separación del nombre Leidy Candy en rosa y gris con espacio)
+Actualizado: 2026-05-20 (Vistas y Me Gusta reales vinculados a la base de datos de TiendaOnline)
 
 ---
 
@@ -71,9 +71,16 @@ featured         boolean; producto destacado
 condition        condición
 color            color
 material         material
-views            contador de vistas
+views            contador de vistas (visitas al producto)
+likes            contador de "me gusta"
 created_at, updated_at
 ```
+
+Reglas de vistas y me gusta:
+- **Valor Inicial**: Comienzan en **10** por defecto en la interfaz.
+- **Incremento**: Cada visita incrementa la columna `views` en `+1`, y cada interacción de me gusta incrementa la columna `likes` en `+1`.
+- **Fórmula de Despliegue**: Se muestran en pantalla con la fórmula: `10 + (Valor en DB) * 10`. Esto hace que el primer usuario vea `10`, el segundo `20`, el tercero `30`, etc.
+- **Interacciones Múltiples**: Se permite que el mismo usuario incremente el contador varias veces si visita la página varias veces o pulsa múltiples veces el corazón.
 
 Reglas:
 - `stock = 0` → aparece badge rojo "Vendido" encima de la foto, click deshabilitado

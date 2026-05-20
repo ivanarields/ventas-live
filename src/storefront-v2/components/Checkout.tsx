@@ -483,7 +483,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-black uppercase tracking-wider" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Resumen</p>
                 <p className="text-[13px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>
-                  {primaryItem ? primaryItem.product.title : 'Pedido Leidy Shop'}
+                  {primaryItem ? primaryItem.product.title : 'Pedido LeidyCandy'}
                 </p>
                 <p className="text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>1 prenda - Retiro coordinado</p>
               </div>

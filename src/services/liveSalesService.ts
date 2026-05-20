@@ -43,6 +43,40 @@ export function namesMatch(a: unknown, b: unknown): boolean {
   return short.length >= 10 && long.includes(short);
 }
 
+function isMissingVerifiedCustomerColumn(error: any): boolean {
+  return (error?.code === '42703' || error?.code === 'PGRST204') &&
+    /is_verified_customer|verified_at|verified_source/i.test(String(error.message ?? ''));
+}
+
+export async function markMainCustomerVerified(
+  mainDb: SupabaseClient,
+  input: { userId: string; customerId?: number | null; name?: string | null; phone?: string | null; source: 'live' | 'store' | 'manual' },
+) {
+  if (!input.userId) return;
+  const updates: Record<string, unknown> = {
+    is_verified_customer: true,
+    verified_at: new Date().toISOString(),
+    verified_source: input.source,
+    updated_at: new Date().toISOString(),
+  };
+  const phone = normalizeLivePhone(input.phone);
+  if (phone) {
+    updates.phone = phone;
+    updates.wa_number = phone;
+    updates.wa_linked_at = new Date().toISOString();
+  }
+  if (input.name) {
+    updates.full_name = input.name;
+    updates.normalized_name = canonicalName(input.name);
+    updates.canonical_name = canonicalName(input.name);
+  }
+
+  let query = mainDb.from('customers').update(updates).eq('user_id', input.userId);
+  query = input.customerId ? query.eq('id', input.customerId) : query.or(`wa_number.eq.${phone},phone.eq.${phone}`);
+  const { error } = await query;
+  if (error && !isMissingVerifiedCustomerColumn(error)) throw error;
+}
+
 export function boliviaDateKey(value: Date | string | number = new Date()): string {
   const date = value instanceof Date ? value : new Date(value);
   return new Date(date.getTime() - BOLIVIA_OFFSET_MS).toISOString().slice(0, 10);
@@ -458,6 +492,16 @@ export async function syncMainPedidoForLiveOrder(
     totalAmount: total,
   });
 
+  if (String(pedidoLive.estado ?? '') === 'pagos_verificados') {
+    await markMainCustomerVerified(mainDb, {
+      userId,
+      customerId: Number(customer.id),
+      name: customer.full_name || name,
+      phone: pedidoLive.phone,
+      source: 'live',
+    });
+  }
+
   const { data, error } = await panelDb
     .from('pedidos_venta_live')
     .update({
@@ -554,6 +598,15 @@ export async function matchLivePaymentWithMacrodroid(
       .select('*')
       .single();
     if (updateError) throw updateError;
+    if (input.mainCustomerId) {
+      await markMainCustomerVerified(mainDb, {
+        userId: input.userId,
+        customerId: Number(input.mainCustomerId),
+        name: input.pagoLive.nombre_detectado,
+        phone: input.pagoLive.phone,
+        source: 'live',
+      });
+    }
     return data;
   }
 

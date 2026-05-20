@@ -334,6 +334,31 @@ function namesMatch(a: unknown, b: unknown): boolean {
   return short.length >= 10 && long.includes(short);
 }
 
+function isMissingVerifiedCustomerColumn(error: any): boolean {
+  return (error?.code === '42703' || error?.code === 'PGRST204') &&
+    /is_verified_customer|verified_at|verified_source/i.test(String(error.message ?? ''));
+}
+
+async function markCustomerVerified(customerId: number | null, payerName: string) {
+  if (!customerId) return;
+  const { error } = await supabase
+    .from('customers')
+    .update({
+      is_verified_customer: true,
+      verified_at: new Date().toISOString(),
+      verified_source: 'live',
+      full_name: payerName,
+      normalized_name: canonicalizeName(payerName),
+      canonical_name: canonicalizeName(payerName),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', customerId)
+    .eq('user_id', INGEST_USER_ID);
+  if (error && !isMissingVerifiedCustomerColumn(error)) {
+    console.error('[verified-customer]', error);
+  }
+}
+
 const NAME_STOP_WORDS = new Set(['DE', 'DEL', 'LA', 'LAS', 'LOS', 'EL', 'Y']);
 
 function namePieces(raw: unknown) {
@@ -594,6 +619,8 @@ async function matchPanelLivePayments(input: {
         main_pedido_id: input.pedidoId ?? null,
       })
       .eq('id', match.pedido_live_id);
+
+    await markCustomerVerified(input.customerId, input.payerName);
   } catch (err) {
     console.error('[panel live match]', err);
   }

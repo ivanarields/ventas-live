@@ -3,6 +3,7 @@ export interface Product {
   name: string;
   title: string;
   price: number;
+  compare_at_price?: number | null;
   description: string;
   images: string[];
   sizes: string[];
@@ -10,6 +11,8 @@ export interface Product {
   stock: number;
   category: string;
   priority_order?: number;
+  views?: number;
+  likes?: number;
 }
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1551163943-3f6a855d1153?auto=format&fit=crop&q=70&w=480';
@@ -99,6 +102,7 @@ function mapRow(row: any): Product {
     name: row.name,
     title: row.name,
     price: Number(row.price),
+    compare_at_price: getCompareAtPrice(row),
     description: row.description ?? '',
     images,
     sizes: Array.isArray(row.sizes) ? row.sizes : [],
@@ -106,7 +110,24 @@ function mapRow(row: any): Product {
     stock: row.stock ?? 1,
     category: row.category ?? 'General',
     priority_order: row.priority_order ?? 0,
+    views: Number(row.views ?? 0),
+    likes: Number(row.likes ?? 0),
   };
+}
+
+function getCompareAtPrice(row: any): number | null {
+  const direct = Number(row.compare_at_price);
+  if (Number.isFinite(direct) && direct > Number(row.price)) return direct;
+
+  const raw = typeof row.material === 'string' ? row.material : '';
+  if (!raw.startsWith('STORE_META:')) return null;
+  try {
+    const meta = JSON.parse(raw.slice('STORE_META:'.length));
+    const fallback = Number(meta.compare_at_price);
+    return Number.isFinite(fallback) && fallback > Number(row.price) ? fallback : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface PaginatedProducts {
@@ -117,7 +138,7 @@ export interface PaginatedProducts {
   hasMore: boolean;
 }
 
-const PRODUCT_CACHE_KEY = 'storefront_products_page1_v1';
+const PRODUCT_CACHE_KEY = 'storefront_products_page1_v3';
 
 function canUseCache(params?: { page?: number; limit?: number; category?: string; search?: string; admin?: boolean; token?: string }) {
   return !params?.admin && !params?.token && !params?.category && !params?.search && (!params?.page || params.page === 1);

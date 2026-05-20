@@ -499,7 +499,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
     try {
       const userId = req.headers['x-user-id'] as string;
       if (!userId) return res.status(401).json({ ok: false, error: 'Autenticación requerida' });
-      const { imageUrls } = req.body;
+      const { imageUrls, categories } = req.body;
       if (!imageUrls?.length) return res.status(400).json({ ok: false, error: 'imageUrls requerido' });
 
       const imageParts: any[] = [];
@@ -513,7 +513,10 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       }
       if (imageParts.length === 0) return res.status(422).json({ ok: false, error: 'No se pudieron cargar las imágenes' });
 
-      const result = await callAi({ userId, feature: 'product_vision', prompt: buildProductCatalogPrompt(), imageParts, maxTokens: 400, temperature: 0.2, jsonMode: true });
+      const categoryOptions = Array.isArray(categories) && categories.length > 0
+        ? categories.map((c: any) => String(c).trim()).filter(Boolean).slice(0, 12)
+        : undefined;
+      const result = await callAi({ userId, feature: 'product_vision', prompt: buildProductCatalogPrompt(categoryOptions), imageParts, maxTokens: 400, temperature: 0.2, jsonMode: true });
       if (!result?.text) return res.status(422).json({ ok: false, error: 'Sin respuesta de la IA' });
 
       const jsonText = extractFirstBalancedJson(String(result.text ?? ''));

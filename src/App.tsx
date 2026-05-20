@@ -1374,16 +1374,15 @@ export default function App() {
   }, [people, selectedPersonId]);
 
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [username, setUsername] = useState('');
+  const [pin, setPin] = useState('');
   const [resetSent, setResetSent] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
     try {
-      const result = await authApi.login(email, password);
+      const result = await authApi.simpleLogin(username, pin);
       const token = result.session?.access_token ?? '';
       const u: SupabaseUser = { id: result.user.id, email: result.user.email };
       setAuthContext(u.id, token);
@@ -1393,12 +1392,12 @@ export default function App() {
       localStorage.setItem('sb_session', JSON.stringify({ user: u, token }));
     } catch (err: any) {
       console.error(err);
-      setLoginError('Credenciales inválidas o usuario no encontrado.');
+      setLoginError(err?.message || 'Usuario o PIN incorrecto.');
     }
   };
 
   const handleResetPassword = async () => {
-    setLoginError('Para restablecer la contraseña contactá al administrador.');
+    setLoginError('Para restablecer el PIN contactá al administrador.');
   };
 
   const handleLogout = () => {
@@ -1457,11 +1456,12 @@ export default function App() {
               <div className="relative">
                 <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-base-text-muted" />
                 <input 
-                  type="email" 
-                  placeholder="Usuario (Email)" 
+                  type="text" 
+                  placeholder="Usuario" 
                   className="input-modern pl-12"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
                   required
                 />
               </div>
@@ -1469,10 +1469,13 @@ export default function App() {
                 <Zap className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-base-text-muted" />
                 <input 
                   type="password" 
-                  placeholder="Contraseña" 
+                  placeholder="PIN" 
                   className="input-modern pl-12"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  autoComplete="current-password"
                   required
                 />
               </div>
@@ -1492,27 +1495,17 @@ export default function App() {
               type="submit" 
               className="w-full btn-pill-primary py-4 mt-2"
             >
-              {isSignUp ? 'Crear Cuenta' : 'Iniciar Sesión'}
+              Iniciar Sesión
             </button>
 
             <div className="flex flex-col gap-3 mt-4">
               <button 
                 type="button"
-                onClick={() => setIsSignUp(!isSignUp)}
-                className="text-xs font-bold text-base-text-muted uppercase tracking-widest hover:text-brand transition-colors"
+                onClick={handleResetPassword}
+                className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter hover:text-base-text transition-colors"
               >
-                {isSignUp ? '¿Ya tienes cuenta? Inicia Sesión' : '¿No tienes cuenta? Regístrate'}
+                ¿Olvidaste tu PIN?
               </button>
-              
-              {!isSignUp && (
-                <button 
-                  type="button"
-                  onClick={handleResetPassword}
-                  className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter hover:text-base-text transition-colors"
-                >
-                  ¿Olvidaste tu contraseña?
-                </button>
-              )}
             </div>
           </form>
         )}
@@ -2151,7 +2144,6 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           </div>
         </section>
       )}
-
       {/* Estado vacío */}
       {activos.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -2166,76 +2158,128 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       {/* Modal detalle del pedido */}
       {selectedPedido && (
         <div
-          className="fixed inset-0 z-[200] bg-black/40 flex items-end"
+          className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setSelectedPedido(null)}
         >
           <motion.div
-            initial={{ y: 80, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 80, opacity: 0 }}
-            transition={{ duration: 0.18 }}
+            initial={{ scale: 0.9, opacity: 0, y: 10 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.9, opacity: 0, y: 10 }}
+            transition={{ type: "spring", duration: 0.35, bounce: 0.15 }}
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-[480px] mx-auto bg-white rounded-t-[28px] p-6 pb-10"
+            className="w-full max-w-[400px] bg-white rounded-[32px] p-6 shadow-2xl border border-gray-100 relative overflow-hidden"
           >
-            {/* Handle */}
-            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+            {/* Background design elements for premium look */}
+            <div className="absolute top-0 right-0 w-24 h-24 bg-brand/5 rounded-full blur-2xl -mr-6 -mt-6" />
+            <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl -ml-10 -mb-10" />
 
-            {/* Etiqueta grande */}
-            <div className="flex items-center gap-4 mb-5">
-              <div className={cn(
-                'w-16 h-16 rounded-2xl flex items-center justify-center',
-                selectedPedido.labelType === 'letter' ? 'bg-brand' : 'bg-blue-500'
-              )}>
-                <span className="text-3xl font-black text-white">{selectedPedido.label}</span>
+            {/* Header with Close Button */}
+            <div className="flex justify-between items-start mb-6">
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Detalle de Entrega</span>
+              <button
+                onClick={() => setSelectedPedido(null)}
+                className="p-1.5 hover:bg-gray-100 active:scale-95 rounded-full transition-all text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Profile/Identity card */}
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="relative mb-3">
+                <div className={cn(
+                  'w-20 h-20 rounded-[24px] flex items-center justify-center text-white font-black text-4xl shadow-lg relative z-10',
+                  selectedPedido.labelType === 'letter' 
+                    ? 'bg-gradient-to-br from-brand to-[#ff5d99] shadow-brand/20' 
+                    : 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-500/20'
+                )}>
+                  {selectedPedido.label}
+                </div>
+                <div className={cn(
+                  'absolute inset-0 rounded-[24px] blur-md scale-95 opacity-50 z-0',
+                  selectedPedido.labelType === 'letter' ? 'bg-brand' : 'bg-blue-500'
+                )} />
               </div>
-              <div>
-                <p className="font-black text-xl text-gray-900">{selectedPedido.customerName}</p>
+
+              <h3 className="font-black text-xl text-gray-900 leading-snug px-2 mb-2 uppercase">
+                {selectedPedido.customerName}
+              </h3>
+
+              {/* Tags */}
+              <div className="flex flex-wrap items-center justify-center gap-1.5">
                 <span className={cn(
-                  "inline-flex mt-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest",
+                  "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border",
                   selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB'
-                    ? "bg-emerald-100 text-emerald-600"
-                    : "bg-violet-100 text-violet-600"
+                    ? "bg-emerald-50 text-emerald-600 border-emerald-100"
+                    : "bg-violet-50 text-violet-600 border-violet-100"
                 )}>
                   {selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB' ? 'Compra web' : 'Pedido live'}
                 </span>
-                <p className="text-[12px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">
+                
+                <span className={cn(
+                  "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border",
+                  selectedPedido.labelType === 'letter'
+                    ? "bg-rose-50 text-brand border-brand/10"
+                    : "bg-blue-50 text-blue-600 border-blue-100"
+                )}>
                   Etiqueta {selectedPedido.labelType === 'letter' ? 'exclusiva' : 'compartida'}
-                </p>
+                </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 rounded-2xl p-3 text-center">
-                <p className="text-2xl font-black text-gray-800">{selectedPedido.bagCount}</p>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Bolsas</p>
+            {/* Counters Section */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-50/80 border border-gray-100/50 rounded-2xl p-4 flex flex-col items-center justify-center transition-all hover:bg-gray-50">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center mb-2">
+                  <Package className="w-4 h-4 text-amber-600" />
+                </div>
+                <span className="text-2xl font-black text-gray-800 leading-none">{selectedPedido.bagCount}</span>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Bolsas</span>
               </div>
-              <div className="bg-gray-50 rounded-2xl p-3 text-center">
-                <p className="text-2xl font-black text-gray-800">{selectedPedido.itemCount ?? 0}</p>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Prendas</p>
+              <div className="bg-gray-50/80 border border-gray-100/50 rounded-2xl p-4 flex flex-col items-center justify-center transition-all hover:bg-gray-50">
+                <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center mb-2">
+                  <Shirt className="w-4 h-4 text-brand" />
+                </div>
+                <span className="text-2xl font-black text-gray-800 leading-none">{selectedPedido.itemCount ?? 0}</span>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Prendas</span>
               </div>
             </div>
 
-            <div className="mt-4 flex flex-col gap-2">
-              {selectedPedido.customerId && (
-                <button
-                  onClick={() => { setSelectedPedido(null); onSelectPerson(selectedPedido.customerId); }}
-                  className="w-full py-3 rounded-2xl font-black text-sm"
-                  style={{ background: '#fff0f5', color: '#ff2d78' }}
-                >
-                  Ver perfil
-                </button>
-              )}
+            {/* Actions */}
+            <div className="space-y-2">
               <button
                 onClick={handleDeliver}
                 disabled={isDelivering}
-                className="w-full py-3 rounded-2xl font-black text-sm text-white disabled:opacity-60"
+                className="w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider text-white disabled:opacity-60 shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
                 style={{ background: 'linear-gradient(135deg, #10B981, #059669)' }}
               >
-                {isDelivering ? 'Entregando...' : '✓ Marcar como entregado'}
+                {isDelivering ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Entregando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 stroke-[3px]" />
+                    <span>Marcar como entregado</span>
+                  </>
+                )}
               </button>
+
+              {selectedPedido.customerId && (
+                <button
+                  onClick={() => { setSelectedPedido(null); onSelectPerson(selectedPedido.customerId); }}
+                  className="w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
+                  style={{ background: '#fff0f5', color: '#ff2d78' }}
+                >
+                  <UserIcon className="w-4 h-4" />
+                  <span>Ver perfil</span>
+                </button>
+              )}
+
               <button
                 onClick={() => setSelectedPedido(null)}
-                className="w-full py-3 rounded-2xl bg-gray-100 text-gray-600 font-black text-sm"
+                className="w-full py-3 rounded-2xl bg-gray-50 hover:bg-gray-100 text-gray-500 font-bold text-xs uppercase tracking-wider active:scale-[0.98] transition-all cursor-pointer border border-gray-100"
               >
                 Cerrar
               </button>
