@@ -92,6 +92,10 @@ interface StoreOrder {
   expires_at: string | null;
   is_verified_customer?: boolean;
   verified_source?: string | null;
+  partial_payment_amount?: number | null;
+  payment_shortfall?: number | null;
+  payment_ref?: string | null;
+  wa_proof_received?: boolean;
 }
 
 const TALLAS_COMUNES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '34', '36', '38', '40', '42', 'Único'];
@@ -1061,6 +1065,11 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
               const cfg = STATUS_CFG[order.status] ?? STATUS_CFG.pending;
               const isExpanded = expandedOrder === order.id;
               const isExpired = order.expires_at && new Date(order.expires_at) < new Date() && order.status === 'pending';
+              const paidAmount = Number(order.partial_payment_amount);
+              const totalAmount = Number(order.total);
+              const amountDiff = Number.isFinite(paidAmount) && paidAmount > 0
+                ? Number((paidAmount - totalAmount).toFixed(2))
+                : 0;
 
               return (
                 <div key={order.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -1079,9 +1088,9 @@ export function AdminTiendaView({ userId, authToken }: { userId: string; authTok
                           {cfg.label}
                         </span>
                         {isExpired && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-500">EXPIRADO</span>}
-                        {Number((order as any).payment_shortfall) > 0 && order.status === 'pending' && (
-                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600" title={`Pagó Bs ${(order as any).partial_payment_amount} de Bs ${order.total}`}>
-                            ⚠ PAGO PARCIAL · falta Bs {Number((order as any).payment_shortfall).toFixed(2)}
+                        {amountDiff !== 0 && order.status === 'pending' && (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-50 text-red-600" title={`Pagó Bs ${paidAmount.toFixed(2)} de Bs ${totalAmount.toFixed(2)}`}>
+                            {amountDiff < 0 ? `Menos Bs ${Math.abs(amountDiff).toFixed(2)}` : `Más Bs ${amountDiff.toFixed(2)}`}
                           </span>
                         )}
                         {String((order as any).payment_ref ?? '').includes('bank-detected') && !(order as any).wa_proof_received && order.status === 'pending' && (

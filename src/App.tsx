@@ -1421,16 +1421,19 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="app-container flex flex-col items-center justify-center p-8 text-center min-h-screen">
+      <div className="app-container flex flex-col items-center justify-center p-8 text-center min-h-screen" style={{ background: 'radial-gradient(circle at 50% 18%, #ffd4e4 0%, #fff0f5 34%, #fff8fb 62%, #ffffff 100%)' }}>
         <motion.div 
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className="mb-12"
         >
-          <div className="w-20 h-20 rounded-[24px] bg-brand flex items-center justify-center shadow-[0_12px_30px_rgba(255,45,120,0.3)] mx-auto mb-6">
-            <Video className="text-white w-10 h-10" />
+          <div className="w-20 h-20 rounded-[24px] overflow-hidden shadow-[0_12px_30px_rgba(255,45,120,0.22)] mx-auto mb-6 bg-white">
+            <img src="/logo.png" alt="Leidy Candy" className="w-full h-full object-cover" />
           </div>
-          <h1 className="text-3xl font-extrabold text-base-text tracking-tight mb-2">Ventas Live</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight mb-2">
+            <span style={{ color: '#ff2d78' }}>Leidy</span>{' '}
+            <span style={{ color: '#6b7280' }}>Candy</span>
+          </h1>
           <p className="text-sm font-medium text-base-text-muted">Gestiona tus ventas en tiempo real</p>
         </motion.div>
         
@@ -2941,6 +2944,8 @@ function PaymentsView({
       if (status === 'paid') return true;
       // Pedidos con comprobante recibido se ven aunque estén "cancelled" (revisión manual morada).
       if (order?.wa_proof_received) return true;
+      // Pedidos con pago menor/mayor quedan visibles para revision manual.
+      if (Number(order?.partial_payment_amount) > 0) return true;
       // Resto: ocultar cancelados sin comprobante.
       return status !== 'cancelled';
     };
@@ -3290,7 +3295,10 @@ function PaymentsView({
 
       <div className="space-y-3">
         {paymentChannel === 'web' && webProfilesForDate.map((profile: any) => {
-          const needsReview = (profile.orders ?? []).some((o: any) => o.status !== 'paid' && o.wa_proof_received);
+          const needsReview = (profile.orders ?? []).some((o: any) => {
+            const paymentRef = String(o.payment_ref ?? '');
+            return o.status !== 'paid' && (o.wa_proof_received || Number(o.partial_payment_amount) > 0 || paymentRef.includes('bank-detected'));
+          });
           const headerBg = needsReview ? 'bg-violet-50 border-violet-100' : 'bg-emerald-50/40 border-emerald-100';
           const badgeClass = needsReview ? 'bg-violet-100 text-violet-600' : 'bg-emerald-100 text-emerald-600';
           return (
@@ -3314,7 +3322,11 @@ function PaymentsView({
                 const firstItem = (order.items ?? [])[0];
                 const itemImage = firstItem?.image || firstItem?.imageUrl || webProductImages[String(firstItem?.productId ?? "")] || firstItem?.productImage || "";
                 const itemCount = (order.items ?? []).length || 0;
-                const isPending = order.status !== 'paid' && order.wa_proof_received;
+                const paidAmount = Number(order.partial_payment_amount);
+                const totalAmount = Number(order.total);
+                const amountDiff = Number.isFinite(paidAmount) && paidAmount > 0 ? Number((paidAmount - totalAmount).toFixed(2)) : 0;
+                const bankDetected = String(order.payment_ref ?? '').includes('bank-detected');
+                const isPending = order.status !== 'paid' && (order.wa_proof_received || amountDiff !== 0 || bankDetected);
                 return (
                   <button
                     key={`web-order-${order.id}`}
@@ -3339,6 +3351,14 @@ function PaymentsView({
                         )}>
                           {order.status === 'paid' ? 'Verificado' : isPending ? 'Revisión manual' : order.status}
                         </span>
+                        {amountDiff !== 0 && (
+                          <span className="text-red-600 normal-case tracking-normal">
+                            {amountDiff < 0 ? `Menos Bs ${Math.abs(amountDiff).toFixed(2)}` : `Más Bs ${amountDiff.toFixed(2)}`}
+                          </span>
+                        )}
+                        {amountDiff === 0 && bankDetected && !order.wa_proof_received && (
+                          <span className="text-red-600 normal-case tracking-normal">Falta comprobante</span>
+                        )}
                         {itemCount > 1 && <span className="text-gray-300">· +{itemCount - 1}</span>}
                       </div>
                     </div>
@@ -3363,7 +3383,12 @@ function PaymentsView({
           const order = webOrderDetail.order;
           const profile = webOrderDetail.profile;
           const items: any[] = Array.isArray(order.items) ? order.items : [];
-          const needsManual = order.status !== 'paid' && order.wa_proof_received;
+          const detailPaidAmount = Number(order.partial_payment_amount);
+          const detailTotalAmount = Number(order.total);
+          const detailAmountDiff = Number.isFinite(detailPaidAmount) && detailPaidAmount > 0 ? Number((detailPaidAmount - detailTotalAmount).toFixed(2)) : 0;
+          const detailBankDetected = String(order.payment_ref ?? '').includes('bank-detected');
+          const needsManual = order.status !== 'paid' && (order.wa_proof_received || detailAmountDiff !== 0);
+          const needsProof = order.status !== 'paid' && detailBankDetected && !order.wa_proof_received && detailAmountDiff === 0;
           const isPaid = order.status === 'paid';
           const headerColor = needsManual ? 'bg-violet-50 border-violet-100' : isPaid ? 'bg-emerald-50 border-emerald-100' : 'bg-gray-50 border-gray-100';
           const badgeColor = needsManual ? 'bg-violet-100 text-violet-600' : isPaid ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-500';
@@ -3403,6 +3428,30 @@ function PaymentsView({
                     </p>
                   </div>
                 </div>
+
+                {detailAmountDiff !== 0 && (
+                  <div className="rounded-2xl bg-red-50 border border-red-100 px-3 py-2">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-red-600">
+                      {detailAmountDiff < 0
+                        ? `Menos Bs ${Math.abs(detailAmountDiff).toFixed(2)}`
+                        : `Más Bs ${detailAmountDiff.toFixed(2)}`}
+                    </p>
+                    <p className="text-[10px] font-bold text-red-500 mt-0.5">
+                      Pedido Bs {detailTotalAmount.toFixed(2)} - pago Bs {detailPaidAmount.toFixed(2)}
+                    </p>
+                  </div>
+                )}
+
+                {needsProof && (
+                  <div className="rounded-2xl bg-red-50 border border-red-100 px-3 py-2">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-red-600">
+                      Falta comprobante
+                    </p>
+                    <p className="text-[10px] font-bold text-red-500 mt-0.5">
+                      Banco detectado, pero el cliente nuevo debe enviar comprobante.
+                    </p>
+                  </div>
+                )}
 
                 {needsManual && (
                   <div className="grid grid-cols-2 gap-2">

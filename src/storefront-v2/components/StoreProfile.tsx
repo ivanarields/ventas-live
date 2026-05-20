@@ -17,6 +17,10 @@ interface StoreOrder {
   created_at: string;
   customer_wa: string;
   customer_selection: { confirmed?: boolean; confirmed_at?: string; confirmed_by?: string } | null;
+  wa_proof_received?: boolean;
+  payment_ref?: string | null;
+  partial_payment_amount?: number | null;
+  payment_shortfall?: number | null;
 }
 
 interface ProfileUser {
@@ -458,6 +462,11 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                   : { bg: '#fff0f5', color: '#ff2d78' };
               const firstItem = order.items?.[0];
               const extraCount = (order.items?.length ?? 0) - 1;
+              const showProofWaiting = order.status === 'pending' && !!order.wa_proof_received && Number(order.partial_payment_amount ?? 0) <= 0;
+              const showProofRequired = order.status === 'pending'
+                && String(order.payment_ref ?? '').includes('bank-detected')
+                && !order.wa_proof_received
+                && Number(order.partial_payment_amount ?? 0) <= 0;
               return (
                 <div key={order.id} className="rounded-3xl border border-white/60 shadow-sm p-3 flex gap-3 items-center" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                   {/* Ícono prenda */}
@@ -483,6 +492,16 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                       style={{ background: statusStyle.bg, color: statusStyle.color }}>
                       {STATUS_LABEL[order.status] ?? order.status}
                     </span>
+                    {showProofWaiting && (
+                      <p className="mt-1 text-[10px] font-bold text-gray-400 leading-snug">
+                        Recibimos tu comprobante. Estamos esperando confirmacion del pago.
+                      </p>
+                    )}
+                    {showProofRequired && (
+                      <p className="mt-1 text-[10px] font-bold text-gray-400 leading-snug">
+                        Recibimos tu pago. Envia tu comprobante para confirmar el pedido.
+                      </p>
+                    )}
                   </div>
                 </div>
               );

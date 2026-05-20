@@ -968,7 +968,7 @@ const PORT = Number(process.env.PORT || 3001);
 
       const [storeCustomers, storeOrders] = await Promise.all([
         safeSelect(supabaseStore, 'store_customers', 'id,whatsapp,display_name,total_orders,total_spent,created_at', (q) => q.order('created_at', { ascending: false }).limit(300)),
-        safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,items,payment_verified_at,wa_proof_received,payment_ref,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
+        safeSelect(supabaseStore, 'store_orders', 'id,customer_id,customer_name,customer_wa,total,status,items,payment_verified_at,wa_proof_received,payment_ref,partial_payment_amount,payment_shortfall,created_at', (q) => q.order('created_at', { ascending: false }).limit(500)),
       ]);
 
       const productImageMap = new Map<string, string>();
@@ -1530,6 +1530,38 @@ const PORT = Number(process.env.PORT || 3001);
     res.json({ user: data.user, session: data.session });
   });
 
+  app.post("/api/auth/simple-login", async (req, res) => {
+    try {
+      const username = String(req.body?.username ?? '').trim().toLowerCase();
+      const pin = String(req.body?.pin ?? '').trim();
+      const allowedUsername = String(process.env.ADMIN_SIMPLE_USERNAME || 'leidycandy').trim().toLowerCase();
+      const allowedPin = String(process.env.ADMIN_SIMPLE_PIN || '7020').trim();
+      if (username !== allowedUsername || pin !== allowedPin) {
+        return res.status(401).json({ error: "Usuario o PIN incorrecto" });
+      }
+
+      const ownerUserId = String(process.env.STORE_OWNER_USER_ID || '13dcb065-6099-4776-982c-18e98ff2b27a').trim();
+      const { data: ownerData, error: ownerError } = await supabaseServer.auth.admin.getUserById(ownerUserId);
+      const owner = ownerData?.user;
+      if (ownerError || !owner?.email) {
+        return res.status(500).json({ error: "Usuario principal no encontrado" });
+      }
+
+      const password = `pin-${pin}`;
+      let login = await supabaseServer.auth.signInWithPassword({ email: owner.email, password });
+      if (login.error) {
+        const { error: updateError } = await supabaseServer.auth.admin.updateUserById(owner.id, { password });
+        if (updateError) return res.status(500).json({ error: updateError.message });
+        login = await supabaseServer.auth.signInWithPassword({ email: owner.email, password });
+      }
+      if (login.error) return res.status(401).json({ error: "No se pudo iniciar sesion" });
+      res.json({ user: login.data.user, session: login.data.session });
+    } catch (err: any) {
+      console.error("[auth] simple-login error:", err);
+      res.status(500).json({ error: err?.message ?? "Error de login" });
+    }
+  });
+
   app.post("/api/auth/register", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email y contraseña requeridos" });
@@ -1659,16 +1691,27 @@ const PORT = Number(process.env.PORT || 3001);
           .single(),
         supabaseStore
           .from('store_orders')
-          .select('id, status, total, created_at, items, payment_verified_at, expires_at, customer_wa, customer_selection, delivery_date, delivery_slot')
+          .select('id, status, total, created_at, items, payment_verified_at, expires_at, customer_wa, customer_name, customer_selection, delivery_date, delivery_slot, wa_proof_received, payment_ref, partial_payment_amount, payment_shortfall')
           .eq('customer_wa', cleanPhone)
           .order('created_at', { ascending: false })
           .limit(20),
       ]);
 
       // Favoritos se cargan aparte vía /api/store-favorites (lazy, solo cuando se abre esa pestaña)
+      const paidOrderWithName = (orders ?? []).find((order: any) =>
+        order.status === 'paid' && isUsableStoreName(order.customer_name)
+      );
+      const profileCustomer = {
+        ...(customer ?? {}),
+        display_name: customer?.display_name || paidOrderWithName?.customer_name || null,
+        is_verified_customer: !!customer?.is_verified_customer || !!paidOrderWithName,
+        verified_at: customer?.verified_at ?? paidOrderWithName?.payment_verified_at ?? null,
+        verified_source: customer?.verified_source ?? (paidOrderWithName ? 'store' : null),
+      };
+
       res.json({
         user: data.user,
-        customer,
+        customer: profileCustomer,
         orders: orders ?? [],
       });
     } catch (err: any) {
@@ -2078,9 +2121,9 @@ const PORT = Number(process.env.PORT || 3001);
       //    → protege a la clienta que ya pagó hasta que el operador decida Confirmar/Rechazar.
       const { data: pendingOrders } = await supabaseStore
         .from("store_orders")
-        .select("id, items, expires_at, wa_proof_received")
+        .select("id, items, expires_at, wa_proof_received, partial_payment_amount")
         .eq("status", "pending")
-        .or(`expires_at.gt.${now},wa_proof_received.eq.true`);
+        .or(`expires_at.gt.${now},wa_proof_received.eq.true,partial_payment_amount.not.is.null`);
 
       const reservedMap: Record<string, string> = {};
       for (const order of (pendingOrders ?? [])) {
@@ -2104,7 +2147,7 @@ const PORT = Number(process.env.PORT || 3001);
     try {
       const { data, error } = await supabaseStore
         .from("store_orders")
-        .select("id, status, payment_verified_at, payment_ref, wa_proof_received, items, total, expires_at, customer_wa")
+        .select("id, status, payment_verified_at, payment_ref, wa_proof_received, items, total, expires_at, customer_wa, partial_payment_amount, payment_shortfall")
         .eq("id", Number(req.params.id))
         .single();
       if (error) throw error;
@@ -2118,6 +2161,8 @@ const PORT = Number(process.env.PORT || 3001);
         requiresProof: data.status !== 'paid' && data.status !== 'confirmed' && paymentRef.includes('bank-detected'),
         items: (data as any).items ?? [],
         total: (data as any).total ?? 0,
+        partialPaymentAmount: (data as any).partial_payment_amount ?? null,
+        paymentShortfall: (data as any).payment_shortfall ?? null,
         expiresAt: (data as any).expires_at ?? null,
         customerWa: (data as any).customer_wa ?? '',
       });
@@ -2301,6 +2346,7 @@ const PORT = Number(process.env.PORT || 3001);
         .select("id, items")
         .eq("status", "pending")
         .eq("wa_proof_received", false)
+        .is("partial_payment_amount", null)
         .lt("expires_at", now);
 
       if (!expired?.length) return;
@@ -2367,7 +2413,7 @@ const PORT = Number(process.env.PORT || 3001);
       // 2) Pedidos detectados por banco, sin comprobante, > 15 min → confirmar
       const { data: needAutoConfirm } = await supabaseStore
         .from('store_orders')
-        .select('id, payment_ref')
+        .select('id, payment_ref, customer_wa, customer_name')
         .like('payment_ref', 'bank-detected:%')
         .eq('wa_proof_received', false)
         .in('status', ['pending', 'cancelled'])
@@ -2376,6 +2422,7 @@ const PORT = Number(process.env.PORT || 3001);
 
       for (const o of (needAutoConfirm ?? [])) {
         try {
+          if (!(await isStoreCustomerVerifiedForAuto(o))) continue;
           await confirmStoreOrder(o.id, `${o.payment_ref}:auto-confirm-15min`);
           console.log(`[store] ✅ Pedido #${o.id} auto-confirmado tras 15 min sin comprobante`);
         } catch (e: any) {
@@ -2612,9 +2659,11 @@ const PORT = Number(process.env.PORT || 3001);
 
     const { data: customer } = await supabaseStore
       .from('store_customers')
-      .select('display_name,total_orders,total_spent')
+      .select('*')
       .eq('whatsapp', waNumber)
       .maybeSingle();
+
+    if ((customer as any)?.is_verified_customer === true) return true;
 
     const hasRealName = isUsableStoreName(customer?.display_name) || isUsableStoreName(order?.customer_name);
     if (!hasRealName) return false;
@@ -2630,6 +2679,33 @@ const PORT = Number(process.env.PORT || 3001);
     return !!previousPaid?.length || Number(customer?.total_orders ?? 0) > 0 || Number(customer?.total_spent ?? 0) > 0;
   }
 
+  async function enqueueStoreProofRequest(order: any) {
+    const orderId = Number(order?.id);
+    const waNumber = String(order?.customer_wa ?? '').replace(/\D/g, '');
+    if (!orderId || !waNumber) return;
+
+    const { data: current } = await supabaseStore
+      .from('store_orders')
+      .select('reminder_sent_at')
+      .eq('id', orderId)
+      .maybeSingle();
+    if ((current as any)?.reminder_sent_at) return;
+
+    await supabaseServer.from('whatsapp_message_queue').insert({
+      user_id: String(process.env.STORE_OWNER_USER_ID || 'store-auto'),
+      phone: waNumber.startsWith('591') ? waNumber : `591${waNumber}`,
+      message_body: `Hola! Vimos tu pago de Bs ${Number(order.total).toFixed(2)}. Falta tu comprobante para confirmar el pedido #${orderId}. EnvÃ­alo aquÃ­ por WhatsApp, por favor.`,
+      type: 'store_proof_reminder',
+      reference_id: String(orderId),
+      reference_type: 'store_order',
+    } as any);
+
+    await supabaseStore
+      .from('store_orders')
+      .update({ reminder_sent_at: new Date().toISOString() } as any)
+      .eq('id', orderId);
+  }
+
   async function markStoreOrderBankDetected(order: any, source: string) {
     const currentRef = String(order?.payment_ref ?? '');
     const nextRef = currentRef.includes('bank-detected') ? currentRef : `bank-detected:${source}`;
@@ -2643,6 +2719,39 @@ const PORT = Number(process.env.PORT || 3001);
       } as any)
       .eq('id', Number(order.id))
       .in('status', ['pending', 'cancelled']);
+    await enqueueStoreProofRequest(order);
+  }
+
+  async function markStoreOrderAmountMismatch(order: any, paidAmount: number, source: string) {
+    const total = Number(order?.total ?? 0);
+    const paid = Number(paidAmount);
+    if (!Number.isFinite(total) || !Number.isFinite(paid) || total <= 0 || paid <= 0) return null;
+    if (Math.abs(paid - total) < 0.01) return null;
+
+    const difference = Number(Math.abs(paid - total).toFixed(2));
+    const type = paid < total ? 'less' : 'more';
+    const currentRef = String(order?.payment_ref ?? '');
+    const nextRef = currentRef.includes('amount-mismatch:')
+      ? currentRef
+      : `amount-mismatch:${type}:${source}`;
+
+    const { error } = await supabaseStore
+      .from('store_orders')
+      .update({
+        partial_payment_amount: paid,
+        payment_shortfall: type === 'less' ? difference : 0,
+        payment_method: 'qr',
+        payment_ref: nextRef,
+      } as any)
+      .eq('id', Number(order.id))
+      .eq('status', 'pending');
+
+    if (error) {
+      console.warn('[store-match] no se pudo marcar diferencia de monto:', error.message);
+      return null;
+    }
+
+    return { type, difference, paid, total };
   }
 
   async function captureStoreBankInbox(payload: any, paymentTime: Date) {
@@ -2653,7 +2762,7 @@ const PORT = Number(process.env.PORT || 3001);
     const windowEnd = new Date(paymentTime.getTime() + 5 * 60 * 1000).toISOString();
     const { data: candidates, error: candidateError } = await supabaseStore
       .from('store_orders')
-      .select('id,total,customer_wa,status,created_at')
+      .select('id,total,customer_wa,customer_name,status,created_at')
       .in('status', ['pending', 'cancelled'])
       .eq('total', parsed.amount)
       .gte('created_at', windowStart)
@@ -2664,7 +2773,73 @@ const PORT = Number(process.env.PORT || 3001);
       console.warn('[store-bank-inbox] no se pudo buscar pedidos tienda:', candidateError.message);
       return { captured: false, reason: 'candidate_error' };
     }
-    if (!candidates?.length) return { captured: false, reason: 'no_store_candidate' };
+    if (!candidates?.length) {
+      const { data: mismatchCandidates } = await supabaseStore
+        .from('store_orders')
+        .select('id,total,customer_wa,customer_name,status,created_at')
+        .in('status', ['pending', 'cancelled'])
+        .gte('created_at', windowStart)
+        .lte('created_at', windowEnd)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      const senderName = cleanName(parsed.senderName ?? '');
+      if (!senderName) return { captured: false, reason: 'no_store_candidate' };
+      const verifiedMismatchCandidates: any[] = [];
+      for (const order of (mismatchCandidates ?? [])) {
+        if (Math.abs(Number(order.total) - Number(parsed.amount)) < 0.01) continue;
+        const isVerified = await isStoreCustomerVerifiedForAuto(order);
+        let orderName = cleanName(order.customer_name ?? '');
+        if (!orderName) {
+          const waNumber = String(order.customer_wa ?? '').replace(/\D/g, '');
+          const { data: customerForName } = waNumber
+            ? await supabaseStore.from('store_customers').select('display_name').eq('whatsapp', waNumber).maybeSingle()
+            : { data: null } as any;
+          orderName = cleanName(customerForName?.display_name ?? '');
+        }
+        const nameMatches = !!orderName && (orderName === senderName || orderName.includes(senderName) || senderName.includes(orderName));
+        if (isVerified && nameMatches) verifiedMismatchCandidates.push(order);
+      }
+
+      if (verifiedMismatchCandidates.length === 1) {
+        const order = verifiedMismatchCandidates[0];
+        const mismatch = await markStoreOrderAmountMismatch(order, parsed.amount, `store-bank:${parsed.hash}`);
+        const hash = `store-bank-mismatch:${parsed.hash}`;
+        const { data: existing } = await supabaseStore
+          .from('payment_events')
+          .select('id')
+          .eq('hash', hash)
+          .maybeSingle();
+        if (!existing) {
+          await supabaseStore.from('payment_events').insert({
+            source: 'macrodroid_bank_amount_mismatch',
+            raw_text: parsed.rawText,
+            amount: parsed.amount,
+            sender_name: parsed.senderName,
+            sender_wa: '',
+            processed: false,
+            match_confidence: mismatch?.type === 'more' ? 'amount_excess' : 'amount_partial',
+            hash,
+            matched_order_id: order.id,
+          } as any);
+        }
+        return { captured: true, candidateCount: 1, amountMismatch: mismatch };
+      }
+
+      return { captured: false, reason: 'no_store_candidate' };
+    }
+
+    const matchedOrder = candidates.length === 1 ? candidates[0] : null;
+    if (matchedOrder) {
+      if (await isStoreCustomerVerifiedForAuto(matchedOrder)) {
+        await confirmStoreOrder(matchedOrder.id, `store-bank:${parsed.hash}:verified-customer`, {
+          nombre: parsed.senderName,
+          pago: parsed.amount,
+        });
+      } else {
+        await markStoreOrderBankDetected(matchedOrder, `store-bank:${parsed.hash}:pending-proof`);
+      }
+    }
 
     const hash = `store-bank:${parsed.hash}`;
     const { data: existing } = await supabaseStore
@@ -2680,10 +2855,10 @@ const PORT = Number(process.env.PORT || 3001);
       amount: parsed.amount,
       sender_name: parsed.senderName,
       sender_wa: '',
-      processed: false,
+      processed: !!matchedOrder && await isStoreCustomerVerifiedForAuto(matchedOrder),
       match_confidence: candidates.length === 1 ? 'pending_single_candidate' : 'pending_multiple_candidates',
       hash,
-      matched_order_id: null,
+      matched_order_id: matchedOrder?.id ?? null,
     } as any);
 
     if (insertError) {
@@ -2974,11 +3149,11 @@ const PORT = Number(process.env.PORT || 3001);
       });
 
       // ── FALLBACK PAGO INCOMPLETO / EXCEDENTE ─────────────────────
-      // Si no hubo match por monto exacto, intentamos por teléfono +
-      // pedido pending en ventana. Diferenciamos:
-      //   - amount >= total → confirma (excedente aceptado).
-      //   - amount  < total → marca pago parcial + WhatsApp recordatorio.
+      // Si no hubo match por monto exacto, intentamos por telefono y pedido pendiente.
+      // Si el monto es menor o mayor, queda para revision manual.
       let mismatchKind: 'partial' | 'excess' | null = null;
+      let mismatchOrder: any = null;
+      let mismatchDetails: any = null;
       const cleanSender = (senderPhone ?? '').replace(/\D/g, '');
       if (!result && cleanSender) {
         const windowStart = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -2996,39 +3171,13 @@ const PORT = Number(process.env.PORT || 3001);
 
         if (sameWa) {
           const total = Number(sameWa.total);
-          if (parsedAmount >= total) {
-            // EXCEDENTE: confirmar normal (decisión del usuario)
+          if (Math.abs(parsedAmount - total) >= 0.01) {
+            mismatchKind = parsedAmount < total ? 'partial' : 'excess';
+            mismatchOrder = sameWa;
+            mismatchDetails = await markStoreOrderAmountMismatch(sameWa, parsedAmount, `bank:${hash ?? 'manual'}`);
+            console.log(`[store-match] MONTO ${mismatchKind === 'partial' ? 'MENOR' : 'MAYOR'}: pedido #${sameWa.id}, pago ${parsedAmount}, total ${total}`);
+          } else if (parsedAmount >= total) {
             result = { order: sameWa, confidence: 'alta' };
-            mismatchKind = 'excess';
-          } else {
-            // PARCIAL: registrar shortfall + encolar WhatsApp al cliente
-            mismatchKind = 'partial';
-            const shortfall = Number((total - parsedAmount).toFixed(2));
-            try {
-              await supabaseStore
-                .from('store_orders')
-                .update({
-                  partial_payment_amount: parsedAmount,
-                  payment_shortfall: shortfall,
-                } as any)
-                .eq('id', sameWa.id)
-                .eq('status', 'pending');
-
-              const waNumber = String(sameWa.customer_wa ?? '').replace(/\D/g, '');
-              if (waNumber) {
-                await supabaseServer.from('whatsapp_message_queue').insert({
-                  user_id: String(process.env.STORE_OWNER_USER_ID || 'store-auto'),
-                  phone: waNumber.startsWith('591') ? waNumber : `591${waNumber}`,
-                  message_body: `Hola! Recibimos tu pago de Bs ${parsedAmount} para el pedido #${sameWa.id}, pero faltan Bs ${shortfall} para completar el total de Bs ${total}. Por favor envía la diferencia para confirmar tu pedido.`,
-                  type: 'store_partial_payment',
-                  reference_id: String(sameWa.id),
-                  reference_type: 'store_order',
-                } as any);
-              }
-              console.log(`[store-match] PARCIAL: pedido #${sameWa.id} pagó ${parsedAmount}/${total}, falta ${shortfall} Bs`);
-            } catch (e: any) {
-              console.error('[store-match] Error guardando pago parcial:', e?.message);
-            }
           }
         }
       }
@@ -3054,6 +3203,13 @@ const PORT = Number(process.env.PORT || 3001);
           await markStoreOrderBankDetected(result.order, `bank:${hash ?? 'manual'}:${result.confidence}`);
           eventData.processed = false;
         }
+      } else if (mismatchOrder) {
+        eventData.matched_order_id = mismatchOrder.id;
+        eventData.processed = false;
+        eventData.match_confidence = mismatchKind === 'excess' ? 'amount_excess' : 'amount_partial';
+        if (mismatchDetails) {
+          eventData.raw_text = `${eventData.raw_text}\namount_mismatch=${mismatchDetails.type};paid=${mismatchDetails.paid};total=${mismatchDetails.total};diff=${mismatchDetails.difference}`.trim();
+        }
       }
 
       await supabaseServer.from('payment_events').insert(eventData as any);
@@ -3061,8 +3217,9 @@ const PORT = Number(process.env.PORT || 3001);
       res.json({
         ok: true,
         matched: !!result,
-        orderId: result?.order.id ?? null,
+        orderId: result?.order.id ?? mismatchOrder?.id ?? null,
         confidence: result?.confidence ?? 'none',
+        amountMismatch: mismatchDetails,
       });
 
     } catch (err: any) {
@@ -3316,12 +3473,46 @@ Responde solo JSON:
         }
         if (!amountMatches) {
           waEvent.summary += `\nproof_amount_mismatch=${receiptAmount}!=${orderTotal}`;
+          const mismatch = await markStoreOrderAmountMismatch(result.order, receiptAmount as number, `wa:${fromWa}`);
+          await supabaseStore
+            .from('store_orders')
+            .update({ wa_proof_received: true, wa_message_id: panelMessageId ?? fromWa } as any)
+            .eq('id', result.order.id)
+            .eq('status', 'pending');
+          if (mediaUrl || receipt) {
+            try {
+              const proofHash = `wa-mismatch:${result.order.id}:${panelMessageId ?? mediaUrl ?? Date.now()}`;
+              const { data: existingProof } = await supabaseStore
+                .from('payment_events')
+                .select('id')
+                .eq('hash', proofHash)
+                .maybeSingle();
+              if (!existingProof) {
+                await supabaseStore.from('payment_events').insert({
+                  source: 'wa_amount_mismatch',
+                  raw_text: waEvent.summary.slice(0, 1000),
+                  amount: receiptAmount,
+                  sender_name: receipt?.cliente ?? '',
+                  sender_wa: cleanFrom,
+                  processed: false,
+                  match_confidence: mismatch?.type === 'more' ? 'amount_excess' : 'amount_partial',
+                  hash: proofHash,
+                  matched_order_id: result.order.id,
+                } as any);
+              }
+            } catch (proofErr: any) {
+              console.warn('[store-wa] No se pudo guardar evidencia de monto distinto:', proofErr?.message ?? proofErr);
+            }
+          }
           await supabaseStore.from('wa_messages').insert(waEvent as any);
-          return res.status(409).json({
-            ok: false,
+          return res.json({
+            ok: true,
             matched: true,
+            confirmed: false,
+            manualReview: true,
             orderId: result.order.id,
-            reason: 'proof_amount_mismatch',
+            reason: 'amount_mismatch_manual_review',
+            amountMismatch: mismatch,
             receipt,
           });
         }
@@ -3635,10 +3826,10 @@ Responde solo JSON:
       todayStart.setHours(0, 0, 0, 0);
       const { data, error } = await supabaseStore
         .from('store_orders')
-        .select('id, customer_wa, customer_name, total, items, created_at')
+        .select('id, customer_wa, customer_name, total, items, created_at, wa_proof_received, payment_ref, partial_payment_amount, payment_shortfall')
         .eq('status', 'pending')
-        .eq('wa_proof_received', true)
         .gte('created_at', todayStart.toISOString())
+        .or('wa_proof_received.eq.true,partial_payment_amount.not.is.null')
         .order('created_at', { ascending: false });
       if (error) return res.status(500).json({ error: error.message });
       res.json(data ?? []);

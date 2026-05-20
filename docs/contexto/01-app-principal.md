@@ -1,6 +1,6 @@
 # App Principal — Ventas Live
 
-Última revisión: 2026-05-11. Verificado contra el código real (`src/App.tsx`).
+Última revisión: 2026-05-20 (Actualizado diseño de login a Leidy Candy con degradado y logo).
 
 ---
 
