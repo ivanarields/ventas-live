@@ -1,67 +1,71 @@
-# Índice del Sistema — Ventas Live
+# Contexto Codex - Indice Operativo
 
-**Aplicación:** PWA de gestión de ropa en consignación + tienda online + WhatsApp + MacroDroid.
-**Dueña:** Leidy Candy Diaz Sanchez.
-**Producción:** https://leidydiaz.live (alias: leidycandy.me, www.leidydiaz.live).
-**Repositorio:** https://github.com/ivanarields/ventas-live.
+Actualizado: 2026-05-20.
 
-Última revisión completa de docs: **2026-05-10**.
+Este folder documenta el funcionamiento actual de la aplicacion para operadores y para auditoria posterior por otra IA.
 
----
+La verdad principal es:
 
-## Documentos en esta carpeta
+1. Codigo actual del repositorio.
+2. Produccion desplegada el 2026-05-20.
+3. Ultima conversacion de cierre del 2026-05-20.
 
-| Archivo | Qué cubre |
+Los documentos anteriores a esa fecha deben leerse solo como historia, no como regla actual, si contradicen este indice o el documento maestro.
+
+## Documentos vigentes
+
+| Documento | Uso |
 |---|---|
-| `00-indice.md` | Este archivo — mapa general |
-| `01-app-principal.md` | Sistema principal: 6 pestañas, flujo del operador, etiquetas |
-| `02-sistema-pagos.md` | Pagos automáticos (MacroDroid), comprobantes WhatsApp, etiquetas |
-| `03-whatsapp-bridge.md` | Bridge de WhatsApp (en DigitalOcean), cola de mensajes |
-| `04-tienda-online.md` | Tienda web (`/tienda`), checkout, pedidos web, integración con sistema principal |
-| `05-estado-pendientes.md` | Qué está hecho hoy, qué falta, últimos cambios |
+| `01-app-principal.md` | Panel del operador, etiquetas, pedidos, entregas y pestañas principales |
+| `02-sistema-pagos.md` | Pagos Live, pagos tienda, MacroDroid, WhatsApp y revision manual |
+| `03-whatsapp-bridge.md` | Bridge WhatsApp y cola de mensajes |
+| `04-tienda-online.md` | Funcionamiento completo de la tienda online |
+| `05-estado-pendientes.md` | Que esta hecho, que falta probar y riesgos conocidos |
+| `06-clientes-verificados.md` | Regla oficial de cliente verificado |
+| `07-entrega-auditoria-ia.md` | Documento maestro para operador y auditoria de otra IA |
 
----
+## Direcciones actuales
 
-## Tres bases de datos en Supabase
-
-| Nombre | ID interno | Para qué |
-|---|---|---|
-| **ChehiAppAbril** | `vhczofpmxzbqzboysoca` | Sistema principal: pagos, clientes, pedidos, etiquetas, cola WhatsApp |
-| **TiendaOnline** | `thgbfurscfjcmgokyyif` | Productos web, pedidos web (`store_orders`), perfiles de clienta web |
-| **PanelPedido** | `vwaocoaeenavxkcshyuf` | Chats WhatsApp (`panel_mensajes`), fotos reales en bucket `whatsapp-media` |
-
-**Regla crítica:** las fotos reales viven en PanelPedido. TiendaOnline solo guarda links. ChehiAppAbril nunca guarda fotos de tienda ni WhatsApp.
-
----
-
-## URLs de producción
-
-- App operador: `https://leidydiaz.live`
-- Tienda nueva (oficial, rápida): `https://leidydiaz.live/tienda`
-- Tienda antigua (respaldo): `https://leidydiaz.live/tienda-original`
-- Tienda v2 directo: `https://leidydiaz.live/tienda-v2`
-
----
-
-## Identificadores clave
-
-| Cosa | Valor |
+| Servicio | Direccion |
 |---|---|
-| User ID del operador (Iván) | `13dcb065-6099-4776-982c-18e98ff2b27a` |
-| Auth del operador | `ivanariel.fb@gmail.com` / `Chehi2024!` |
-| Bridge WhatsApp | `http://134.122.123.253:3001` (DigitalOcean) |
-| Webhook secret del bridge | `ventas-live-bridge-2026` |
+| Produccion principal | `https://leidycandy.me` |
+| Alias de produccion | `https://leidydiaz.live` |
+| Tienda | `https://leidycandy.me/tienda` |
+| Health API | `https://leidycandy.me/api/health` |
+| WhatsApp bridge | `http://134.122.123.253:3001` |
+| MacroDroid receiver | `http://134.122.123.253:3002/api/ingest-notification` |
 
----
+## Acceso del panel
 
-## Comandos esenciales
+Login simple oficial:
 
-```bash
-npm run dev          # Servidor local en puerto 3004
-npm run build        # Compilar para producción
-npm run lint         # Verificar tipos TypeScript
-
-# Edge Functions
-C:/Users/IVAN/bin/supabase.exe functions deploy ingest-notification --no-verify-jwt --project-ref vhczofpmxzbqzboysoca
-C:/Users/IVAN/bin/supabase.exe functions deploy ingest-bank-store --no-verify-jwt --project-ref thgbfurscfjcmgokyyif
+```text
+usuario: leidycandy
+PIN: 7020
 ```
+
+Ese login entra al usuario dueño real de la tienda. No crea un usuario nuevo.
+
+## Regla de lectura para otra IA
+
+Antes de auditar o cambiar algo:
+
+1. Leer `07-entrega-auditoria-ia.md`.
+2. Leer `04-tienda-online.md` para tienda.
+3. Leer `02-sistema-pagos.md` para pagos, Live, MacroDroid y WhatsApp.
+4. Leer `01-app-principal.md` para etiquetas y operacion diaria.
+5. Revisar el codigo antes de afirmar que algo sigue vigente.
+
+## Estado general
+
+La aplicacion esta funcional y ya fue subida a produccion el 2026-05-20 con los ultimos cambios de tienda, cliente verificado, pagos dudosos y login simple.
+
+Lo que falta antes de Play Store no es construir funciones nuevas. Falta cerrar pruebas finales reales desde celular y operador:
+
+- tienda con pago exacto, menor, mayor;
+- banco sin comprobante;
+- comprobante sin banco;
+- Live encendido y apagado;
+- etiquetas/listo/entregado;
+- Buffer encendido y apagado;
+- perfil del cliente y retomar pedido.

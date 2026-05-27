@@ -1317,6 +1317,198 @@ const PORT = Number(process.env.PORT || 3001);
     res.json(data);
   });
 
+  app.post("/api/pedidos/:id/prepare-label", async (req, res) => {
+    if (String(process.env.FAST_LABEL_SAVE ?? "").trim() !== "true") {
+      return res.status(409).json({ error: "FAST_LABEL_SAVE desactivado" });
+    }
+    const userId = req.headers["x-user-id"] as string;
+    if (!userId) return res.status(401).json({ error: "x-user-id requerido" });
+
+    try {
+      const pedidoId = String(req.params.id);
+      const updateData: Record<string, any> = { updated_at: new Date() };
+      if (req.body.status) updateData.status = req.body.status;
+      if (req.body.bag_count !== undefined) updateData.bag_count = Number(req.body.bag_count);
+      if (req.body.item_count !== undefined) updateData.item_count = Number(req.body.item_count);
+
+      const { data: updatedPedido, error: updateError } = await supabaseServer
+        .from("pedidos")
+        .update(updateData)
+        .eq("id", pedidoId)
+        .eq("user_id", userId)
+        .select()
+        .single();
+      if (updateError || !updatedPedido) throw updateError ?? new Error("Pedido no encontrado");
+
+      const customerId = String(req.body.customer_id ?? updatedPedido.customer_id ?? "");
+      if (!customerId) {
+        return res.json({ ok: true, pedido: updatedPedido, pedidos: [updatedPedido], customer: null, labels: [] });
+      }
+
+      const { data: customer, error: customerError } = await supabaseServer
+        .from("customers")
+        .select("id, full_name, canonical_name, normalized_name, phone, whatsapp_number, active_label, active_label_type")
+        .eq("id", customerId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (customerError) throw customerError;
+      if (!customer) {
+        return res.json({ ok: true, pedido: updatedPedido, pedidos: [updatedPedido], customer: null, labels: [] });
+      }
+
+      const { data: customerPedidos, error: pedidosError } = await supabaseServer
+        .from("pedidos")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("customer_id", customerId)
+        .order("date", { ascending: false });
+      if (pedidosError) throw pedidosError;
+
+      const activePedidos = (customerPedidos ?? []).filter((p: any) => {
+        const status = String(p.status ?? "").toLowerCase();
+        return status === "listo" || status === "preparado" || status === "ready";
+      });
+
+      for (const pedido of activePedidos) {
+        const { error } = await supabaseServer.rpc("fn_upsert_order_and_assign", {
+          p_firebase_id: String(pedido.id),
+          p_customer_id: Number(customerId),
+          p_total_bags: Number(pedido.bag_count || 1),
+          p_total_items: Number(pedido.item_count || 0),
+          p_total_amount: Number(pedido.total_amount || 0),
+          p_assigned_by: "app",
+        });
+        if (error) throw new Error(`upsert order: ${error.message}`);
+      }
+
+      const activePedidoIds = activePedidos.map((p: any) => String(p.id));
+      let labelUpdates: Array<{ id: string; label: string; type: "number" | "letter" }> = [];
+      if (activePedidoIds.length > 0) {
+        const { data: orderRows, error: orderRowsError } = await supabaseServer
+          .from("orders")
+          .select("id, firebase_id")
+          .in("firebase_id", activePedidoIds);
+        if (orderRowsError) throw orderRowsError;
+
+        const orderIds = (orderRows ?? []).map((o: any) => o.id).filter(Boolean);
+        const { data: allocationRows, error: allocationError } = orderIds.length > 0
+          ? await supabaseServer
+            .from("container_allocations")
+            .select("order_id, container_id")
+            .in("order_id", orderIds)
+            .eq("status", "ACTIVE")
+          : { data: [], error: null };
+        if (allocationError) throw allocationError;
+
+        const containerIds = [...new Set((allocationRows ?? []).map((a: any) => a.container_id).filter(Boolean))];
+        const { data: containerRows, error: containerError } = containerIds.length > 0
+          ? await supabaseServer
+            .from("storage_containers")
+            .select("id, container_code")
+            .in("id", containerIds)
+          : { data: [], error: null };
+        if (containerError) throw containerError;
+
+        const orderIdByFirebase = new Map((orderRows ?? []).map((o: any) => [String(o.firebase_id), o.id]));
+        const containerById = new Map((containerRows ?? []).map((c: any) => [c.id, c.container_code]));
+        const allocationByOrder = new Map((allocationRows ?? []).map((a: any) => [a.order_id, a]));
+
+        labelUpdates = activePedidos.flatMap((pedido: any) => {
+          const orderId = orderIdByFirebase.get(String(pedido.id));
+          const allocation = orderId ? allocationByOrder.get(orderId) : null;
+          const label = allocation ? containerById.get(allocation.container_id) : null;
+          return label ? [{ id: String(pedido.id), label: String(label), type: /^\d+$/.test(String(label)) ? "number" : "letter" }] : [];
+        });
+
+        await Promise.all(labelUpdates.map((label) =>
+          supabaseServer
+            .from("pedidos")
+            .update({ label: label.label, label_type: label.type, updated_at: new Date() })
+            .eq("id", label.id)
+            .eq("user_id", userId)
+        ));
+      }
+
+      const primaryLabel = labelUpdates[0] ?? null;
+      if (primaryLabel) {
+        await supabaseServer
+          .from("customers")
+          .update({
+            active_label: primaryLabel.label,
+            active_label_type: primaryLabel.type,
+            label_updated_at: new Date(),
+          })
+          .eq("id", customerId)
+          .eq("user_id", userId);
+      }
+
+      if (updateData.status === "listo" && updatedPedido.customer_id && updatedPedido.source !== "WEB" && updatedPedido.label_type !== "WEB") {
+        (async () => {
+          try {
+            const { data: readyCustomer } = await supabaseServer
+              .from("customers")
+              .select("phone, full_name")
+              .eq("id", updatedPedido.customer_id)
+              .maybeSingle();
+            if (!readyCustomer?.phone) return;
+            await supabaseStore.from("store_customers").upsert(
+              {
+                whatsapp: readyCustomer.phone,
+                display_name: readyCustomer.full_name ?? updatedPedido.customer_name ?? "",
+              },
+              { onConflict: "whatsapp", ignoreDuplicates: false }
+            );
+            const storeBase = publicStoreBaseUrl(process.env.STORE_PUBLIC_URL || `${req.protocol}://${req.get("host")}`);
+            const profileLink = `${storeBase}/tienda#profile/orders`;
+            const currentLabel = labelUpdates.find((l) => l.id === String(updatedPedido.id))?.label ?? updatedPedido.label;
+            const pedidoLabel = currentLabel ? ` #${currentLabel}` : "";
+            const message =
+              `Hola ${(readyCustomer.full_name ?? "").split(" ")[0] || ""}!\n` +
+              `Tu pedido${pedidoLabel} esta listo. Muchas gracias por tu compra!\n\n` +
+              `Mira los detalles en tu perfil:\n` +
+              `${profileLink}`;
+            const ownerUserId = (process.env.STORE_OWNER_USER_ID || userId).trim();
+            await enqueueStoreConfirmation(
+              supabaseServer,
+              ownerUserId,
+              readyCustomer.phone,
+              updatedPedido.id,
+              message,
+            );
+          } catch (waErr: any) {
+            console.error("[prepare-label] Error enviando WA listo:", waErr?.message);
+          }
+        })();
+      }
+
+      const { data: refreshedPedidos, error: refreshedPedidosError } = await supabaseServer
+        .from("pedidos")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("customer_id", customerId)
+        .order("date", { ascending: false });
+      if (refreshedPedidosError) throw refreshedPedidosError;
+
+      const { data: refreshedCustomer } = await supabaseServer
+        .from("customers")
+        .select("*")
+        .eq("id", customerId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      res.json({
+        ok: true,
+        pedido: (refreshedPedidos ?? []).find((p: any) => String(p.id) === pedidoId) ?? updatedPedido,
+        pedidos: refreshedPedidos ?? [updatedPedido],
+        customer: refreshedCustomer ?? customer,
+        labels: labelUpdates,
+      });
+    } catch (err: any) {
+      console.error("[prepare-label] error:", err);
+      res.status(500).json({ error: err?.message ?? "Error interno" });
+    }
+  });
+
   app.delete("/api/pedidos/:id", async (req, res) => {
     const userId = req.headers["x-user-id"] as string;
     if (!userId) return res.status(401).json({ error: "x-user-id requerido" });

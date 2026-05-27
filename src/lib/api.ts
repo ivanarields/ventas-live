@@ -91,6 +91,8 @@ export const pedidosApi = {
     apiFetch("/api/pedidos", { method: "POST", body: JSON.stringify(body) }),
   update: (id: string | number, body: Record<string, any>) =>
     apiFetch(`/api/pedidos/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  prepareLabel: (id: string | number, body: Record<string, any>) =>
+    apiFetch(`/api/pedidos/${id}/prepare-label`, { method: "POST", body: JSON.stringify(body) }),
   delete: (id: string | number) =>
     apiFetch(`/api/pedidos/${id}`, { method: "DELETE" }),
 };

@@ -1,163 +1,121 @@
-# App Principal — Ventas Live
+# 01 - App Principal Y Operacion Del Panel
 
-Última revisión: 2026-05-20 (Actualizado diseño de login a Leidy Candy con degradado y logo).
+Actualizado: 2026-05-20.
 
----
+Este documento explica lo que ve y hace el operador en el panel principal.
 
-## Nombres de pantallas (nomenclatura oficial)
+## Pestañas principales
 
-Estas son las 6 pestañas del menú inferior con sus nombres correctos:
-
-| Nombre visible | Código interno | Ícono | Lo que muestra |
-|---|---|---|---|
-| **Cobros** | `home` | Casa | Resumen del día: ingresos, pedidos, accesos rápidos |
-| **Etiquetas** | `entrega` | Caja | Etiquetas asignadas a pedidos + Comprobantes Live |
-| **Pagos** | `payments` | Billetera | Lista de pagos del día por cliente |
-| **Finanzas** | `finance` | Gráfico | Transacciones de ingresos y gastos |
-| **Tienda** | `tienda` | Tienda | Panel admin de la tienda online |
-| **Config** | `settings` | Engranaje | Configuración: WhatsApp, etiquetas, versión |
-
-> **"Mesa de Preparación"**: este nombre NO existe en la UI. Es un concepto interno que usaba Claude para explicar la pantalla. La pantalla real muestra ícono de camiseta y bolsa, con el botón **"MARCAR COMO LISTO"**. En los documentos se llama "pantalla de conteo".
-
----
-
-## Pestaña Cobros (home)
-
-Pantalla de inicio. Muestra un resumen de todo el día.
-
-**Contenido en orden:**
-1. **Banner PWA** — aparece solo si la app no está instalada
-2. **Tarjeta de ingresos** — "Ingresos hoy" en grande (Bs), más Pagos hoy / Total acumulado / Mes
-3. **Grilla de pedidos** — tres cifras: Procesar / Listos / Total (pedidos del día)
-4. **Acceso rápido** — tres botones que llevan directo a: Etiquetas (muestra cuántos listos) / Pagos / Panel Tienda
-5. **Próximo Live** — solo aparece si hay un live programado
-6. **Pagos recientes** — lista de los últimos pagos del día
-
----
-
-## Pestaña Etiquetas (entrega)
-
-Tiene dos sub-pestañas dentro:
-
-### Sub-pestaña "Etiquetas" (primera)
-Muestra todas las etiquetas activas con pedidos asignados.
-
-- **"Etiquetas de 1 bolsa"** — etiquetas numéricas (1–100), fondo azul, 1 bolsa por pedido
-- **"Etiquetas de 2+ bolsas"** — etiquetas alfabéticas (A–Z), fondo fucsia, múltiples bolsas
-- Cada etiqueta muestra el nombre de la clienta y los pedidos dentro
-- Tocar un pedido abre un modal centrado con diseño de tarjeta moderna y premium (no a pantalla completa ni abajo): muestra la etiqueta grande con degradado, el nombre de la clienta destacado, etiquetas de tipo de pedido/exclusividad, contadores visuales con íconos para bolsas y prendas, botón de entregar con degradado, botón para ver perfil y opción de cerrar.
-- Estado vacío: "Sin etiquetas asignadas"
-
-### Sub-pestaña "Comprobantes Live" (segunda)
-Muestra el panel de pedidos y comprobantes de WhatsApp Live (`PanelPedidos`). Ver `02-sistema-pagos.md` para detalle completo.
-
----
-
-## Pestaña Pagos (payments)
-
-Lista de pagos del día seleccionado, agrupados por cliente.
-
-**Cada grupo muestra:**
-- Ícono de check con color según origen:
-  - **Verde** — verificado automáticamente por MacroDroid
-  - **Morado/Violeta** — verificado manualmente O hay comprobante WA pendiente
-  - **Gris** — efectivo u otro tipo sin clasificar
-- Nombre del cliente y monto total (Bs, en fucsia)
-- Botón **"Verificar"** en violeta — aparece solo cuando hay comprobante WA pendiente; al tocarlo confirma el pago sin ir a otra pantalla
-
-**Filtros en la barra superior:**
-- Ojo — oculta clientes que ya retiraron
-- `#` — muestra solo clientes con número de WhatsApp
-- Botón "Live" (color morado) — procesa todas las conversaciones WA del día con IA
-
-**Pagos manuales:**
-Al crear un pago manual, la fecha elegida en el formulario se guarda exactamente como fue seleccionada (sin mezclarla con "hoy"), asegurando que cada pago aparezca en el día correcto.
-
----
-
-## Pestaña Finanzas (finance)
-
-Transacciones de ingresos y gastos del negocio. Separado del flujo de cobros de clientas.
-
----
-
-## Pestaña Tienda (tienda)
-
-Panel admin para gestionar la tienda online en `leidydiaz.live`. Muestra productos, stock y pedidos web. Ver `04-tienda-online.md` para detalle completo.
-
----
-
-## Pestaña Config (settings)
-
-- Conexión WhatsApp
-- **Número oficial de WhatsApp** — número conectado al Bridge, se usa en todos los botones de la app. Se guarda en `store_settings` con key `official_wa_number`
-- **Capacidad de etiquetas** — ajusta bolsas máximas por etiqueta numérica
-- Versión de la app y base de datos
-
----
-
-## Flujo del perfil de una clienta
-
-Desde la pestaña **Pagos**, tocar el nombre de una clienta abre su perfil.
-
-### Tarjetas de pedido — colores reales (OrderItemCard)
-
-| Color de borde | Estado | Lo que significa |
-|---|---|---|
-| **Gris** (`#f1f5f9`) | Solo pago, sin pedido | Se registró un pago pero no hay pedido asociado |
-| **Ámbar** (`#FEF3C7`) | PROCESAR | Pedido creado, falta contar prendas y bolsas |
-| **Azul** (`#E0F2FE`) | LISTO | Pedido contado y con etiqueta asignada |
-| **Verde** (`#DCFCE7`) | ENTREGADO | La clienta retiró su ropa |
-
-### Acciones desde el perfil
-
-- Tocar tarjeta **PROCESAR** → abre la pantalla de conteo
-- Tocar tarjeta **LISTO** → abre la pantalla de conteo en modo edición
-- Botón **"+ Pedido"** → crea un pedido nuevo para la clienta
-
-### Pantalla de conteo (antes llamada "Mesa de Preparación")
-
-No tiene título en pantalla. Muestra:
-- **Ícono camiseta** — toca para sumar prendas
-- **Ícono bolsa** — toca para sumar bolsas
-- **Ícono etiqueta** — bloqueado, muestra la etiqueta que asignará el sistema
-- Botón de reset: "Resumen del Pedido"
-- Botón principal: **"MARCAR COMO LISTO"** (si está en PROCESAR) o **"GUARDAR CAMBIOS"** (si ya está LISTO)
-
-Al tocar "MARCAR COMO LISTO": Supabase asigna la etiqueta automáticamente según el total de bolsas de la clienta. El operador nunca elige la etiqueta.
-
----
-
-## Sistema de etiquetas — reglas de asignación
-
-| Bolsas totales de la clienta | Tipo de etiqueta |
+| Pestaña | Para que sirve |
 |---|---|
-| 1 bolsa | Numérica (1–100), compartida con otras clientas |
-| 2+ bolsas | Alfabética (A–Z), exclusiva para esa clienta |
+| Inicio | Resumen rapido, acceso al panel tienda y estado general |
+| Entrega | Pedidos listos, etiquetas activas y entrega final |
+| Pagos | Pagos normales, pagos Live, pagos Web y revision manual |
+| Finanzas | Resumen financiero |
+| Tienda | Productos, pedidos web, clientes, confirmaciones y configuracion |
+| Config | WhatsApp oficial, etiquetas y configuracion general |
 
-- Si la clienta ya tiene etiqueta alfabética activa → nuevo pedido hereda la misma letra
-- Si suma 2+ bolsas en total → migra automáticamente de número a letra (transacción atómica en PostgreSQL)
-- Al marcar ENTREGADO → etiqueta liberada
+## Login del operador
 
-**Capacidades reales (producción):**
-- Etiquetas numéricas: 1–100 (hasta 5 pedidos por etiqueta)
-- Etiquetas alfabéticas: A–Z (hasta 20 bolsas por etiqueta)
+El operador puede entrar con:
 
----
+```text
+leidycandy
+7020
+```
 
-## Estructura de datos principal
+El endpoint usado es `/api/auth/simple-login`. Entra al usuario dueño real de la app, no a una cuenta nueva vacia.
 
-Todas las tablas están en **ChehiAppAbril** (`vhczofpmxzbqzboysoca`):
+## Estados principales de pedidos
 
-| Tabla | Propósito |
+| Estado | Que significa |
 |---|---|
-| `customers` | Clientas con nombre, teléfono, etiqueta activa |
-| `pagos` | Pagos recibidos (efectivo, MacroDroid, tienda, WA manual) |
-| `pedidos` | Pedidos en proceso o listos |
-| `storage_containers` | Etiquetas físicas (1–100 y A–Z) |
-| `container_allocations` | Asignaciones activas e históricas |
-| `orders` | Sistema de etiquetas vinculado a pedidos |
-| `order_bags` | Bolsas individuales por pedido |
-| `transactions` | Ingresos y gastos de finanzas |
-| `live_sessions` | Lives programados |
-| `app_users` | Usuarios de la app |
+| `procesar` | Pedido confirmado y pendiente de preparar/contar |
+| `listo` / `ready` | Pedido preparado y con etiqueta asignada |
+| `entregado` / `delivered` | Pedido entregado a la clienta; la etiqueta se libera |
+| `cancelled` | Pedido cancelado o rechazado |
+
+## Etiquetas numericas y alfabeticas
+
+Las etiquetas se asignan cuando un pedido pasa a listo/preparado.
+
+Regla operativa:
+
+- Pedido en `procesar`: todavia no debe ocupar etiqueta fisica.
+- Pedido listo con 1 bolsa: usa etiqueta numerica.
+- Pedido listo con 2 o mas bolsas: usa etiqueta alfabetica.
+- Si una clienta ya tiene una etiqueta alfabetica activa, sus nuevos pedidos pueden heredar esa misma letra.
+- El operador no elige la etiqueta manualmente; el sistema la asigna.
+- Al marcar entregado, la etiqueta se libera.
+
+La liberacion ocurre cuando el pedido se marca como entregado desde Entrega o desde el perfil. El sistema llama la logica de liberacion y limpia la etiqueta activa del cliente si ya no quedan pedidos activos.
+
+## Flujo de entrega
+
+1. El pedido confirmado entra en `procesar`.
+2. El operador prepara y cuenta las prendas.
+3. Al marcar listo, el sistema asigna etiqueta.
+4. El pedido aparece en Entrega.
+5. Al entregar, el operador confirma entrega.
+6. El pedido pasa a entregado.
+7. La etiqueta queda disponible para otro pedido.
+
+## Pagos normales, Live y Web
+
+En la pestaña Pagos hay dos vistas importantes:
+
+- `Live`: pagos y pedidos de venta por WhatsApp/Live.
+- `Web`: pagos y pedidos de la tienda online.
+
+La tienda online no debe mezclarse con los pagos normales del sistema principal. Los pagos web viven como pagos de tienda y se muestran separados.
+
+## Boton Live / OFF
+
+El boton Live controla la ventana de procesamiento de ventas Live.
+
+Cuando Live esta encendido:
+
+- MacroDroid puede alimentar el flujo Live.
+- Los mensajes de WhatsApp dentro de la ventana se procesan como venta Live.
+- Los comprobantes de Live pueden cruzarse con pagos del banco.
+- Si alguien compra por tienda al mismo tiempo, la tienda tambien intenta capturar ese pago como tienda.
+
+Cuando Live esta apagado:
+
+- El servidor responde para Live con `live_off`.
+- Eso significa que el pago no entra al flujo Live.
+- Pero antes de ignorarlo para Live, el servidor intenta capturarlo para tienda si corresponde.
+- Por eso una compra web puede funcionar aunque Live este apagado.
+
+## Perfil del cliente
+
+El perfil sirve para revisar:
+
+- pagos;
+- pedidos;
+- estado del pedido;
+- datos de WhatsApp;
+- comprobantes y pagos pendientes;
+- boton para notificar Live listo;
+- confirmacion de prendas de Live cuando aplica.
+
+Los pedidos web no deben contaminar el historial Live. En el perfil se filtran como compra web cuando corresponde.
+
+## Acciones que debe usar el operador
+
+Para tienda:
+
+- Si el pago esta claro y confirmado automaticamente, no tocar.
+- Si aparece en Pagos Web para revision, usar `Confirmar` o `Rechazar`.
+- Si se confirma, el pedido queda pagado, se ocultan productos vendidos y se envia WhatsApp de confirmacion.
+- Si se rechaza, el producto vuelve a tienda y el pedido deja de contarse como pagado.
+
+Para Live:
+
+- Si el pago esta verificado por MacroDroid, no tocar salvo que haya inconsistencia.
+- Si aparece pendiente/revision, revisar comprobante y banco.
+- Usar verificar manual solo cuando el operador confirma que el pago existe.
+
+## Riesgo operativo conocido
+
+En el panel Tienda existe tambien una accion de gestion de pedido como `Vendido + Ocultar`. Para pagos dudosos, el flujo recomendado es usar la revision en Pagos Web (`Confirmar` / `Rechazar`), porque ese flujo ejecuta la confirmacion completa de pago.

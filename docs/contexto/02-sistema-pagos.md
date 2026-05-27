@@ -1,309 +1,169 @@
-# Sistema de Pagos y Etiquetas
+# 02 - Sistema De Pagos, MacroDroid, WhatsApp Y Live
 
-Última revisión: 2026-05-10. Verificado contra el código real.
+Actualizado: 2026-05-20.
 
----
+Este documento describe el flujo operativo de pagos. No intenta documentar cada tabla; explica que debe pasar en la aplicacion.
 
-## Tipos de pago
+## Entradas de pago
 
-Hay tres canales de pago completamente distintos. Cada uno tiene su propio flujo.
+El sistema recibe evidencia de pago por tres caminos:
 
-| Canal | Origen | Destino en Supabase | Función clave |
-|---|---|---|---|
-| **Efectivo manual** | Operador toca "Registrar" en la app | `pagos` (ChehiAppAbril) | `POST /api/pagos` |
-| **Live (WhatsApp + MacroDroid)** | Cliente manda foto por WA; MacroDroid captura notificación bancaria | `pagos_venta_live` + `pagos` (ChehiAppAbril) | `upsertWhatsappLivePayment()` + `matchLivePaymentWithMacrodroid()` |
-| **Tienda Online** | Cliente paga desde `/tienda`; MacroDroid captura transferencia | `store_orders` (TiendaOnline) + `pagos` (ChehiAppAbril) | Edge Function `ingest-bank-store` → `confirmStoreOrder()` |
-
----
-
-## Canal 1 — Efectivo manual
-
-El operador toca el botón "Registrar" en la pestaña **Pagos**. Abre un formulario que crea un registro en `pagos` con `method = 'Efectivo'` y crea automáticamente un pedido en estado `procesar`. No hay automatización.
-
----
-
-## Canal 2 — Live (WhatsApp + MacroDroid)
-
-### Flujo completo
-
-```
-1. Cliente manda foto de comprobante por WhatsApp
-       ↓
-2. WhatsApp Bridge (DigitalOcean 134.122.123.253:3001)
-   espeja el mensaje a: panel_mensajes (DB PanelPedido)
-       ↓
-3. Operador toca botón "Live" en la app (o revisa chat manualmente)
-   → POST /api/ai/summarize-conversation
-   → IA (Gemini 2.5 Flash Lite) extrae: nombre, monto, hora, foto
-       ↓
-4. upsertWhatsappLivePayment() — crea registro en pagos_venta_live
-   - Si tiene nombre Y monto → estado inicial: 'pendiente_whatsapp'
-   - Si le falta nombre O monto → estado inicial: 'revision_manual'
-       ↓
-5. matchLivePaymentWithMacrodroid()
-   - Busca en tabla `pagos` por nombre ≈ nombre_canonico, monto exacto, ±5 min
-   - Si hay match → estado: 'verificado_macrodroid' (VERDE)
-   - Si no hay match → estado: 'revision_manual' (ÁMBAR)
-       ↓
-6. (Mientras tanto, o antes/después)
-   MacroDroid captura notificación Yape/banco en el celular
-   → POST http://134.122.123.253:3002/api/ingest-notification (MacroDroid Receiver)
-   → reenvía a /api/ingest-notification (proxy en server.ts)
-   → Edge Function ingest-notification (ChehiAppAbril)
-   → Parsea nombre + monto en cascada (ver sección Parseo)
-   → Inserta en `pagos` (ChehiAppAbril)
-```
-
-### Colores en la pestaña Pagos
-
-La pestaña **Pagos** muestra un ícono de check con color según el origen del pago (`App.tsx:2566–2570`):
-
-| Color del ícono | Cuándo aparece |
-|---|---|
-| **Verde** | MacroDroid verificó el pago automáticamente |
-| **Morado/Violeta** | Verificado manualmente por la operadora, O hay un comprobante WA pendiente de confirmar |
-| **Gris** | Efectivo u otro tipo sin clasificar |
-
-Cuando hay un comprobante WA pendiente, aparece además un botón **"Verificar"** en violeta al lado del monto. Al tocarlo, confirma el pago sin ir a ninguna otra pantalla.
-
-### Estados internos del pago Live (base de datos)
-
-Internamente hay 6 estados en la tabla `pagos_venta_live`. Estos estados determinan el color del ícono en la pestaña **Pagos** y también se muestran en **Comprobantes Live** (sub-pestaña dentro de Etiquetas):
-
-| Estado interno | Color en Comprobantes Live | Color en pestaña Pagos | Cuándo ocurre |
-|---|---|---|---|
-| `pendiente_whatsapp` | **Ámbar** | **Morado** | Comprobante WA llegó con nombre+monto pero MacroDroid no coincidió todavía |
-| `revision_manual` | **Ámbar** | **Morado** | Comprobante sin nombre/monto, o match MacroDroid falló |
-| `verificado_macrodroid` | **Verde** | **Verde** | Match automático con notificación MacroDroid exitoso |
-| `verificado_manual` | **Verde** | **Verde** | Operadora confirmó manualmente |
-| `posible_duplicado` | **Azul** | (oculto) | Mismo nombre+monto+hora que otro pago ya registrado (±5 min) |
-| `rechazado` | **Rojo** | (oculto) | Descartado manualmente |
-
-> **Importante:** `pendiente_whatsapp` y `revision_manual` son dos estados distintos aunque ambos se vean igual. El primero: llegaron los datos pero el banco no coincidió. El segundo: faltan datos desde el inicio, o el cruce falló después.
-
-### Verificación manual (`verify-manual`)
-
-Cuando el operador confirma un pago morado/ámbar manualmente (`src/routes/live-sales.ts:342–479`):
-
-1. Crea pago en ChehiAppAbril con `method = 'Verificacion manual WhatsApp'`
-2. Busca si el cliente también tiene pedidos en TiendaOnline por mismo teléfono+monto del día
-3. Si encuentra pedido de tienda pendiente → lo marca como pagado y pone stock en 0
-4. Actualiza estado en `pagos_venta_live` a `verificado_manual`
-
----
-
-## Canal 3 — Tienda Online
-
-La tienda en `/tienda` tiene su propio flujo de pago automático separado del canal Live.
-
-### Flujo completo
-
-```
-1. Cliente selecciona producto y toca "Pagar"
-   → Se crea store_order en TiendaOnline con estado 'pendiente'
-   → Reserva de stock por 60 segundos
-   → Pantalla de pago muestra QR Yape y número de WhatsApp
-       ↓
-2. Cliente paga por Yape/transferencia
-       ↓
-3A. MacroDroid captura notificación bancaria en el celular
-    → POST http://134.122.123.253:3002/api/ingest-notification (MacroDroid Receiver 24/7)
-    → reenvía a https://leidydiaz.live/api/ingest-notification (proxy en server.ts)
-    → Edge Function ingest-notification (ChehiAppAbril)
-    → Crea pago en pagos (method="Notificación bancaria")
-    → Bloque "REENVÍO A TIENDA ONLINE" busca store_orders pending en últimos 2 min
-    → Si hay match único → POST /api/store/match-payment → confirmStoreOrder()
-
-3B. Cliente manda comprobante por WhatsApp al número de la tienda
-    → WhatsApp Bridge recibe el mensaje
-    → POST /api/store/ingest-wa (server.ts)
-    → Ventana de búsqueda: 10 minutos
-    → Llama a tryMatchOrder({ windowMinutes: 10 })
-    → Si banco ya procesó → confirmStoreOrder()
-    → Si banco no llegó todavía → marca `wa_proof_received = true` en store_order
-       (el pedido queda en estado 'pending' esperando verificación manual)
-```
-
-### Flujo de verificación manual de tienda
-
-Cuando el banco no llega (MacroDroid sin internet, etc.) pero la clienta envió el comprobante por WA, el operador puede verificar manualmente desde la **pestaña Pagos**:
-
-1. `/api/store/pending-manual` devuelve store_orders con `status='pending'` y `wa_proof_received=true` del día actual
-2. Aparecen como tarjetas **moradas** con badge **WEB** en la parte superior de la pestaña Pagos
-3. El operador toca **"Verificar"** → `POST /api/store/verify-manual/:id` → llama a `confirmStoreOrder()`
-4. `confirmStoreOrder()` ejecuta los mismos 7 pasos que el flujo automático (pedido, pago, WhatsApp)
-5. El pago queda en **verde** con badge WEB y se envía el mensaje de confirmación automáticamente
-
-### `tryMatchOrder()` — Niveles de confianza
-
-La función busca la store_order que corresponde al pago recibido (`server.ts:2168–2224`). Hay tres niveles:
-
-| Nivel | Condición | Resultado |
+| Camino | Que trae | Uso |
 |---|---|---|
-| **MÁXIMA** | El texto del comprobante contiene el código del pedido (ej: `#WEB-123`) | Match definitivo |
-| **ALTA** | Solo un candidato con ese monto en la ventana de tiempo, o un candidato único después de filtrar por teléfono | Match confirmado |
-| **MEDIA** | Múltiples candidatos con ese monto, sin desempate posible | Retorna `null` — no hace nada |
+| MacroDroid | Notificacion bancaria del celular | Detecta monto, nombre y hora del pago |
+| WhatsApp | Comprobante o mensaje de la clienta | Une comprobante con pedido y telefono |
+| Operador | Confirmacion manual | Resuelve casos dudosos |
 
-El `windowMinutes` por defecto (si nadie lo especifica) es **2 minutos**. Los tres puntos de entrada usan:
-- Edge Function `ingest-bank-store`: **35 minutos** (siempre, no condicional)
-- `/api/store/ingest-bank` (server): **2 minutos**
-- `/api/store/ingest-wa` (server): **10 minutos**
+## Separacion tienda vs Live
 
-### `confirmStoreOrder()` — obtención del nombre real
+La tienda online y el Live son flujos distintos.
 
-El nombre del pagador se obtiene en cascada:
-1. Si `source` incluye `bank` o `macrodroid`: busca `payment_events` en ChehiAppAbril con `matched_order_id`
-2. Busca `payment_events` en TiendaOnline con `matched_order_id` (disponible para el camino `chehi`)
-3. Usa `store_orders.customer_name` como último recurso
+- Tienda: pedidos creados en `/tienda`, pagos en TiendaOnline y vista `Pagos > Web`.
+- Live: mensajes de WhatsApp dentro de una ventana Live, pedidos Live y vista `Pagos > Live`.
+- Un pago web no debe convertirse en pedido Live.
+- Un pago Live real no debe borrarse como pedido fantasma de tienda.
 
-### `confirmStoreOrder()` — pasos de inyección (`server.ts:2250+`)
+## MacroDroid con Live apagado
 
-Cuando el match es exitoso, esta función ejecuta los pasos en orden:
+Cuando MacroDroid manda una notificacion bancaria:
 
-1. Marca la store_order como pagada en TiendaOnline
-2. Pone el stock del producto en 0 (oculta de la tienda)
-3. Obtiene el nombre del pagador desde `payment_events`
-4. Busca o crea al cliente en ChehiAppAbril por teléfono
-5. Inserta pedido en ChehiAppAbril con `label = 'WEB-{id}'`, `source = 'WEB'`
-6. Inserta pago en ChehiAppAbril con `method = 'Tienda Online'` (con chequeo de duplicados)
-7. Encola mensaje de confirmación por WhatsApp (`enqueueStoreConfirmation()`)
+1. El servidor intenta capturar/cruzar el pago para tienda.
+2. Luego revisa si hay Live activo o recientemente cerrado.
+3. Si no hay Live valido, responde `ignored: true` con razon `live_off`.
+4. Ese `live_off` solo significa que se ignoro para Live.
+5. La tienda puede haber capturado el pago antes de esa respuesta.
 
-`enqueueStoreConfirmation()` es **idempotente por `order_id`** — si se llama dos veces para el mismo pedido, solo encola una vez.
+Esta regla es importante: Live apagado no debe romper compras web.
 
-Los pedidos web tienen `source = 'WEB'` y **NO** disparan el segundo mensaje "PEDIDO LISTO" que reciben los pedidos del Live.
+## MacroDroid con Live encendido
 
----
+Cuando Live esta encendido:
 
-## Parseo de notificaciones bancarias (en cascada)
+1. El pago entra al flujo de tienda si coincide con un pedido web.
+2. Tambien puede entrar al flujo Live si cae dentro de la ventana Live.
+3. El sistema evita que una compra web genere un pedido fantasma en Live.
+4. Si se crea un pedido fantasma `source='macrodroid'` sin items ni etiqueta, la confirmacion de tienda intenta limpiarlo solo si cumple condiciones estrictas.
 
-Aplica al canal Live (Edge Function `ingest-notification`, ChehiAppAbril):
+## Flujo tienda - pago exacto
 
-1. **Regex hardcodeados** — Yape directo (`NOMBRE, te envió...`), Yape QR (`QR DE NOMBRE te envió...`), bancos bolivianos clásicos
-2. **Patrones aprendidos** (`learned_text_patterns`) — aprende automáticamente el contexto antes/después del nombre según `app_package`
-3. **OpenRouter** (Gemini 2.5 Flash Lite, `thinkingBudget: 0`) — casos nuevos no cubiertos por regex
-4. Sin nombre válido → va a `manual_review_queue` — **NUNCA** se inventa un placeholder tipo "PAGO Yape"
+### Cliente verificado
 
-**Idempotencia:** cada notificación tiene un hash SHA-256 (`raw_hash`). Si llega duplicada, se ignora.
+Si el cliente ya es verificado y el banco detecta un pago exacto de un pedido unico:
 
----
+1. El pedido se confirma automaticamente.
+2. El producto queda vendido y oculto.
+3. Se registra pago de tienda.
+4. Se envia un unico WhatsApp de confirmacion.
+5. El pedido aparece como pagado.
 
-## Cola de mensajes WhatsApp
+### Cliente nuevo
 
-Hay dos modos de envío:
+Si el cliente es nuevo:
 
-| Modo | Endpoint | Filtro | Delay |
-|---|---|---|---|
-| **Automático** (procesador cada 60 seg) | interno, sin endpoint HTTP | `storeOnly: true` — solo mensajes de tienda | Sin delay artificial |
-| **Manual "Envío Seguro"** | `POST /api/whatsapp/send-next` | Sin filtro — envía cualquier tipo | Delay aleatorio 2–4 min para no parecer bot |
+1. El sistema es mas estricto.
+2. Si hay banco + WhatsApp/comprobante + pedido y todo coincide, se confirma.
+3. Al confirmarse correctamente, el cliente pasa a cliente verificado.
+4. Si falta comprobante o hay duda, no se confirma solo.
 
-El procesador automático corre en el servidor cada 60 segundos con filtro `storeOnly`. Esto significa que los mensajes del Live solo salen cuando el operador los envía manualmente.
+## Flujo tienda - pago menor o mayor
 
----
+Si el monto pagado no coincide:
 
-## Sistema de etiquetas
+- No se confirma automaticamente.
+- El pedido queda en revision manual.
+- El producto sigue reservado mientras se revisa.
+- El operador ve nota roja:
+  - `Menos Bs X` si pago menos.
+  - `Mas Bs X` si pago mas.
+- El cliente ve pendiente/revision en su perfil.
+- No se manda ningun mensaje automatico pidiendo completar una diferencia de monto.
 
-### Capacidades reales (verificadas en producción)
+El operador debe decidir:
 
-| Tipo | Códigos | Máx pedidos por etiqueta | Máx bolsas por etiqueta |
-|---|---|---|---|
-| `NUMERIC_SHARED` | 1 al 100 (100 etiquetas) | 5 pedidos simples | — |
-| `ALPHA_COMPLEX` | A a Z (26 etiquetas) | — | 20 bolsas |
+- Confirmar si reviso el banco y acepta el caso.
+- Rechazar si el pago no corresponde.
 
-> Estos números vienen de las migraciones 041 y 042. La migración 001 tenía solo 1–4 y A–D con 12 bolsas; los valores actuales fueron expandidos después.
+## Flujo tienda - banco sin comprobante
 
-### Reglas de asignación
+Si MacroDroid detecta banco pero no hay comprobante:
 
-- Pedido en estado `procesar` → **sin etiqueta todavía**
-- Pedido marcado `LISTO` con **1 bolsa** → etiqueta numérica (la de menor número disponible)
-- Pedido marcado `LISTO` con **2+ bolsas** → etiqueta alfabética
-- Si la clienta ya tiene etiqueta letra activa → nuevo pedido **hereda la misma letra**
-- Si se agrega una bolsa y la suma total supera 1 bolsa → **migra automáticamente** de numérica a alfabética en una transacción atómica
-- Al marcar `entregado` → etiqueta liberada (`RELEASED`)
+1. El pedido queda pendiente.
+2. Se marca como banco detectado / falta comprobante.
+3. Si hay numero confiable, se encola WhatsApp pidiendo comprobante.
+4. El cliente ve que debe enviar comprobante.
+5. Cliente nuevo no se confirma automaticamente solo por banco.
+6. Cliente verificado puede auto-confirmarse solo si la regla de seguridad lo permite.
 
-El operador **nunca elige** la etiqueta — el backend la asigna solo.
+## Flujo tienda - comprobante sin banco
 
-### Funciones PL/pgSQL
+Si llega comprobante por WhatsApp pero MacroDroid no detecto banco:
 
-```sql
-fn_assign_container(order_id, user_id)      — asigna con FOR UPDATE SKIP LOCKED (evita race conditions)
-fn_migrate_to_complex(order_id)             — migra de numérico a alfabético
-fn_release_container(order_id, reason)      — libera al entregar
-fn_recalc_container_state(container_id)     — recalcula estado de la etiqueta
+1. El pedido queda en revision manual.
+2. El producto sigue reservado.
+3. El cliente ve: "Recibimos tu comprobante. Estamos esperando confirmacion del pago."
+4. El operador revisa banco y confirma o rechaza.
+
+## Revision manual de tienda
+
+La revision manual correcta debe hacerse desde `Pagos > Web` cuando el pedido aparezca pendiente/dudoso.
+
+Botones:
+
+- `Confirmar`: confirma el pago, registra pago de tienda, oculta productos y deja el pedido pagado.
+- `Rechazar`: cancela/rechaza el pedido y libera los productos para volver a vender.
+
+No usar una accion rapida de gestion de producto como sustituto de la verificacion de pago si el caso es dudoso.
+
+## Flujo Live
+
+1. El operador inicia Live.
+2. El sistema guarda hora de inicio.
+3. Entra conversacion de WhatsApp.
+4. Al cerrar Live, el operador indica hora real de cierre.
+5. El sistema procesa mensajes dentro de esa ventana.
+6. La IA resume pedidos/comprobantes.
+7. Los comprobantes se cruzan con MacroDroid por monto, nombre y hora.
+8. Si coincide, el pago queda verificado.
+9. Si falta algo, queda pendiente o revision manual.
+10. Si el operador verifica manualmente, el cliente y el pedido se sincronizan.
+
+## Estados de pago Live
+
+| Estado | Significado |
+|---|---|
+| `pendiente_whatsapp` | Hay comprobante o informacion de WhatsApp, falta cruce completo |
+| `verificado_macrodroid` | Banco y comprobante coincidieron automaticamente |
+| `verificado_manual` | Operador confirmo manualmente |
+| `revision_manual` | Hay duda y requiere decision |
+| `rechazado` | Operador rechazo |
+| `posible_duplicado` | Posible repeticion o evento repetido |
+
+## Cliente verificado
+
+Un cliente se vuelve verificado cuando el sistema logra unir:
+
+```text
+nombre real + WhatsApp + pago confirmado
 ```
 
-### Migraciones relevantes
+Esto aplica tanto en tienda como en Live.
 
-| Migración | Qué hace |
+## Mensajes WhatsApp importantes
+
+| Caso | Mensaje esperado |
 |---|---|
-| `001_labeling_system.sql` | Seed inicial: etiquetas 1–4 y A–D, max_simple_orders=4, max_bags=12 |
-| `041_group_orders_by_client_alpha.sql` | Agrega etiquetas 5–100 (numéricas) y E–Z (alfabéticas); agrupa por cliente |
-| `042_v2_total_bags_per_customer.sql` | Sube max_bags_capacity a 20 para todas las etiquetas alfabéticas |
-| `043_fix_downgrade_last_order.sql` | Permite degradar de letra a número cuando es el único pedido activo del cliente |
+| Tienda pagada | Confirmacion de pago y link al perfil |
+| Banco sin comprobante | Pedido de comprobante |
+| Comprobante sin banco | El perfil muestra espera de confirmacion |
+| Live listo para confirmar prendas | Link a `/tienda#profile/confirmar` |
 
----
+## Duplicados
 
-## Tablas por base de datos
+El sistema distingue:
 
-### ChehiAppAbril (`vhczofpmxzbqzboysoca`)
+- pago repetido real;
+- repeticion de la misma notificacion;
+- comprobante reenviado;
+- pago de tienda que ocurre mientras Live esta encendido.
 
-| Tabla | Propósito |
-|---|---|
-| `pagos` | Todo pago recibido (efectivo, MacroDroid, tienda, manual WA) |
-| `pedidos` | Pedidos de ropa en proceso o listos |
-| `customers` | Clientes con teléfono, etiqueta activa, firebase_id |
-| `storage_containers` | Etiquetas físicas (tabla interna del sistema) |
-| `container_allocations` | Asignaciones activas e históricas |
-| `orders` | Sistema de etiquetas (vinculado a pedidos) |
-| `order_bags` | Bolsas individuales por pedido |
-| `raw_notification_events` | Notificaciones crudas de MacroDroid |
-| `parsed_payment_candidates` | Notificaciones ya parseadas antes de cruzar |
-| `learned_text_patterns` | Patrones aprendidos por app_package |
-| `manual_review_queue` | Notificaciones sin nombre válido para revisión |
-
-### PanelPedido (`vwaocoaeenavxkcshyuf`)
-
-| Tabla | Propósito |
-|---|---|
-| `panel_clientes` | Un registro por número de teléfono WA |
-| `panel_mensajes` | Mensajes y fotos recibidos (has_media, media_url) |
-| `pedidos_venta_live` | Pedidos del Live (cliente, monto total, estado) |
-| `pagos_venta_live` | Comprobantes procesados con estado, foto, match_reason |
-
-Campos clave de `pagos_venta_live`: `estado`, `main_pago_id`, `panel_mensaje_id`, `duplicate_of`, `nombre_canonico`, `monto`, `comprobante_media_url`, `match_reason`.
-
-### TiendaOnline (`thgbfurscfjcmgokyyif`)
-
-| Tabla | Propósito |
-|---|---|
-| `products` | Productos con foto, precio, stock |
-| `store_orders` | Pedidos de clientes (estado: pendiente/pagado/cancelado) |
-| `store_customers` | Clientes de la tienda (teléfono + PIN) |
-| `payment_events` | Notificaciones bancarias recibidas para la tienda |
-| `store_favorites` | Favoritos guardados por cliente |
-| `whatsapp_queue` | Cola de mensajes WA pendientes de envío |
-
----
-
-## Variables de entorno del sistema de pagos
-
-| Variable | Dónde se usa |
-|---|---|
-| `INGEST_DEVICE_SECRET` | Header que valida que MacroDroid es legítimo |
-| `WEBHOOK_SECRET` | Valida peticiones del bridge WA (`ventas-live-bridge-2026`) |
-| `WHATSAPP_BRIDGE_URL` | URL del bridge en DigitalOcean (`http://134.122.123.253:3001`) |
-| `MACRODROID_RECEIVER_URL` | URL operativa del receiver 24/7 (`http://134.122.123.253:3002/api/ingest-notification`) |
-| `STORE_PUBLIC_URL` / `STORE_URL` | Base publica usada en links de perfil enviados por WhatsApp; el servidor limpia espacios y saltos de linea antes de armar `/tienda#profile/orders` o `/tienda#profile/confirmar` |
-| `STORE_OWNER_USER_ID` | Si falta, los pedidos de tienda quedan invisibles (`13dcb065-6099-4776-982c-18e98ff2b27a`) |
-| `VITE_STORE_WA_NUMBER` | Fallback del número WA de la tienda. En producción se usa `official_wa_number` guardado en `store_settings` (configurable desde Configuraciones de la app) |
-
----
-
-## Puntos de atención
-
-1. **`STORE_OWNER_USER_ID` es crítica**: si falta en Vercel, los pedidos de tienda se crean en ChehiAppAbril pero el operador no los ve.
-2. **La ventana de 35 min del Edge Function es fija**: no cambia según si hay código de pedido o no — aplica siempre.
-3. **Los pedidos web (`source='WEB'`) no disparan el mensaje "PEDIDO LISTO"** que sí reciben los clientes del Live.
-4. **Las fotos de comprobante WhatsApp viven solo en PanelPedido** — nunca se copian a TiendaOnline ni a ChehiAppAbril.
-5. **`revision_manual` ≠ `pendiente_whatsapp`**: aunque ambos son ámbar, tienen causas distintas y se tratan diferente.
-6. **La cola WhatsApp marca como fallido un `sending` viejo**: si un envio queda mas de 10 minutos en `sending`, pasa a `failed` con `sending_timeout_revisar_si_llego` para revision/reintento manual.
-7. **Live no debe perder comprobantes si falla la clasificacion inicial**: si una imagen no fue clasificada como `COMPROBANTE` pero el extractor logra leer nombre o monto, se registra igual como comprobante Live; si aun asi no hay datos pero el chat habla de pago y hay una imagen reciente, se crea revision manual usando la imagen mas reciente del chat para que la operadora revise la banca.
+Antes de llamar algo duplicado, hay que revisar si es pago real o solo replay de notificacion.

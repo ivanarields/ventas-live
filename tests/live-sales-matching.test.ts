@@ -52,6 +52,13 @@ test('usa la hora del comprobante cuando WhatsApp llega tarde', () => {
   assert.equal(match?.id, 272);
 });
 
+test('si WhatsApp llega despues de medianoche, una hora 23:xx pertenece al dia anterior', () => {
+  assert.equal(
+    receiptAtFromMessage('2026-05-23T04:03:23.439Z', '23:35'),
+    '2026-05-23T03:35:00.000Z',
+  );
+});
+
 test('no verifica si solo coincide monto pero el nombre es distinto', () => {
   const pagoLive = {
     nombre_detectado: name,

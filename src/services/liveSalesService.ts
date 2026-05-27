@@ -98,6 +98,9 @@ export function receiptAtFromMessage(messageCreatedAt: string | null | undefined
   const mm = Math.max(0, Math.min(59, Number(match[2])));
   const utc = new Date(`${fecha}T00:00:00.000Z`);
   utc.setUTCHours(hh + 4, mm, 0, 0);
+  if (utc.getTime() > base.getTime() + 2 * 60 * 60 * 1000) {
+    utc.setUTCDate(utc.getUTCDate() - 1);
+  }
   return utc.toISOString();
 }
 
@@ -480,8 +483,9 @@ export async function syncMainPedidoForLiveOrder(
 ) {
   const name = pedidoLive.nombre_detectado;
   if (!name) return pedidoLive;
-  // Usar total_verificado si ya tiene valor; si es 0 usar total_comprobantes (monto detectado en el comprobante)
-  const total = parseLiveMonto(pedidoLive.total_verificado) || parseLiveMonto(pedidoLive.total_comprobantes) || 0;
+  // El pedido principal solo debe recibir dinero verificado. Los comprobantes
+  // pendientes/revision quedan visibles en el panel, pero no inflan ventas.
+  const total = parseLiveMonto(pedidoLive.total_verificado) || 0;
 
   const customer = await ensureMainCustomerForLive(mainDb, userId, name, pedidoLive.phone);
   const pedido = await ensureMainDailyPedido(mainDb, {
@@ -578,7 +582,20 @@ export async function matchLivePaymentWithMacrodroid(
 
   const { data: candidates, error } = await query;
   if (error) throw error;
-  if (!candidates?.length) return input.pagoLive;
+  if (!candidates?.length) {
+    const { data, error: updateError } = await panelDb
+      .from('pagos_venta_live')
+      .update({
+        estado: 'revision_manual',
+        match_score: 0.5,
+        match_reason: 'sin_pago_macrodroid_en_ventana',
+      })
+      .eq('id', input.pagoLive.id)
+      .select('*')
+      .single();
+    if (updateError) throw updateError;
+    return data;
+  }
 
   const matched = findMacrodroidMatchForLivePayment(pagoLiveForMatch, candidates, {
     mainCustomerId: input.mainCustomerId,
