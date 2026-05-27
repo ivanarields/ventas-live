@@ -17,6 +17,7 @@ import {
   recomputeLiveOrderTotals,
   syncMainPedidoForLiveOrder,
 } from '../services/liveSalesService.js';
+import { analyzeLiveReceipt } from '../services/liveReceiptAnalyzer.js';
 
 const ESTADOS_TARJETA = [
   'conversacion',
@@ -1050,6 +1051,9 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
       }
 
       const reanalyze = req.query.reanalyze === 'true';
+      if (reanalyze && await getActiveProcessingLive(userId)) {
+        return res.status(409).json({ error: 'No se puede re-analizar mientras hay un Live activo' });
+      }
       const pendientes = (clientes ?? []).filter((c: any) => {
         const ultimoMsg = ultimoPorCliente[c.id];
         if (!ultimoMsg) return false; // sin mensajes en el rango, no procesar
@@ -1064,6 +1068,49 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
       });
     } catch (err: any) {
       console.error('[live-sales/pending-conversations]', err);
+      res.status(500).json({ error: err?.message ?? 'Error interno' });
+    }
+  });
+
+  // POST /api/live-sales/analyze-receipt
+  // Análisis automático de un comprobante recién llegado por WhatsApp.
+  // Lo invoca la edge function ingest-whatsapp cuando detecta imagen entrante
+  // durante un Live activo. NO genera resumen, NO selecciona prendas.
+  // Solo: clasifica imagen → si es comprobante real → crea pago + match MacroDroid.
+  router.post('/analyze-receipt', async (req: Request, res: Response) => {
+    const userId = uid(req);
+    if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
+    if (!supabaseMain) return res.status(503).json({ error: 'Base principal no disponible' });
+
+    try {
+      const { clienteId, phone, panelMensajeId, mediaUrl, mediaType, messageContent, messageCreatedAt } = req.body ?? {};
+
+      if (!clienteId || !phone || !panelMensajeId || !mediaUrl || !messageCreatedAt) {
+        return res.status(400).json({
+          error: 'Faltan campos: clienteId, phone, panelMensajeId, mediaUrl, messageCreatedAt',
+        });
+      }
+
+      // Verificar que hay un Live activo (sino, no procesar)
+      const activeSession = await getActiveProcessingLive(userId);
+      if (!activeSession) {
+        return res.json({ ok: true, skipped: true, reason: 'sin_live_activo' });
+      }
+
+      const result = await analyzeLiveReceipt(supabasePanel, supabaseMain, {
+        userId,
+        clienteId: String(clienteId),
+        phone: String(phone),
+        panelMensajeId: String(panelMensajeId),
+        mediaUrl: String(mediaUrl),
+        mediaType: mediaType ? String(mediaType) : null,
+        messageContent: messageContent ? String(messageContent) : null,
+        messageCreatedAt: String(messageCreatedAt),
+      });
+
+      return res.json(result);
+    } catch (err: any) {
+      console.error('[live-sales/analyze-receipt]', err);
       res.status(500).json({ error: err?.message ?? 'Error interno' });
     }
   });

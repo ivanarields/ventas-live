@@ -190,6 +190,44 @@ async function processMessage(req: Request) {
       })());
     }
 
+    // ── ANÁLISIS AUTOMÁTICO DE COMPROBANTES LIVE ──────────────────────────
+    // Si llega imagen entrante y hay un Live activo, disparar análisis IA al instante.
+    // El backend valida si hay live activo y crea el pago si la imagen es comprobante real.
+    if (!mensajeError && SERVER_URL && INGEST_USER_ID && direction === 'in' && hasUsableMedia && mensajeData?.id) {
+      const looksLikeImage = (mediaMimetype || '').toLowerCase().startsWith('image/');
+      if (looksLikeImage) {
+        EdgeRuntime.waitUntil((async () => {
+          try {
+            const response = await fetch(`${SERVER_URL.replace(/\/$/, '')}/api/live-sales/analyze-receipt`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': INGEST_USER_ID,
+              },
+              body: JSON.stringify({
+                clienteId: clienteData.id,
+                phone: clientPhone,
+                panelMensajeId: mensajeData.id,
+                mediaUrl,
+                mediaType: mediaMimetype,
+                messageContent: content,
+                messageCreatedAt: mensajeData.created_at ?? new Date().toISOString(),
+              }),
+            });
+            if (!response.ok) {
+              const detail = await response.text().catch(() => '');
+              console.error(`[live-receipt-auto] Error: ${response.status} ${detail}`);
+            } else {
+              const result = await response.json().catch(() => ({}));
+              console.log(`[live-receipt-auto] OK: ${JSON.stringify(result).slice(0, 200)}`);
+            }
+          } catch (error) {
+            console.error('[live-receipt-auto] No se pudo analizar:', error);
+          }
+        })());
+      }
+    }
+
     // Depositar evidencia de identidad en DB principal (fire-and-forget)
     if (MAIN_URL && MAIN_KEY && INGEST_USER_ID && direction === 'in') {
       (async () => {

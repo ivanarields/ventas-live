@@ -460,6 +460,16 @@ const cleanAmount = (val: any) => {
   return parseFloat(cleaned) || 0;
 };
 
+const isCountablePayment = (payment: any) => {
+  if (!payment) return false;
+  if (payment.is_live_pending) return false;
+  const origin = String(payment.verification_origin ?? payment.verificationOrigin ?? '').toLowerCase();
+  if (origin === 'whatsapp_pending') return false;
+  const liveStatus = String(payment.live_payment_status ?? payment.livePaymentStatus ?? '').toLowerCase();
+  if (liveStatus === 'pendiente_whatsapp' || liveStatus === 'revision_manual') return false;
+  return true;
+};
+
 const getTS = (f: any) => {
   if (!f) return 0;
   const d = new Date(f);
@@ -569,6 +579,15 @@ const FINANCE_CATEGORIES = [
   'Entretenimiento', 'Servicios', 'Deudas', 'Seguro', 
   'Impuestos', 'Personal', 'Otros'
 ];
+
+const isFastLabelSaveEnabled = () => {
+  try {
+    const override = localStorage.getItem('FAST_LABEL_SAVE');
+    if (override === 'true') return true;
+    if (override === 'false') return false;
+  } catch {}
+  return String(import.meta.env.VITE_FAST_LABEL_SAVE ?? 'false').trim() === 'true';
+};
 
 type VerificationOrigin = 'automatic' | 'manual' | 'whatsapp_pending' | 'macrodroid_only' | 'other';
 
@@ -1623,6 +1642,39 @@ export default function App() {
               setLinkingCustomer(c);
               setShowLinkModal(true);
             }}
+            onFastLabelUpdate={(result: any) => {
+              const updatedPedidos = Array.isArray(result?.pedidos) ? result.pedidos : [];
+              if (updatedPedidos.length > 0) {
+                setPedidos(prev => prev.map(p => {
+                  const row = updatedPedidos.find((u: any) => String(u.id) === String(p.id));
+                  if (!row) return p;
+                  return {
+                    ...p,
+                    customerId: row.customer_id ? String(row.customer_id) : p.customerId,
+                    customerName: row.customer_name ?? p.customerName,
+                    itemCount: row.item_count ?? p.itemCount,
+                    bagCount: row.bag_count ?? p.bagCount,
+                    label: row.label ?? p.label,
+                    labelType: row.label_type ?? p.labelType,
+                    status: row.status ?? p.status,
+                    totalAmount: Number(row.total_amount ?? p.totalAmount),
+                    date: row.date ?? p.date,
+                    source: row.source ?? p.source,
+                    webItemsList: row.web_items_list ?? p.webItemsList,
+                  };
+                }));
+              }
+              if (result?.customer?.id) {
+                setCustomers(prev => prev.map(c => String(c.id) === String(result.customer.id)
+                  ? {
+                    ...c,
+                    activeLabel: result.customer.active_label ?? c.activeLabel,
+                    activeLabelType: result.customer.active_label_type ?? c.activeLabelType,
+                  }
+                  : c
+                ));
+              }
+            }}
           />
         )}
         {showAddModal === 'live' && <AddLiveModal onClose={() => setShowAddModal(null)} />}
@@ -1813,9 +1865,10 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
   const todayStr = today.toDateString();
 
   // Métricas de pagos
-  const pagosHoy = (payments ?? []).filter((p: any) => new Date(p.date || p.fecha).toDateString() === todayStr);
+  const pagosContables = (payments ?? []).filter(isCountablePayment);
+  const pagosHoy = pagosContables.filter((p: any) => new Date(p.date || p.fecha).toDateString() === todayStr);
   const ingresosHoy = pagosHoy.reduce((acc: number, p: any) => acc + (cleanAmount(p.pago) || 0), 0);
-  const totalIngresos = (payments ?? []).reduce((acc: number, p: any) => acc + (cleanAmount(p.pago) || 0), 0);
+  const totalIngresos = pagosContables.reduce((acc: number, p: any) => acc + (cleanAmount(p.pago) || 0), 0);
 
   // Métricas de pedidos
   const pedidosProcesar = (pedidos ?? []).filter((p: any) => (p.status ?? '').toLowerCase() === 'procesar').length;
@@ -2702,7 +2755,7 @@ function PaymentsView({
       alert('Primero inicia y cierra un Live para poder resumirlo.');
       return;
     }
-    if (!window.confirm(`Procesar solo mensajes entre:\n${new Date(session.startAt).toLocaleString('es-BO')}\ny\n${new Date(session.endAt).toLocaleString('es-BO')}?`)) return;
+    if (!window.confirm(`Generar resumen de mensajes entre:\n${new Date(session.startAt).toLocaleString('es-BO')}\ny\n${new Date(session.endAt).toLocaleString('es-BO')}?\n\nNOTA: Los pagos ya se procesaron automáticamente al llegar los comprobantes. Esto solo genera resúmenes y selección de prendas.`)) return;
 
     setProcesandoLive(true);
     setProcesandoProgreso(null);
@@ -2722,7 +2775,12 @@ function PaymentsView({
         try {
           await apiFetch('/api/ai/summarize-conversation', {
             method: 'POST',
-            body: JSON.stringify({ clienteId: cliente.id, startAt: session.startAt, endAt: session.endAt }),
+            body: JSON.stringify({
+              clienteId: cliente.id,
+              startAt: session.startAt,
+              endAt: session.endAt,
+              skipPayments: true,
+            }),
           });
         } catch (e) {
           errores += 1;
@@ -2735,7 +2793,7 @@ function PaymentsView({
       }
       onRefresh?.();
       if (errores > 0) {
-        alert(`Live procesado con ${errores} error(es). No lo marco como finalizado para que puedas reintentar.`);
+        alert(`Resumen generado con ${errores} error(es). No marco el Live como finalizado para que puedas reintentar.`);
       } else {
         await apiFetch(`/api/live-sales/sessions/${session.id}/processed`, { method: 'POST' });
       }
@@ -2750,7 +2808,11 @@ function PaymentsView({
 
   const reanalyzeLiveSession = async () => {
     if (procesandoLive) return;
-    const state = liveSessionState ?? await refreshLiveSessionState();
+    const state = await refreshLiveSessionState();
+    if (state?.active) {
+      alert('Primero termina el Live activo antes de re-analizar.');
+      return;
+    }
     const session = state?.lastAny;
     if (!session?.startAt || !session?.endAt) {
       alert('No hay ningún Live reciente para re-analizar.');
@@ -2776,7 +2838,12 @@ function PaymentsView({
         try {
           await apiFetch('/api/ai/summarize-conversation', {
             method: 'POST',
-            body: JSON.stringify({ clienteId: cliente.id, startAt: session.startAt, endAt: session.endAt }),
+            body: JSON.stringify({
+              clienteId: cliente.id,
+              startAt: session.startAt,
+              endAt: session.endAt,
+              skipPayments: true,
+            }),
           });
         } catch (e) {
           errores += 1;
@@ -3152,7 +3219,7 @@ function PaymentsView({
 
   const activeLiveSession = liveSessionState?.active ?? null;
   const completedLiveSession = liveSessionState?.lastCompleted ?? null;
-  const liveButtonLabel = activeLiveSession ? 'Live' : completedLiveSession ? 'Listar' : 'Live';
+  const liveButtonLabel = activeLiveSession ? 'Live' : completedLiveSession ? 'Resumir' : 'Live';
   const liveButtonStyle = activeLiveSession
     ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-600"
     : completedLiveSession
@@ -3161,7 +3228,7 @@ function PaymentsView({
   const liveButtonTitle = activeLiveSession
     ? 'Cerrar el bloque de Live con hora real de cierre'
     : completedLiveSession
-      ? 'Procesar conversaciones del ultimo Live cerrado'
+      ? 'Generar resumen y selección de prendas (los pagos ya se procesan automáticamente)'
       : 'Iniciar bloque de Live desde este momento';
 
   return (
@@ -3180,12 +3247,12 @@ function PaymentsView({
           <h2 className="text-2xl font-extrabold text-base-text tracking-tight uppercase">Pagos</h2>
         </div>
         <div className="flex gap-2">
-          {liveSessionState?.lastAny && (
+          {!activeLiveSession && liveSessionState?.lastAny && (
             <button
               onClick={reanalyzeLiveSession}
-              disabled={procesandoLive}
+              disabled={procesandoLive || Boolean(activeLiveSession)}
               className="w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 bg-amber-50 text-amber-600 hover:bg-amber-100 disabled:opacity-60"
-              title="Re-analizar el último Live (reprocesa todos los chats, incluyendo los ya alistados)"
+              title="Re-analizar el último Live cerrado"
             >
               <RotateCcw size={16} />
             </button>
@@ -4017,7 +4084,7 @@ function FinanceView({ transactions, payments, categories, onAdd, onEdit, onRefr
   // Agrupar pagos por día como entradas de "Ventas"
   const salesByDay = useMemo(() => {
     const grouped: Record<string, number> = {};
-    (payments ?? []).forEach((p: any) => {
+    (payments ?? []).filter(isCountablePayment).forEach((p: any) => {
       const raw = p.date || p.fecha;
       if (!raw) return;
       const d = new Date(raw);
@@ -5634,7 +5701,7 @@ const OrderItemCard: React.FC<OrderItemCardProps> = ({
   );
 };
 
-function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, onEditPayment, onLinkNumber, forceDetailView, onRefresh }: any) {
+function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, onEditPayment, onLinkNumber, forceDetailView, onRefresh, onFastLabelUpdate }: any) {
   const loadData = onRefresh ?? (() => Promise.resolve());
   const [quickPhone, setQuickPhone] = useState('');
   const [isLinking, setIsLinking] = useState(false);
@@ -5956,6 +6023,17 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       setSelectedPedido(null);
       try {
         try { await saveChatPhotoSelection(); } catch (e) { console.warn('No se pudo guardar selección de fotos:', e); }
+        if (isFastLabelSaveEnabled()) {
+          const result = await pedidosApi.prepareLabel(selectedPedido.id, {
+            status: 'listo',
+            bag_count: bolsaCount,
+            item_count: selectedPrenda,
+            customer_id: effectiveCustomerId,
+          });
+          onFastLabelUpdate?.(result);
+          setIsSaving(false);
+          return;
+        }
         await pedidosApi.update(selectedPedido.id, { status: 'listo', bag_count: bolsaCount, item_count: selectedPrenda });
         const updatedPedidos = allPedidos.map((p: any) =>
           p.id === selectedPedido.id ? { ...p, status: 'listo', bagCount: bolsaCount, itemCount: selectedPrenda } : p
@@ -5972,6 +6050,18 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       // LISTO → guardar cambios y reasignar casillero si cambió la cantidad de bolsas
       try {
         try { await saveChatPhotoSelection(); } catch (e) { console.warn('No se pudo guardar selección de fotos:', e); }
+        if (isFastLabelSaveEnabled()) {
+          const result = await pedidosApi.prepareLabel(selectedPedido.id, {
+            bag_count: bolsaCount,
+            item_count: selectedPrenda,
+            customer_id: effectiveCustomerId,
+          });
+          onFastLabelUpdate?.(result);
+          setView('detail');
+          setSelectedPedido(null);
+          setIsSaving(false);
+          return;
+        }
         await pedidosApi.update(selectedPedido.id, { bag_count: bolsaCount, item_count: selectedPrenda });
         const updatedPedidos = allPedidos.map((p: any) =>
           p.id === selectedPedido.id ? { ...p, bagCount: bolsaCount, itemCount: selectedPrenda } : p

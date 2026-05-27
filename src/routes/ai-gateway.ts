@@ -872,8 +872,9 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
     try {
       const userId = req.headers['x-user-id'] as string;
       if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
-      const { clienteId, startAt, endAt } = req.body;
+      const { clienteId, startAt, endAt, skipPayments } = req.body;
       if (!clienteId) return res.status(400).json({ error: 'clienteId requerido' });
+      const skipPaymentCreation = skipPayments === true || skipPayments === 'true';
 
       const rangeStart = startAt ? new Date(startAt) : null;
       const rangeEnd = endAt ? new Date(endAt) : null;
@@ -887,6 +888,10 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       if ((startAt || endAt) && !hasLiveRange) {
         return res.status(400).json({ error: 'Rango de Live invalido' });
       }
+      const LIVE_LATE_PROOF_GRACE_MINUTES = 5;
+      const liveQueryEnd = hasLiveRange
+        ? new Date(rangeEnd!.getTime() + LIVE_LATE_PROOF_GRACE_MINUTES * 60 * 1000)
+        : rangeEnd;
 
       const panelDb = supabasePanel ?? supabase;
 
@@ -907,12 +912,21 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       if (hasLiveRange) {
         mensajesQuery = mensajesQuery
           .gte('created_at', rangeStart!.toISOString())
-          .lte('created_at', rangeEnd!.toISOString());
+          .lte('created_at', liveQueryEnd!.toISOString());
       }
       const { data: mensajes, error: dbErr } = await mensajesQuery;
 
       if (dbErr) return res.status(500).json({ error: dbErr.message });
       if (!mensajes?.length) return res.status(404).json({ error: hasLiveRange ? 'Sin mensajes en esta sesion Live' : 'Sin mensajes' });
+      const hadMessageInsideLiveRange = hasLiveRange
+        ? mensajes.some((m: any) => {
+          const time = m.created_at ? new Date(m.created_at).getTime() : NaN;
+          return Number.isFinite(time) && time >= rangeStart!.getTime() && time <= rangeEnd!.getTime();
+        })
+        : true;
+      if (hasLiveRange && !hadMessageInsideLiveRange) {
+        return res.json({ ok: true, skipped: true, reason: 'sin_participacion_en_live' });
+      }
 
       function phoneDigits(value: unknown) {
         return String(value ?? '').replace(/\D/g, '');
@@ -1124,6 +1138,12 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
         return normalizeTrafficDirection(direction) === 'outgoing';
       }
 
+      function isLateLiveProof(itemCreatedAt: string | null | undefined): boolean {
+        if (!hasLiveRange || !itemCreatedAt || !liveQueryEnd) return false;
+        const time = new Date(itemCreatedAt).getTime();
+        return Number.isFinite(time) && time > rangeEnd!.getTime() && time <= liveQueryEnd.getTime();
+      }
+
       // Cargar prompt de extracción de comprobantes (configurable desde el panel)
       const ownerName = await getOwnerName(userId);
       const rawComprobantePrompt = await getPrompt(userId, 'comprobante_extraction');
@@ -1309,23 +1329,10 @@ Responde SOLO con una línea, sin explicaciones.`;
         await clasificarYExtraer(item, { addDescription: false });
       }
 
-      // Segunda pasada: foto entrante clasificada como "otro" + contexto de pago en el chat
-      // → intentar leerla como comprobante. Cubre casos donde Gemini duda en la clasificación.
-      if (hasLiveRange) {
-        for (const item of itemsAClasificar) {
-          if (isOutgoingDirection(item.direction)) continue;
-          const cached = analisisFotos.get(item.id ?? item.url);
-          if (cached?.tipo !== 'otro') continue;
-          const media = await fetchBase64(item.url);
-          if (!media) continue;
-          const imagePart = { inlineData: { mimeType: media.mime, data: media.b64 } };
-          const extraido = await extraerComprobanteDesdeImagen(imagePart, 'reintento comprobante sobre otro');
-          if (extraido?.monto || extraido?.cliente) {
-            registrarComprobanteDetectado(item, cached.desc || 'COMPROBANTE: detectado en reintento', extraido);
-            analisisFotos.set(item.id ?? item.url, { tipo: 'comprobante', desc: cached.desc, extraido });
-          }
-        }
-      }
+      // NOTA: La "segunda pasada" sobre fotos clasificadas como "otro" se eliminó
+      // (commit del 15/5/2026 que causó el error del 23/5/2026 con montos fantasma Bs 6000.21).
+      // Forzar a la IA a extraer comprobante sobre imágenes que ella misma clasificó como
+      // "otro" generaba alucinaciones de montos. Si la IA dice "otro", se respeta esa decisión.
 
       ensureAllLiveImagesAreVisibleAsCandidates();
 
@@ -1695,7 +1702,7 @@ Reglas de timeline_steps:
         }
       }
 
-      if (panelPhone && comprobantesDetectados.length > 0) {
+      if (panelPhone && comprobantesDetectados.length > 0 && !skipPaymentCreation) {
         try {
           const phone = normalizePanelPhoneForLiveSales(panelPhone);
           if (!phone) throw new Error('Telefono invalido para venta live');
@@ -1739,6 +1746,8 @@ Reglas de timeline_steps:
                 live_range: hasLiveRange ? {
                   start_at: rangeStart!.toISOString(),
                   end_at: rangeEnd!.toISOString(),
+                  late_proof_grace_minutes: LIVE_LATE_PROOF_GRACE_MINUTES,
+                  late_proof: isLateLiveProof(comprobante.item.createdAt),
                 } : null,
               },
             });
@@ -1798,6 +1807,20 @@ Reglas de timeline_steps:
               mainCustomerId: updatedOrder.main_customer_id,
               windowMinutes: 5,
             });
+            if (isLateLiveProof(comprobante.item.createdAt) && pagoLive?.estado !== 'verificado_macrodroid') {
+              const { data: latePago, error: latePagoError } = await panelDb
+                .from('pagos_venta_live')
+                .update({
+                  estado: 'revision_manual',
+                  match_score: 0.5,
+                  match_reason: 'comprobante_tardio_live_5min_sin_macrodroid',
+                })
+                .eq('id', pagoLive.id)
+                .select('*')
+                .single();
+              if (latePagoError) throw latePagoError;
+              pagoLive = latePago;
+            }
 
             if (pagoLive?.estado === 'verificado_macrodroid') {
               estadoPago = 'pagado_verificado';
