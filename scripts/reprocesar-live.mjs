@@ -207,6 +207,7 @@ async function main() {
           mediaType: m.media_type,
           messageContent: m.content,
           messageCreatedAt: m.created_at,
+          allowWithoutActiveLive: true,
         }),
       });
 

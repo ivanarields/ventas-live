@@ -1083,7 +1083,7 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
     if (!supabaseMain) return res.status(503).json({ error: 'Base principal no disponible' });
 
     try {
-      const { clienteId, phone, panelMensajeId, mediaUrl, mediaType, messageContent, messageCreatedAt } = req.body ?? {};
+      const { clienteId, phone, panelMensajeId, mediaUrl, mediaType, messageContent, messageCreatedAt, allowWithoutActiveLive } = req.body ?? {};
 
       if (!clienteId || !phone || !panelMensajeId || !mediaUrl || !messageCreatedAt) {
         return res.status(400).json({
@@ -1091,10 +1091,12 @@ export function createLiveSalesRouter(supabasePanel: SupabaseClient, supabaseMai
         });
       }
 
-      // Verificar que hay un Live activo (sino, no procesar)
-      const activeSession = await getActiveProcessingLive(userId);
-      if (!activeSession) {
-        return res.json({ ok: true, skipped: true, reason: 'sin_live_activo' });
+      // Verificar que hay un Live activo (excepto cuando se pide reprocesamiento histórico explícito)
+      if (!allowWithoutActiveLive) {
+        const activeSession = await getActiveProcessingLive(userId);
+        if (!activeSession) {
+          return res.json({ ok: true, skipped: true, reason: 'sin_live_activo' });
+        }
       }
 
       const result = await analyzeLiveReceipt(supabasePanel, supabaseMain, {
