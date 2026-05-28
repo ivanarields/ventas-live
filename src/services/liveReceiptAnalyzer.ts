@@ -259,6 +259,15 @@ export async function analyzeLiveReceipt(
     return { ok: true, created: false, reason: 'sin_monto_extraido' };
   }
 
+  // 5b. Anti-alucinación de monto alto: si la IA dice un monto > 1000 Bs
+  // sin haber identificado al pagador, es muy probable que sea alucinación
+  // (foto de prenda mal clasificada). En vez de crear pago en revisión, descartamos.
+  // Para pagos legítimos altos, MacroDroid los matcheará después y la operadora
+  // puede registrarlos manualmente si llega un comprobante real.
+  if (extraction.monto > MAX_AMOUNT_AUTO_VERIFY_BS && !extraction.pagador) {
+    return { ok: true, created: false, reason: 'monto_alto_sin_pagador_probable_alucinacion' };
+  }
+
   // 5b. Si el comprobante es válido pero no tiene nombre del pagador
   // (caso típico: Banco Unión solo muestra el receptor), usar como nombre
   // temporal el del cliente del panel (si lo tiene) o el número de WhatsApp.
@@ -290,9 +299,20 @@ export async function analyzeLiveReceipt(
   const forceManualReview = amountRepeated || isHighAmount;
   const initialEstado: PagoVentaLiveEstado = forceManualReview ? 'revision_manual' : 'pendiente_whatsapp';
 
-  // 8. Crear pedido + evidencia + pago
+  // 9. Crear pedido + evidencia + pago
   const fechaPedido = boliviaDateKey(input.messageCreatedAt);
-  const comprobanteAt = receiptAtFromMessage(input.messageCreatedAt, extraction.hora);
+  // Validar que la hora del comprobante es razonable: debe estar dentro de 1 hora
+  // antes del mensaje (las clientas envían el comprobante poco después de pagar).
+  // Si la IA devolvió una hora que cae muy lejos, ignoramos la hora.
+  const messageTime = new Date(input.messageCreatedAt).getTime();
+  let comprobanteAt = receiptAtFromMessage(input.messageCreatedAt, extraction.hora);
+  const compTime = new Date(comprobanteAt).getTime();
+  const diffHours = Math.abs(messageTime - compTime) / (60 * 60 * 1000);
+  if (diffHours > 12) {
+    // La hora extraída por la IA es absurda (ej: 11:36 AM cuando el mensaje
+    // llegó a las 00:00). Descartamos la hora y usamos la del mensaje.
+    comprobanteAt = input.messageCreatedAt;
+  }
   const comprobanteTexto = [
     pagadorFinal,
     `Bs ${extraction.monto}`,
