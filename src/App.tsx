@@ -5964,14 +5964,19 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   }, [person.payments, selectedPedido]);
 
   const showComprobanteSection = useMemo(() => {
-    return dayPayments.some((p: any) =>
+    // Mostrar la sección si hay CUALQUIER pago panel pendiente para esta clienta,
+    // sin filtrar por fecha del pedido (los comprobantes pueden estar en distintas fechas).
+    return (person.payments || []).some((p: any) =>
       p.livePaymentId && (
         p.verificationOrigin === 'whatsapp_pending' ||
         p.verificationOrigin === 'macrodroid_only' ||
-        p.verificationOrigin === 'other'
+        p.verificationOrigin === 'other' ||
+        p.livePaymentStatus === 'pendiente_whatsapp' ||
+        p.livePaymentStatus === 'revision_manual' ||
+        p.isLivePending === true
       )
     );
-  }, [dayPayments]);
+  }, [person.payments]);
 
   const stats = useMemo(() => {
     const payments = (person.payments || [])
@@ -6332,10 +6337,10 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           </div>
 
           <OrderChatPhotoSelector
-            phone={person.waNumber ?? ''}
+            phone={person.waNumber || person.phone || ''}
             orderDate={selectedPedido.date}
             mainPedidoId={selectedPedido.id}
-            days={1}
+            days={4}
             editable={!selectedPedido.id.startsWith('temp-')}
             showComprobantes={showComprobanteSection}
             onSelectionChange={(photos, contexto) => {
