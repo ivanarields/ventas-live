@@ -5702,6 +5702,21 @@ const OrderItemCard: React.FC<OrderItemCardProps> = ({
 };
 
 function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, onEditPayment, onLinkNumber, forceDetailView, onRefresh, onFastLabelUpdate }: any) {
+  // Compatibilidad: el caller pasa `person` como group con `history` (pagos).
+  // Renombramos a `payments` y derivamos pedidos del cliente.
+  const personPayments = Array.isArray(person?.payments)
+    ? person.payments
+    : Array.isArray(person?.history) ? person.history : [];
+  const personPedidos = Array.isArray(person?.pedidos)
+    ? person.pedidos
+    : (Array.isArray(allPedidos) ? allPedidos.filter((p: any) =>
+        (person?.customerId && String(p.customerId) === String(person.customerId)) ||
+        (person?.phone && p.phone && p.phone === person.phone) ||
+        (p.customerName && cleanName(p.customerName ?? '') === cleanName(person?.nombre ?? ''))
+      ) : []);
+  // Asignar al objeto person para que el resto del componente funcione sin más cambios
+  person = { ...person, payments: personPayments, pedidos: personPedidos };
+
   const loadData = onRefresh ?? (() => Promise.resolve());
   const [quickPhone, setQuickPhone] = useState('');
   const [isLinking, setIsLinking] = useState(false);
