@@ -13,6 +13,7 @@ import {
   syncMainPedidoForLiveOrder,
   matchLivePaymentWithMacrodroid,
   normalizeLivePhone,
+  receiptAtFromMessage,
   type PagoVentaLiveEstado,
 } from './liveSalesService.js';
 import { buildReceiptQrPrompt } from '../ai/prompts/receipt-qr.js';
@@ -84,17 +85,7 @@ function boliviaDateKey(value: Date | string | number = new Date()): string {
   return local.toISOString().slice(0, 10);
 }
 
-function receiptAtFromMessage(messageCreatedAt: string, hora: string | null): string {
-  if (!hora) return messageCreatedAt;
-  const match = hora.match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return messageCreatedAt;
-  const base = new Date(messageCreatedAt);
-  if (!Number.isFinite(base.getTime())) return messageCreatedAt;
-  const offsetMs = 4 * 60 * 60 * 1000;
-  const localBase = new Date(base.getTime() - offsetMs);
-  localBase.setUTCHours(Number(match[1]), Number(match[2]), 0, 0);
-  return new Date(localBase.getTime() + offsetMs).toISOString();
-}
+// Nota: receiptAtFromMessage se importa desde liveSalesService.ts (versión con fix de medianoche)
 
 // ─── Owner name configurable ───────────────────────────────────────────────
 
