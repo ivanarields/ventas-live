@@ -268,6 +268,29 @@ export async function analyzeLiveReceipt(
     return { ok: true, created: false, reason: 'sin_monto_extraido' };
   }
 
+  // 5b. Si el comprobante es válido pero no tiene nombre del pagador
+  // (caso típico: Banco Unión solo muestra el receptor), usar como nombre
+  // temporal el del cliente del panel (si lo tiene) o el número de WhatsApp.
+  // Esto permite vincular el pago al perfil sin perder el dato.
+  let pagadorFinal = extraction.pagador;
+  let pagadorEsTemporal = false;
+  if (!pagadorFinal) {
+    // Buscar nombre del cliente en el panel (puede haber sido nombrado antes)
+    const { data: clientePanel } = await panelDb
+      .from('panel_clientes')
+      .select('nombre')
+      .eq('id', input.clienteId)
+      .maybeSingle();
+    const nombrePanel = (clientePanel?.nombre || '').trim();
+    if (nombrePanel && nombrePanel.toLowerCase() !== 'sin nombre') {
+      pagadorFinal = nombrePanel.toUpperCase();
+    } else {
+      // No hay nombre real → usar número de WhatsApp como identificador temporal
+      pagadorFinal = `WHATSAPP ${phone}`;
+      pagadorEsTemporal = true;
+    }
+  }
+
   // 6. Detector de alucinación: monto repetido entre clientes distintos
   const amountRepeated = await isAmountRepeatedAcrossClients(panelDb, extraction.monto, input.clienteId);
 
@@ -280,7 +303,7 @@ export async function analyzeLiveReceipt(
   const fechaPedido = boliviaDateKey(input.messageCreatedAt);
   const comprobanteAt = receiptAtFromMessage(input.messageCreatedAt, extraction.hora);
   const comprobanteTexto = [
-    extraction.pagador,
+    pagadorFinal,
     `Bs ${extraction.monto}`,
     extraction.hora,
   ].filter(Boolean).join(' - ');
@@ -289,7 +312,7 @@ export async function analyzeLiveReceipt(
     clienteId: input.clienteId,
     phone,
     fechaPedido,
-    nombreDetectado: extraction.pagador,
+    nombreDetectado: pagadorFinal,
     isTest: false,
   });
 
@@ -306,6 +329,7 @@ export async function analyzeLiveReceipt(
     metadata: {
       source: 'auto_analyzer',
       extracted: extraction,
+      pagador_temporal: pagadorEsTemporal,
       flagged_amount_repeated: amountRepeated,
       flagged_high_amount: isHighAmount,
     },
@@ -316,7 +340,7 @@ export async function analyzeLiveReceipt(
     clienteId: input.clienteId,
     phone,
     fechaPedido,
-    nombreDetectado: extraction.pagador,
+    nombreDetectado: pagadorFinal,
     monto: extraction.monto,
     comprobanteHora: extraction.hora,
     comprobanteAt,
