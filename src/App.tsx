@@ -3678,15 +3678,6 @@ function PaymentsView({
                   </div>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
-                  {group.pendingLivePaymentId && (
-                    <button
-                      onClick={(e) => verifyLivePaymentFromPayments(group.pendingLivePaymentId, e)}
-                      disabled={verifyingLivePaymentId === group.pendingLivePaymentId}
-                      className="px-3 py-2 rounded-xl bg-violet-50 text-violet-600 border border-violet-100 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 active:scale-95"
-                    >
-                      {verifyingLivePaymentId === group.pendingLivePaymentId ? '...' : 'Verificar'}
-                    </button>
-                  )}
                   <span className="font-extrabold text-brand text-base">Bs {group.totalAmount}</span>
                 </div>
               </div>
