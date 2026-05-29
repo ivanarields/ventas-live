@@ -2653,7 +2653,6 @@ function PaymentsView({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [isDeletingTodayPayments] = useState(false); // unused — botón eliminado
   const [showOnlyWithPhone, setShowOnlyWithPhone] = useState(false);
-  const [verifyingLivePaymentId, setVerifyingLivePaymentId] = useState<string | null>(null);
   const [verifyingWebOrderId, setVerifyingWebOrderId] = useState<number | null>(null);
   const [pendingWebOrders, setPendingWebOrders] = useState<any[]>([]);
   const [webProfiles, setWebProfiles] = useState<any[]>([]);
@@ -2959,21 +2958,6 @@ function PaymentsView({
       alert('No se pudo rechazar el pago');
     } finally {
       setVerifyingWebOrderId(null);
-    }
-  };
-
-  const verifyLivePaymentFromPayments = async (livePaymentId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setVerifyingLivePaymentId(livePaymentId);
-    try {
-      await pagosApi.verifyLivePayment(livePaymentId);
-      onRefresh?.();
-    } catch (error) {
-      console.error('Error verificando pago WhatsApp:', error);
-      const message = error instanceof Error ? error.message : 'Error desconocido';
-      alert(`No se pudo verificar el pago: ${message}`);
-    } finally {
-      setVerifyingLivePaymentId(null);
     }
   };
 
