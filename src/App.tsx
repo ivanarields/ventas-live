@@ -405,7 +405,6 @@ const cleanName = (name: string) => {
   cleaned = cleaned.replace(/[0-9.,:-]/g, "").replace(/\s+/g, " ").toUpperCase().trim();
 
   // 4. ORDENAR PALABRAS (La clave profesional para vinculación infalible)
-  // Esto hace que "MARIA FUENTES" y "FUENTES MARIA" sean lo mismo internamente
   return cleaned.split(' ').sort().filter(Boolean).join(' ').trim();
 };
 
@@ -581,12 +580,7 @@ const FINANCE_CATEGORIES = [
 ];
 
 const isFastLabelSaveEnabled = () => {
-  try {
-    const override = localStorage.getItem('FAST_LABEL_SAVE');
-    if (override === 'true') return true;
-    if (override === 'false') return false;
-  } catch {}
-  return String(import.meta.env.VITE_FAST_LABEL_SAVE ?? 'false').trim() === 'true';
+  return true;
 };
 
 type VerificationOrigin = 'automatic' | 'manual' | 'whatsapp_pending' | 'macrodroid_only' | 'other';
@@ -613,6 +607,7 @@ interface Customer {
   canonicalName?: string;
   phone: string;
   activeLabel: string;
+  activeLabelType?: string;
   totalSpent: number;
   totalItems: number;
   pendingItems: number;
@@ -1250,10 +1245,19 @@ export default function App() {
       const rawName = p.nombre || 'Sin nombre';
       const cleanedName = cleanName(rawName);
       
-      // Try to find customer by ID first, then by canonical name
-      const customer = customers.find((c: any) => (p.customerId && c.id === p.customerId) || cleanName(c.name) === cleanedName);
+      let customer = customers.find((c: any) => (p.customerId && c.id === p.customerId) || cleanName(c.name) === cleanedName);
       
-      const groupKey = customer ? customer.id : cleanedName;
+      let groupKey = customer ? customer.id : cleanedName;
+      
+      const existingKeys = Object.keys(groups);
+      const similarKey = existingKeys.find(k => k !== groupKey && (
+         isStrongNameMatch(groups[k].nombre, rawName) || 
+         (customer && isStrongNameMatch(groups[k].nombre, customer.name))
+      ));
+      
+      if (similarKey) {
+         groupKey = similarKey;
+      }
       
       if (!groups[groupKey]) {
         groups[groupKey] = {
@@ -1303,9 +1307,19 @@ export default function App() {
     // Link pedidos to these groups
     pedidos.forEach((ped: any) => {
       const cleanedPedName = cleanName(ped.customerName || '');
-      const customer = customers.find(c => (ped.customerId && c.id === ped.customerId) || (ped.customerName && cleanName(c.name) === cleanedPedName));
+      let customer = customers.find(c => (ped.customerId && c.id === ped.customerId) || (ped.customerName && cleanName(c.name) === cleanedPedName));
       
-      const groupKey = customer ? customer.id : cleanedPedName;
+      let groupKey = customer ? customer.id : cleanedPedName;
+
+      const existingKeys = Object.keys(groups);
+      const similarKey = existingKeys.find(k => k !== groupKey && (
+         isStrongNameMatch(groups[k].nombre, ped.customerName || '') || 
+         (customer && isStrongNameMatch(groups[k].nombre, customer.name))
+      ));
+      
+      if (similarKey) {
+         groupKey = similarKey;
+      }
 
       if (groupKey && groups[groupKey]) {
         groups[groupKey].pedidos.push(ped);
@@ -1332,9 +1346,19 @@ export default function App() {
     // Link orders to these groups
     orders.forEach((ord: any) => {
       const cleanedOrdName = cleanName(ord.customerName || '');
-      const customer = customers.find(c => (ord.customerId && c.id === ord.customerId) || (ord.customerName && cleanName(c.name) === cleanedOrdName));
+      let customer = customers.find(c => (ord.customerId && c.id === ord.customerId) || (ord.customerName && cleanName(c.name) === cleanedOrdName));
       
-      const groupKey = customer ? customer.id : cleanedOrdName;
+      let groupKey = customer ? customer.id : cleanedOrdName;
+
+      const existingKeys = Object.keys(groups);
+      const similarKey = existingKeys.find(k => k !== groupKey && (
+         isStrongNameMatch(groups[k].nombre, ord.customerName || '') || 
+         (customer && isStrongNameMatch(groups[k].nombre, customer.name))
+      ));
+      
+      if (similarKey) {
+         groupKey = similarKey;
+      }
 
       if (groupKey && groups[groupKey]) {
         if (!groups[groupKey].orders) groups[groupKey].orders = [];
@@ -3105,9 +3129,23 @@ function PaymentsView({
       const cleanedName = cleanName(rawName);
       
       // Find customer info robustly (normalizing names for old records)
-      const customer = customers.find(c => (p.customerId && c.id === p.customerId) || cleanName(c.name) === cleanedName);
+      let customer = customers.find(c => (p.customerId && c.id === p.customerId) || cleanName(c.name) === cleanedName);
       
-      const groupKey = customer ? customer.id : cleanedName;
+      if (!customer) {
+        customer = customers.find(c => isStrongNameMatch(c.name, rawName));
+      }
+      
+      let groupKey = customer ? customer.id : cleanedName;
+      
+      const existingKeys = Object.keys(groups);
+      const similarKey = existingKeys.find(k => k !== groupKey && (
+         isStrongNameMatch(groups[k].nombre, rawName) || 
+         (customer && isStrongNameMatch(groups[k].nombre, customer.name))
+      ));
+      
+      if (similarKey) {
+         groupKey = similarKey;
+      }
       
       const amount = cleanAmount(p.pago);
       const ts = getTS(p.date);
@@ -3221,7 +3259,7 @@ function PaymentsView({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -10 }}
       transition={{ duration: 0.1, ease: "linear" }}
-      className="space-y-6"
+      className="space-y-4"
     >
       <div className="flex justify-between items-center px-1">
         <div className="flex-1">
@@ -3344,7 +3382,7 @@ function PaymentsView({
         </button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {paymentChannel === 'web' && webProfilesForDate.map((profile: any) => {
           const needsReview = (profile.orders ?? []).some((o: any) => {
             const paymentRef = String(o.payment_ref ?? '');
@@ -3640,7 +3678,7 @@ function PaymentsView({
                     onSelectPerson(group.id);
                   }
                 }}
-                className="w-full pl-2 pr-4 py-4 flex items-center justify-between active:bg-gray-50 transition-colors gap-2 cursor-pointer"
+                className="w-full pl-2 pr-4 py-2.5 flex items-center justify-between active:bg-gray-50 transition-colors gap-2 cursor-pointer"
               >
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
                   <div
@@ -6270,13 +6308,13 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         </div>
 
         <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5 flex flex-col gap-6 pb-10">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-[#FFF1F2] rounded-[20px] p-4 border border-[#FFE4E6] flex flex-col justify-center">
-              <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">Total del Pedido</span>
+          <div className="grid grid-cols-2 gap-3 mb-2">
+            <div className="bg-[#FFF1F2] rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
+              <span className="text-[9px] font-extrabold text-[#BE185D] uppercase tracking-widest block mb-1">Total del Pedido</span>
               <span className="text-xl font-black text-[#BE185D]">Bs {selectedPedido.orderAmount || selectedPedido.totalAmount || 0}</span>
             </div>
-            <div className="order-card-bg p-4 flex flex-col justify-center">
-              <span className="text-[8px] font-bold text-[#94A3B8] uppercase tracking-widest block mb-1">Pagos Realizados</span>
+            <div className="bg-slate-50 rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
+              <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest block mb-1">Pagos Realizados</span>
               <span className="text-xl font-black text-[#1E293B]">{selectedPedido.paymentCount || 0}</span>
             </div>
           </div>
@@ -6293,7 +6331,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
 
             {/* Popup de verificación manual desde el carrusel */}
             {verifyPaymentPopup && (
-              <div className="fixed inset-0 z-[400] flex items-end justify-center p-4" onClick={() => setVerifyPaymentPopup(null)}>
+              <div className="fixed inset-0 z-[400] flex items-center justify-center p-4" onClick={() => setVerifyPaymentPopup(null)}>
                 <div className="absolute inset-0 bg-black/20" />
                 <div className="bg-white rounded-[24px] p-5 w-full max-w-sm relative z-10 shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
                   <p className="text-sm font-bold text-gray-700 text-center">¿Verificar pago de <span className="text-brand">Bs {verifyPaymentPopup.amount}</span>?</p>
@@ -6334,7 +6372,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
               }} 
               className="reset-button"
             >
-              <p className="reset-text">Resumen del Pedido</p>
+              <p className="reset-text">RESUMEN DEL PEDIDO</p>
             </button>
             
             <div className="icons-grid">
@@ -6432,8 +6470,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                 onClick={handleSmartAction}
                 disabled={isSaving}
                 className={cn(
-                  "w-full py-5 rounded-[24px] font-black uppercase tracking-[0.1em] flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg text-[14px] disabled:opacity-60",
-                  isProcesar ? "bg-[#FFF9C4] text-[#F57F17] shadow-[#FFF9C4]/20" : "bg-[#E3F2FD] text-[#1976D2] shadow-[#E3F2FD]/20"
+                  "w-max mx-auto px-8 py-3.5 rounded-[24px] font-black uppercase tracking-[0.1em] flex items-center justify-center gap-3 transition-all active:scale-95 text-[14px] disabled:opacity-60",
+                  isProcesar ? "bg-[#FFF9C4] text-[#F57F17]" : "bg-[#E3F2FD] text-[#1976D2]"
                 )}
               >
                 <span>{isSaving ? '...' : getSmartButtonText()}</span>
