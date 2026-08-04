@@ -330,7 +330,7 @@ function WelcomeScreen({ onEnter, isInstallable, onInstall }: { onEnter: () => v
   // por lo que no necesitamos prefetch masivo.
 
   return (
-    <div className="flex flex-col min-h-screen relative overflow-hidden bg-white">
+    <div className="flex flex-col min-h-screen relative overflow-hidden bg-white" data-build-check="local-test-2026-08-04">
       
       {/* PWA Banner */}
       {isInstallable && (
