@@ -879,7 +879,7 @@ const ICON_GROUPS = [
     icons: ['Dumbbell', 'Waves', 'Activity', 'Mountain', 'Trophy', 'Wind', 'PersonStanding', 'Medal', 'Swords', 'Users', 'Megaphone']
   },
   {
-    name: 'Finanzas',
+    name: 'Dinero',
     icons: ['Banknote', 'Scale', 'Building2', 'Wallet', 'BarChart3', 'Coins', 'CreditCard', 'PiggyBank', 'RefreshCw', 'Phone', 'Gem', 'CandlestickChart', 'Bitcoin']
   },
   {
@@ -1631,7 +1631,7 @@ export default function App() {
         <TabButton active={currentTab === 'home'} icon={Home} label="Cobros" onClick={() => setCurrentTab('home')} />
         <TabButton active={currentTab === 'entrega'} icon={Package} label="Etiquetas" onClick={() => setCurrentTab('entrega')} />
         <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => setCurrentTab('payments')} />
-        <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Finanzas" onClick={() => setCurrentTab('finance')} />
+        <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Dinero" onClick={() => setCurrentTab('finance')} />
         <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => setCurrentTab('tienda')} />
         <TabButton active={currentTab === 'settings'} icon={Settings} label="Config" onClick={() => setCurrentTab('settings')} />
       </nav>
@@ -4178,7 +4178,7 @@ function FinanceView({ transactions, payments, categories, onAdd, onEdit, onRefr
       </AnimatePresence>
       {/* Header */}
       <div className="flex justify-between items-center px-1">
-        <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Finanzas</h2>
+        <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Dinero</h2>
         <div className="flex gap-2">
           <button onClick={onAdd} className="btn-tertiary-brand text-xs">
             <Plus className="w-4 h-4" />
