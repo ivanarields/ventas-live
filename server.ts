@@ -12,7 +12,7 @@ import { publishProductToBuffer, savePublicationResults } from "./src/services/b
 import { createAiRouter } from "./src/routes/ai-gateway.js";
 import { createIdentityRouter } from "./src/routes/identity.js";
 import { createLiveSalesRouter } from "./src/routes/live-sales.js";
-import { createWhatsappRouter, enqueueStoreConfirmation, processNextWhatsappQueueMessage } from "./src/routes/whatsapp.js";
+import { createWhatsappRouter, enqueueStoreConfirmation } from "./src/routes/whatsapp.js";
 import { createStoreSelectionRouter } from "./src/routes/store-selection.js";
 import { createStoreSettingsRouter } from "./src/routes/store-settings.js";
 
@@ -133,28 +133,6 @@ const isMissingDbObject = (error: any) => {
   const message = String(error?.message ?? '').toLowerCase();
   return code === '42P01' || code === '42703' || code === 'PGRST204' || message.includes('does not exist') || message.includes('schema cache');
 };
-
-function startWhatsappQueueProcessor() {
-  const key = Symbol.for('ventas-live.whatsapp-queue-processor');
-  if ((globalThis as any)[key]) return;
-  (globalThis as any)[key] = true;
-
-  const run = async () => {
-    try {
-      const result = await processNextWhatsappQueueMessage(supabaseServer, undefined, { storeOnly: true });
-      if (result.sent) {
-        console.log(`[whatsapp-auto] Mensaje enviado: ${result.message_id}`);
-      } else if (result.error) {
-        console.error('[whatsapp-auto] Error enviando mensaje:', result.error);
-      }
-    } catch (err: any) {
-      console.error('[whatsapp-auto] Error procesando cola:', err?.message ?? err);
-    }
-  };
-
-  const interval = setInterval(run, 60_000);
-  interval.unref?.();
-}
 
 async function safeSelect(client: any, table: string, columns: string, apply: (query: any) => any) {
   try {
@@ -2090,7 +2068,6 @@ const PORT = Number(process.env.PORT || 3001);
   app.use('/api/whatsapp', createWhatsappRouter(supabaseServer));
   app.use('/api/store', createStoreSelectionRouter(supabaseStore));
   app.use('/api/store', createStoreSettingsRouter(supabaseStore));
-  startWhatsappQueueProcessor();
   // ==========================================================================
 
   app.get("/api/products", async (req, res) => {
@@ -2566,6 +2543,7 @@ const PORT = Number(process.env.PORT || 3001);
   //   • A los 5 min sin comprobante → manda recordatorio por WhatsApp.
   //   • A los 15 min sin comprobante → confirma igual (banco basta).
   setInterval(async () => {
+    return;
     try {
       const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
@@ -2872,6 +2850,7 @@ const PORT = Number(process.env.PORT || 3001);
   }
 
   async function enqueueStoreProofRequest(order: any) {
+    return;
     const orderId = Number(order?.id);
     const waNumber = String(order?.customer_wa ?? '').replace(/\D/g, '');
     if (!orderId || !waNumber) return;
@@ -4181,6 +4160,7 @@ Responde solo JSON:
 
   // ── Endpoint 6: Generar Link de Live y Encolar Notificación ──────
   app.post('/api/store/notify-live-ready', async (req, res) => {
+    return res.status(410).json({ error: 'WhatsApp saliente desactivado. Solo se permite vincular y recibir.' });
     try {
       const { customerId, phone } = req.body;
       const userId = req.headers['x-user-id'] as string;

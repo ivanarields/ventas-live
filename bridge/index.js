@@ -3,7 +3,6 @@ const { Client, LocalAuth } = pkg;
 import qrcodeImg from 'qrcode';
 import axios from 'axios';
 import http from 'http';
-import { handleBridgeApiRoute } from './send.js';
 import { buildMediaPath } from './media-path.js';
 
 import { createRequire } from 'module';
@@ -31,8 +30,6 @@ const RECONNECT_BASE_DELAY   = 5000;
 
 // ─── Servidor HTTP para mostrar el QR por URL ───
 const server = http.createServer(async (req, res) => {
-  if (await handleBridgeApiRoute(req, res, client, () => connected)) return;
-
   // Endpoint JSON para la app principal
   if (req.url === '/status') {
     res.setHeader('Content-Type', 'application/json');
@@ -222,5 +219,3 @@ client.on('message_create', async (msg) => {
 });
 
 client.initialize();
-
-// Registrar rutas de envío (POST /api/send y GET /api/health)

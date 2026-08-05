@@ -5736,7 +5736,6 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const [showQuickLink, setShowQuickLink] = useState(false);
   const [noteText, setNoteText] = useState(person.notes || '');
   const [isSavingNote, setIsSavingNote] = useState(false);
-  const [isNotifying, setIsNotifying] = useState(false);
   const [verifyPaymentPopup, setVerifyPaymentPopup] = useState<{ id: string; livePaymentId: string; amount: number } | null>(null);
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
   const [chatPhotosForPedido, setChatPhotosForPedido] = useState<OrderChatPhoto[]>([]);
@@ -5769,26 +5768,6 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       }),
     });
   };
-
-  const handleNotifyLive = async () => {
-    if (!person.phone) {
-      alert('Esta clienta no tiene un número vinculado para notificar.');
-      return;
-    }
-    setIsNotifying(true);
-    try {
-      await apiFetch('/api/store/notify-live-ready', {
-        method: 'POST',
-        body: JSON.stringify({ phone: person.phone })
-      });
-      confetti({ particleCount: 150, spread: 70, origin: { y: 0.3 }, colors: ['#ff2d78', '#ffffff'] });
-    } catch (err) {
-      alert('Error al enviar notificación por WhatsApp');
-    } finally {
-      setIsNotifying(false);
-    }
-  };
-
 
   const handleQuickLink = async () => {
     if (!quickPhone) return;
@@ -6550,17 +6529,6 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
               )}
             </div>
           </div>
-          <button 
-            onClick={handleNotifyLive}
-            disabled={isNotifying || !person.phone}
-            className={cn(
-              "p-2 rounded-full transition-all",
-              person.phone ? "text-brand hover:bg-pink-50" : "text-gray-200 cursor-not-allowed"
-            )}
-            title="Notificar Live Listo (WhatsApp)"
-          >
-            {isNotifying ? <Loader2 size={20} className="animate-spin" /> : <Video size={20} />}
-          </button>
           <button 
             onClick={() => setConfirmDeleteProfile(true)}
 

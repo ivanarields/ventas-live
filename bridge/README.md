@@ -37,4 +37,4 @@ El QR aparece en la terminal. Escanearlo con el WhatsApp del negocio.
 
 - Requiere proceso persistente (no serverless) — la sesión de WhatsApp Web necesita estar activa.
 - Si se migra a otro servidor: solo actualizar `WHATSAPP_BRIDGE_URL` en Vercel.
-- Los mensajes salientes se envían via `POST /api/send` con header `x-webhook-secret`.
+- No existen mensajes salientes: el bridge solo vincula la sesión, recibe mensajes/fotos y los guarda mediante el webhook.

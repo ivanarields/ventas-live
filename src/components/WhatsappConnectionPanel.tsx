@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { MessageCircle, RefreshCw, CheckCircle2, AlertTriangle, Send, Settings2 } from 'lucide-react';
-import { WhatsappQueue } from './WhatsappQueue';
+import { MessageCircle, RefreshCw, CheckCircle2, AlertTriangle, Settings2 } from 'lucide-react';
 import { WhatsappHealthBadge } from './WhatsappHealthBadge';
 
 interface WaStatus {
@@ -14,7 +13,6 @@ interface WaStatus {
 export function WhatsappConnectionPanel() {
   const [status, setStatus] = useState<WaStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'connection' | 'queue'>('connection');
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -40,33 +38,15 @@ export function WhatsappConnectionPanel() {
     <div className="bg-white rounded-[20px] border border-gray-100 flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between border-b border-gray-50 px-4 pt-4 pb-2">
         <div className="flex gap-2">
-          <button
-            onClick={() => setActiveTab('connection')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
-              activeTab === 'connection'
-                ? 'bg-[#ff2d78] text-white'
-                : 'text-gray-400 hover:bg-gray-50'
-            }`}
-          >
+          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold bg-[#ff2d78] text-white">
             <Settings2 size={13} /> Conexion
-          </button>
-          <button
-            onClick={() => setActiveTab('queue')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
-              activeTab === 'queue'
-                ? 'bg-[#ff2d78] text-white'
-                : 'text-gray-400 hover:bg-gray-50'
-            }`}
-          >
-            <Send size={13} /> Mensajeria
-          </button>
+          </span>
         </div>
         <WhatsappHealthBadge className="hidden sm:inline-flex" />
       </div>
 
       <div className="p-4 flex-1 overflow-y-auto">
-        {activeTab === 'connection' ? (
-          <div className="space-y-4">
+        <div className="space-y-4">
             {loading ? (
               <div className="flex items-center gap-3 py-4">
                 <RefreshCw size={16} className="animate-spin text-gray-400" />
@@ -137,10 +117,7 @@ export function WhatsappConnectionPanel() {
                 <p className="text-xs text-gray-500">El QR aparecera en unos segundos.</p>
               </div>
             )}
-          </div>
-        ) : (
-          <WhatsappQueue />
-        )}
+        </div>
       </div>
     </div>
   );
