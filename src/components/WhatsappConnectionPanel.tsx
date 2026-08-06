@@ -10,16 +10,30 @@ interface WaStatus {
   timestamp?: string;
 }
 
+interface WaIncomingStats {
+  todayCount: number;
+  lastMessageAt: string | null;
+  lastMessageHasMedia?: boolean;
+  lastMessageType?: string | null;
+  lastMessagePreview?: string;
+}
+
 export function WhatsappConnectionPanel() {
   const [status, setStatus] = useState<WaStatus | null>(null);
+  const [stats, setStats] = useState<WaIncomingStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/whatsapp/status');
-      const data = await res.json().catch(() => null);
-      if (res.ok && data) setStatus(data);
+      const [statusRes, statsRes] = await Promise.all([
+        fetch('/api/whatsapp/status'),
+        fetch('/api/whatsapp/incoming-stats'),
+      ]);
+      const data = await statusRes.json().catch(() => null);
+      const statsData = await statsRes.json().catch(() => null);
+      if (statusRes.ok && data) setStatus(data);
       else setStatus({ connected: false, qrDataUrl: null, error: data?.error || 'bridge_unreachable' });
+      if (statsRes.ok && statsData) setStats(statsData);
     } catch {
       setStatus({ connected: false, qrDataUrl: null, error: 'bridge_unreachable' });
     }
@@ -75,6 +89,27 @@ export function WhatsappConnectionPanel() {
                   <p className="text-sm font-extrabold text-gray-800">WhatsApp conectado</p>
                 </div>
                 <p className="text-xs text-gray-500">El bridge esta activo y recibiendo mensajes.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl bg-green-50 px-3 py-2">
+                    <p className="text-[9px] font-black uppercase tracking-wide text-green-600">Hoy</p>
+                    <p className="text-lg font-black text-green-700">{stats?.todayCount ?? 0}</p>
+                    <p className="text-[10px] font-bold text-green-500">mensajes</p>
+                  </div>
+                  <div className="rounded-xl bg-gray-50 px-3 py-2">
+                    <p className="text-[9px] font-black uppercase tracking-wide text-gray-400">Ultimo</p>
+                    <p className="text-xs font-black text-gray-700">
+                      {stats?.lastMessageAt
+                        ? new Date(stats.lastMessageAt).toLocaleTimeString('es-BO', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : 'Sin mensajes'}
+                    </p>
+                    <p className="text-[10px] font-bold text-gray-400">
+                      {stats?.lastMessageHasMedia ? 'con imagen' : 'texto'}
+                    </p>
+                  </div>
+                </div>
                 <button
                   onClick={fetchStatus}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-50 text-gray-400 text-[10px] font-bold hover:bg-gray-100 transition-colors"

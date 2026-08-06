@@ -24,7 +24,7 @@
       "destination": "/tienda.html"
     },
     {
-      "source": "/((?!api/|icon-|manifest\\.json|sw\\.js|sw-tienda\\.js|assets/|demo-products/).*)",
+      "source": "/((?!api/|icon-|manifest\\.json|manifest-tienda\\.json|sw\\.js|sw-tienda\\.js|sw-tienda-v2\\.js|assets/|demo-products/|logo\\.png|qr-leidy-shop\\.jpg|qr-yape\\.jpg).*)",
       "destination": "/index.html"
     }
   ],

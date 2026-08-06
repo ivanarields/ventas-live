@@ -214,8 +214,7 @@ import {
   Printer,
   FileSpreadsheet,
   ArrowUpRight,
-  ArrowDownRight,
-  RotateCcw
+  ArrowDownRight
 } from 'lucide-react';
 import { 
   format, 
@@ -507,6 +506,7 @@ import { DetailedAnalysis, type CategoryData } from './components/DetailedAnalys
 const AdminTiendaView = React.lazy(() => import('./components/AdminTiendaView').then(m => ({ default: m.AdminTiendaView })));
 import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, adminApi, setAuthContext, clearAuthContext, apiFetch } from './lib/api';
 import { isStrongNameMatch } from './services/nameMatching';
+import { DEFAULT_SECTION_VISIBILITY, loadSectionVisibility, saveSectionVisibility, type SectionVisibility } from './services/sectionVisibility';
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs,
   query, where, orderBy, limit, serverTimestamp, writeBatch, increment,
@@ -1000,6 +1000,7 @@ export default function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState<'home' | 'entrega' | 'payments' | 'finance' | 'tienda' | 'settings'>('home');
+  const [sectionVisibility, setSectionVisibility] = useState<SectionVisibility>(DEFAULT_SECTION_VISIBILITY);
   const [selectedPaymentDates, setSelectedPaymentDates] = useState<Date[]>([new Date()]);
   const [selectedPaymentTime, setSelectedPaymentTime] = useState<string>("");
   const [isPaymentCalendarOpen, setIsPaymentCalendarOpen] = useState(false);
@@ -1065,6 +1066,23 @@ export default function App() {
     }
     setLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setSectionVisibility(DEFAULT_SECTION_VISIBILITY);
+      return;
+    }
+    setSectionVisibility(loadSectionVisibility(user.id));
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (
+      (currentTab === 'finance' && sectionVisibility.dinero) ||
+      (currentTab === 'tienda' && sectionVisibility.tienda)
+    ) {
+      setCurrentTab('home');
+    }
+  }, [currentTab, sectionVisibility.dinero, sectionVisibility.tienda]);
 
   const loadData = async () => {
     if (!user) return;
@@ -1452,6 +1470,11 @@ export default function App() {
     localStorage.removeItem('sb_session');
   };
 
+  const handleSectionVisibilityChange = (next: SectionVisibility) => {
+    setSectionVisibility(next);
+    if (user?.id) saveSectionVisibility(user.id, next);
+  };
+
   // Routing público (tienda) delegado a main.tsx para extrema velocidad
 
   if (loading) {
@@ -1576,6 +1599,7 @@ export default function App() {
               isInstallable={isInstallable}
               onInstall={handleInstallClick}
               onNavigate={(tab: string) => setCurrentTab(tab as any)}
+              sectionVisibility={sectionVisibility}
             />
           )}
           {currentTab === 'entrega' && <EntregaView pedidos={pedidos} customers={customers} onSelectPerson={(id) => setSelectedPersonId(id)} onRefresh={loadData} key="entrega" />}
@@ -1622,7 +1646,7 @@ export default function App() {
               </React.Suspense>
             </motion.div>
           )}
-          {currentTab === 'settings' && <SettingsView payments={payments} customers={customers} onRefresh={loadData} onLogout={handleLogout} userId={user?.id ?? ''} key="settings" />}
+          {currentTab === 'settings' && <SettingsView payments={payments} customers={customers} onRefresh={loadData} onLogout={handleLogout} userId={user?.id ?? ''} sectionVisibility={sectionVisibility} onSectionVisibilityChange={handleSectionVisibilityChange} key="settings" />}
         </AnimatePresence>
       </main>
 
@@ -1631,8 +1655,8 @@ export default function App() {
         <TabButton active={currentTab === 'home'} icon={Home} label="Cobros" onClick={() => setCurrentTab('home')} />
         <TabButton active={currentTab === 'entrega'} icon={Package} label="Etiquetas" onClick={() => setCurrentTab('entrega')} />
         <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => setCurrentTab('payments')} />
-        <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Dinero" onClick={() => setCurrentTab('finance')} />
-        <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => setCurrentTab('tienda')} />
+        {!sectionVisibility.dinero && <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Dinero" onClick={() => setCurrentTab('finance')} />}
+        {!sectionVisibility.tienda && <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => setCurrentTab('tienda')} />}
         <TabButton active={currentTab === 'settings'} icon={Settings} label="Config" onClick={() => setCurrentTab('settings')} />
       </nav>
 
@@ -1884,7 +1908,7 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
 
 // --- Views ---
 
-function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate }: any) {
+function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate, sectionVisibility }: any) {
   const today = new Date();
   const todayStr = today.toDateString();
 
@@ -1978,7 +2002,7 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
       </div>
 
       {/* Acceso rápido */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid ${sectionVisibility?.tienda ? 'grid-cols-2' : 'grid-cols-3'} gap-3`}>
         <button
           onClick={() => onNavigate?.('entrega')}
           className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
@@ -2001,17 +2025,19 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
           <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Pagos</p>
           <p className="text-[9px] text-gray-400">Historial</p>
         </button>
-        <button
-          onClick={() => onNavigate?.('tienda')}
-          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
-          style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
-        >
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
-            <Store className="w-4 h-4" style={{ color: '#ff2d78' }} />
-          </div>
-          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Panel Tienda</p>
-          <p className="text-[9px] text-gray-400">Pedidos web</p>
-        </button>
+        {!sectionVisibility?.tienda && (
+          <button
+            onClick={() => onNavigate?.('tienda')}
+            className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
+            style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+          >
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
+              <Store className="w-4 h-4" style={{ color: '#ff2d78' }} />
+            </div>
+            <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Panel Tienda</p>
+            <p className="text-[9px] text-gray-400">Pedidos web</p>
+          </button>
+        )}
       </div>
 
       {/* Próximo live */}
@@ -2773,6 +2799,7 @@ function PaymentsView({
   };
 
   const processClosedLiveSession = async (session: any) => {
+    return;
     if (procesandoLive) return;
     if (!session?.startAt || !session?.endAt) {
       alert('Primero inicia y cierra un Live para poder resumirlo.');
@@ -2793,10 +2820,12 @@ function PaymentsView({
       }
       setProcesandoProgreso({ actual: 0, total: clientes.length });
       let errores = 0;
+      let pedidosDetectados = 0;
+      let pagosDetectados = 0;
       for (let i = 0; i < clientes.length; i++) {
         const cliente = clientes[i];
         try {
-          await apiFetch('/api/ai/summarize-conversation', {
+          const result = await apiFetch('/api/ai/summarize-conversation', {
             method: 'POST',
             body: JSON.stringify({
               clienteId: cliente.id,
@@ -2805,6 +2834,8 @@ function PaymentsView({
               skipPayments: true,
             }),
           });
+          pedidosDetectados += Array.isArray(result?.pedidos_venta_live) ? result.pedidos_venta_live.length : 0;
+          if (result?.estado_pago || result?.pago_alerta || result?.tarjeta_venta) pagosDetectados += 1;
         } catch (e) {
           errores += 1;
           console.warn(`[procesarLive] error en ${cliente.nombre}:`, e);
@@ -2819,6 +2850,11 @@ function PaymentsView({
         alert(`Resumen generado con ${errores} error(es). No marco el Live como finalizado para que puedas reintentar.`);
       } else {
         await apiFetch(`/api/live-sales/sessions/${session.id}/processed`, { method: 'POST' });
+        if (pedidosDetectados === 0 && pagosDetectados === 0) {
+          alert(`Se revisaron ${clientes.length} conversaciones. No se encontraron pagos ni pedidos.`);
+        } else {
+          alert(`Se revisaron ${clientes.length} conversaciones. Pedidos: ${pedidosDetectados}. Pagos: ${pagosDetectados}.`);
+        }
       }
       await refreshLiveSessionState();
     } catch (e: any) {
@@ -2830,6 +2866,7 @@ function PaymentsView({
   };
 
   const reanalyzeLiveSession = async () => {
+    return;
     if (procesandoLive) return;
     const state = await refreshLiveSessionState();
     if (state?.active) {
@@ -2891,10 +2928,6 @@ function PaymentsView({
     const state = liveSessionState ?? await refreshLiveSessionState();
     if (state.active) {
       await closeLiveSession(state.active);
-      return;
-    }
-    if (state.lastCompleted) {
-      await processClosedLiveSession(state.lastCompleted);
       return;
     }
     await startLiveSession();
@@ -3240,18 +3273,13 @@ function PaymentsView({
   }, [filteredPayments, customers, pedidos, hideCompletedWork, showOnlyWithPhone, orders, paymentChannel]);
 
   const activeLiveSession = liveSessionState?.active ?? null;
-  const completedLiveSession = liveSessionState?.lastCompleted ?? null;
-  const liveButtonLabel = activeLiveSession ? 'Live' : completedLiveSession ? 'Resumir' : 'Live';
+  const liveButtonLabel = 'Live';
   const liveButtonStyle = activeLiveSession
     ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-600"
-    : completedLiveSession
-      ? "bg-purple-100 text-purple-700 hover:bg-purple-200"
-      : "bg-gray-100 text-gray-500 hover:bg-gray-200";
+    : "bg-gray-100 text-gray-500 hover:bg-gray-200";
   const liveButtonTitle = activeLiveSession
     ? 'Cerrar el bloque de Live con hora real de cierre'
-    : completedLiveSession
-      ? 'Generar resumen y selección de prendas (los pagos ya se procesan automáticamente)'
-      : 'Iniciar bloque de Live desde este momento';
+    : 'Iniciar bloque de Live desde este momento';
 
   return (
     <motion.div 
@@ -3269,16 +3297,6 @@ function PaymentsView({
           <h2 className="text-2xl font-extrabold text-base-text tracking-tight uppercase">Pagos</h2>
         </div>
         <div className="flex gap-2">
-          {!activeLiveSession && liveSessionState?.lastAny && (
-            <button
-              onClick={reanalyzeLiveSession}
-              disabled={procesandoLive || Boolean(activeLiveSession)}
-              className="w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 bg-amber-50 text-amber-600 hover:bg-amber-100 disabled:opacity-60"
-              title="Re-analizar el último Live cerrado"
-            >
-              <RotateCcw size={16} />
-            </button>
-          )}
           <button
             onClick={() => setShowOnlyWithPhone(!showOnlyWithPhone)}
             className={cn(
@@ -3311,7 +3329,7 @@ function PaymentsView({
               <Loader2 size={14} className="animate-spin" />
             ) : (
               <>
-                {completedLiveSession ? <ClipboardList size={14} /> : <RadioTower size={14} />}
+                <RadioTower size={14} />
                 <span>{liveButtonLabel}</span>
               </>
             )}
@@ -5739,7 +5757,6 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const [verifyPaymentPopup, setVerifyPaymentPopup] = useState<{ id: string; livePaymentId: string; amount: number } | null>(null);
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
   const [chatPhotosForPedido, setChatPhotosForPedido] = useState<OrderChatPhoto[]>([]);
-  const [chatPhotoContext, setChatPhotoContext] = useState<string | null>(null);
 
   const handleVerifyPaymentFromTape = async () => {
     if (!verifyPaymentPopup) return;
@@ -5763,11 +5780,30 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         phone: person.waNumber,
         mainPedidoId: selectedPedido.id,
         orderDate: selectedPedido.date,
-        contextoVisual: chatPhotoContext,
         photos: chatPhotosForPedido,
       }),
     });
   };
+
+  const handleNotifyLive = async () => {
+    if (!person.phone) {
+      alert('Esta clienta no tiene un número vinculado para notificar.');
+      return;
+    }
+    return;
+    try {
+      await apiFetch('/api/store/notify-live-ready', {
+        method: 'POST',
+        body: JSON.stringify({ phone: person.phone })
+      });
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.3 }, colors: ['#ff2d78', '#ffffff'] });
+    } catch (err) {
+      alert('Error al enviar notificación por WhatsApp');
+    } finally {
+      // WhatsApp saliente desactivado.
+    }
+  };
+
 
   const handleQuickLink = async () => {
     if (!quickPhone) return;
@@ -6335,9 +6371,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             days={4}
             editable={!selectedPedido.id.startsWith('temp-')}
             showComprobantes={showComprobanteSection}
-            onSelectionChange={(photos, contexto) => {
+            onSelectionChange={(photos) => {
               setChatPhotosForPedido(photos);
-              setChatPhotoContext(contexto);
             }}
           />
 
@@ -6351,7 +6386,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
               }} 
               className="reset-button"
             >
-              <p className="reset-text">RESUMEN DEL PEDIDO</p>
+              <p className="reset-text">DETALLE DEL PEDIDO</p>
             </button>
             
             <div className="icons-grid">
@@ -7164,7 +7199,7 @@ function AddPedidoModal({ onClose, customerId, customerName, allPedidos, allCust
                 }} 
                 className="reset-button"
               >
-                <p className="reset-text">Resumen del Pedido</p>
+                <p className="reset-text">Detalle del Pedido</p>
               </button>
               
               <div className="icons-grid">

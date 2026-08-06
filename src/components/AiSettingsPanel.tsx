@@ -9,7 +9,6 @@ import {
   FileText,
   Key,
   Loader2,
-  MessageSquare,
   Images,
   RefreshCw,
   XCircle,
@@ -55,11 +54,6 @@ const FEATURE_META: Record<string, { icon: React.ReactNode; label: string; desc:
     label: 'Catalogar productos',
     desc: 'Analiza fotos de ropa y genera datos del producto.',
   },
-  chat_summary: {
-    icon: <MessageSquare size={14} />,
-    label: 'Resumen WhatsApp',
-    desc: 'Resume conversaciones, fotos, audios y comprobantes.',
-  },
   photo_selection: {
     icon: <Images size={14} />,
     label: 'Selección automática de prendas',
@@ -75,7 +69,6 @@ const FEATURE_META: Record<string, { icon: React.ReactNode; label: string; desc:
 function defaultFeatures(model: string): FeatureConfig {
   return {
     product_vision: { enabled: true, model },
-    chat_summary: { enabled: true, model },
     photo_selection: { enabled: false, model },
     notif_parser: { enabled: true, model },
   };

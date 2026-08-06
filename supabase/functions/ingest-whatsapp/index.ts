@@ -1,12 +1,13 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const SUPABASE_URL = Deno.env.get('PANEL_SUPABASE_URL')!;
-const SUPABASE_SERVICE_KEY = Deno.env.get('PANEL_SUPABASE_SERVICE_KEY')!;
+const SUPABASE_URL = Deno.env.get('PANEL_SUPABASE_URL') || Deno.env.get('SUPABASE_URL')!;
+const SUPABASE_SERVICE_KEY = Deno.env.get('PANEL_SUPABASE_SERVICE_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // DB principal (ChehiAppAbril) — para depositar identity_evidence
-const MAIN_URL = Deno.env.get('SUPABASE_URL') || '';
-const MAIN_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+const MAIN_URL = Deno.env.get('MAIN_SUPABASE_URL') || Deno.env.get('APP_SUPABASE_URL') || '';
+const MAIN_KEY = Deno.env.get('MAIN_SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('APP_SUPABASE_SERVICE_ROLE_KEY') || '';
 const INGEST_USER_ID = Deno.env.get('INGEST_USER_ID') || '';;
 const SERVER_URL = Deno.env.get('SERVER_URL') || Deno.env.get('APP_SERVER_URL') || '';
+const WHATSAPP_LIVE_ONLY = (Deno.env.get('WHATSAPP_LIVE_ONLY') || 'true').toLowerCase() !== 'false';
 
 function normalizePhone(raw: string): string | null {
   if (!raw) return null;
@@ -15,10 +16,41 @@ function normalizePhone(raw: string): string | null {
   return phone;
 }
 
+async function hasActiveProcessingLive(): Promise<boolean> {
+  if (!WHATSAPP_LIVE_ONLY) return true;
+  if (!MAIN_URL || !MAIN_KEY) {
+    console.warn('[whatsapp-live-only] Configuracion incompleta; se permite guardar para evitar perdida accidental.');
+    return true;
+  }
+
+  const mainDb = createClient(MAIN_URL, MAIN_KEY);
+  // IMPORTANTE: No filtramos por user_id si no está configurado para evitar
+  // que mensajes sean descartados silenciosamente por variable faltante.
+  let query = mainDb
+    .from('live_sessions')
+    .select('id')
+    .eq('status', 'live')
+    .limit(1);
+
+  if (INGEST_USER_ID) {
+    query = query.eq('user_id', INGEST_USER_ID) as any;
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    console.error('[whatsapp-live-only] Error consultando Live activo:', error);
+    return true; // ante error, permitir para no perder mensajes
+  }
+
+  const activo = !!data;
+  console.log(`[whatsapp-live-only] Live activo: ${activo} (session id: ${data?.id ?? 'ninguna'})`);
+  return activo;
+}
+
 Deno.serve(async (req) => {
-  const bodyClone = req.clone();
-  EdgeRuntime.waitUntil(processMessage(bodyClone));
-  return new Response(JSON.stringify({ ok: true }), {
+  const result = await processMessage(req);
+  return new Response(JSON.stringify({ ok: true, result }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -66,16 +98,22 @@ async function processMessage(req: Request) {
     if (!clientPhone) {
       console.error('No se pudo determinar el teléfono del cliente');
       await audit('skipped_no_phone');
-      return;
+      return 'skipped_no_phone';
     }
 
     if (!content && !hasUsableMedia) {
       console.log(`Mensaje vacío ignorado | De: ${clientPhone}`);
       await audit('skipped_empty');
-      return;
+      return 'skipped_empty';
     }
 
     console.log(`📨 Mensaje | Tipo: ${hasUsableMedia ? 'Media' : 'Texto'} | De: ${clientPhone} | Media URL: ${mediaUrl || 'ninguna'}`);
+
+    if (WHATSAPP_LIVE_ONLY && !(await hasActiveProcessingLive())) {
+      console.log(`Mensaje WhatsApp ignorado fuera de Live activo | De: ${clientPhone} | Tipo: ${hasUsableMedia ? 'Media' : 'Texto'}`);
+      await audit('skipped_live_not_active');
+      return 'skipped_live_not_active';
+    }
 
     // Upsert cliente
     const { data: clienteData, error: clienteError } = await supabase
@@ -89,7 +127,7 @@ async function processMessage(req: Request) {
 
     if (clienteError || !clienteData) {
       console.error('Error upsert cliente:', clienteError);
-      return;
+      return `cliente_error:${clienteError?.message ?? 'sin_data'}`;
     }
 
     if (messageId) {
@@ -103,7 +141,7 @@ async function processMessage(req: Request) {
       if (existingById) {
         console.log(`Mensaje duplicado ignorado por id: ${messageId}`);
         await audit('skipped_duplicate_id', { cliente_id: clienteData.id });
-        return;
+        return 'skipped_duplicate_id';
       }
     }
 
@@ -122,7 +160,7 @@ async function processMessage(req: Request) {
       if (existingMedia) {
         console.log(`Media duplicada ignorada: ${mediaUrl}`);
         await audit('skipped_duplicate_media', { cliente_id: clienteData.id });
-        return;
+        return 'skipped_duplicate_media';
       }
     }
 
@@ -141,7 +179,7 @@ async function processMessage(req: Request) {
       if (existingText) {
         console.log(`Texto duplicado ignorado para ${clientPhone}`);
         await audit('skipped_duplicate_text', { cliente_id: clienteData.id });
-        return;
+        return 'skipped_duplicate_text';
       }
     }
 
@@ -341,8 +379,10 @@ async function processMessage(req: Request) {
 
     // Log de auditoría (payload liviano, sin base64)
     await audit('processed', { cliente_id: clienteData.id });
+    return 'processed';
 
   } catch (err) {
     console.error('Error general:', err);
+    return `error:${err instanceof Error ? err.message : String(err)}`;
   }
 }

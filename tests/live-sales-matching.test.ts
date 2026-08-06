@@ -99,6 +99,26 @@ test('permite match por customer_id aunque el banco venga con nombre abreviado',
   assert.equal(match?.id, 242);
 });
 
+test('permite match cuando Yasta trunca una palabra de un nombre largo', () => {
+  const pagoLive = {
+    nombre_detectado: 'ANGELA MICHELLE URQUIZA COCA',
+    monto: 30,
+    message_created_at: '2026-05-24T03:25:00.000Z',
+  };
+
+  const match = findMacrodroidMatchForLivePayment(pagoLive, [
+    {
+      id: 499,
+      nombre: 'URQUIZA COCA ANGELA MICHEL',
+      pago: 30,
+      date: '2026-05-24T03:25:30.000Z',
+      customer_id: null,
+    },
+  ], { windowMinutes: 5 });
+
+  assert.equal(match?.id, 499);
+});
+
 test('rechaza pagos fuera de la ventana operativa', () => {
   const pagoLive = {
     nombre_detectado: name,

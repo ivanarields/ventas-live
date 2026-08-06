@@ -163,6 +163,11 @@ Responde SOLO con una línea, sin explicaciones.`, mime, b64);
 }
 
 Deno.serve(async (req) => {
+  return new Response(JSON.stringify({ ok: false, error: 'Función desactivada' }), {
+    status: 410,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' } });
   }

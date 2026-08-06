@@ -2,11 +2,12 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { AiSettingsPanel } from '../components/AiSettingsPanel';
 import { WhatsappConnectionPanel } from '../components/WhatsappConnectionPanel';
 import { adminApi, pagosApi, apiFetch } from '../lib/api';
+import { DEFAULT_SECTION_VISIBILITY, type SectionVisibility } from '../services/sectionVisibility';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Package, BarChart3, Trash2, Search, Check, CheckCircle2,
   LogOut, Printer, FileSpreadsheet, Eye, Pencil, X, Wallet,
-  Calendar, Zap, Database, Minus, Plus, Users, MessageSquare, Loader2,
+  Calendar, Zap, Database, Minus, Plus, Users, MessageSquare, Loader2, EyeOff, Store, TrendingUp,
 } from 'lucide-react';
 import { Payment } from '../types';
 
@@ -56,12 +57,14 @@ type CustomerLite = {
 };
 
 // ─── Main Component ──────────────────────────────────────────────────────────
-function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = '' }: {
+function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = '', sectionVisibility = DEFAULT_SECTION_VISIBILITY, onSectionVisibilityChange = () => {} }: {
   payments: Payment[];
   customers?: CustomerLite[];
   onRefresh?: () => void;
   onLogout: () => void;
   userId?: string;
+  sectionVisibility?: SectionVisibility;
+  onSectionVisibilityChange?: (value: SectionVisibility) => void;
   key?: string;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>('sistema');
@@ -149,6 +152,8 @@ function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = 
               setOfficialPhone={setOfficialPhone}
               phoneSaving={phoneSaving}
               saveOfficialPhone={saveOfficialPhone}
+              sectionVisibility={sectionVisibility}
+              onSectionVisibilityChange={onSectionVisibilityChange}
             />
           )}
 
@@ -424,7 +429,7 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
   const [editingName, setEditingName] = useState('');
 
   // Conversaciones WhatsApp
-  type Conversacion = { id: string; nombre: string | null; phone: string | null; mensajes: number; resumen_at: string | null };
+  type Conversacion = { id: string; nombre: string | null; phone: string | null; mensajes: number };
   const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
@@ -714,7 +719,6 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
                     <p className="text-[11px] font-bold text-gray-700 truncate">{c.nombre ?? 'Sin nombre'}</p>
                     <p className="text-[10px] text-gray-400">{c.phone ?? '—'} · {c.mensajes} mensajes</p>
                   </div>
-                  {c.resumen_at && <span className="text-[9px] text-emerald-500 font-bold">✓</span>}
                 </div>
               ))}
             </div>
@@ -823,11 +827,15 @@ function TabSistema({
   setOfficialPhone,
   phoneSaving,
   saveOfficialPhone,
+  sectionVisibility,
+  onSectionVisibilityChange,
 }: {
   officialPhone: string;
   setOfficialPhone: (value: string) => void;
   phoneSaving: boolean;
   saveOfficialPhone: () => void;
+  sectionVisibility: SectionVisibility;
+  onSectionVisibilityChange: (value: SectionVisibility) => void;
 }) {
   const [numericCapacity, setNumericCapacity] = useState(4);
   const [saving, setSaving] = useState(false);
@@ -931,6 +939,92 @@ function TabSistema({
           <span className="text-[11px] font-bold text-[#ff2d78]">Activo</span>
         </div>
       </div>
+
+      <SectionVisibilityPanel
+        value={sectionVisibility}
+        onChange={onSectionVisibilityChange}
+      />
+    </div>
+  );
+}
+
+function SectionVisibilityPanel({
+  value,
+  onChange,
+}: {
+  value: SectionVisibility;
+  onChange: (next: SectionVisibility) => void;
+}) {
+  const toggle = (section: keyof SectionVisibility) => {
+    onChange({ ...value, [section]: !value[section] });
+  };
+
+  return (
+    <div className="mt-2 bg-gray-50/70 rounded-xl border border-gray-100/80 p-2.5 space-y-2">
+      <div className="flex items-start gap-3">
+        <div className="w-7 h-7 rounded-lg bg-white text-gray-400 flex items-center justify-center shrink-0">
+          <EyeOff size={14} />
+        </div>
+        <div>
+          <p className="text-[11px] font-black text-gray-700">Ocultar secciones</p>
+          <p className="text-[9px] text-gray-400 font-medium">
+            Solo cambia tu menú. No elimina datos ni funciones.
+          </p>
+        </div>
+      </div>
+
+      <VisibilitySwitch
+        label="Dinero"
+        description="Ocultar el apartado de dinero"
+        icon={<TrendingUp size={15} />}
+        hidden={value.dinero}
+        onClick={() => toggle('dinero')}
+      />
+      <VisibilitySwitch
+        label="Tienda"
+        description="Ocultar el panel de tienda"
+        icon={<Store size={15} />}
+        hidden={value.tienda}
+        onClick={() => toggle('tienda')}
+      />
+    </div>
+  );
+}
+
+function VisibilitySwitch({
+  label,
+  description,
+  icon,
+  hidden,
+  onClick,
+}: {
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+  hidden: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-2">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="text-gray-500 shrink-0">{icon}</span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-black text-gray-700">{label}</p>
+          <p className="text-[9px] text-gray-400 truncate">{description}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={hidden}
+        aria-label={`Ocultar ${label}`}
+        onClick={onClick}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${hidden ? 'bg-[#ff2d78]' : 'bg-gray-300'}`}
+      >
+        <span
+          className={`absolute top-1 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${hidden ? 'translate-x-5' : 'translate-x-1'}`}
+        />
+      </button>
     </div>
   );
 }

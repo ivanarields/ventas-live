@@ -82,6 +82,7 @@ export interface Customer {
   canonicalName?: string;
   phone: string;
   activeLabel: string;
+  activeLabelType?: string;
   totalSpent: number;
   totalItems: number;
   pendingItems: number;

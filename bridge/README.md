@@ -7,7 +7,6 @@ Microservicio Node.js que conecta el WhatsApp del negocio con la aplicación.
 - **Host:** DigitalOcean droplet
 - **URL:** `http://134.122.123.253:3001`
 - **Variable en app:** `WHATSAPP_BRIDGE_URL=http://134.122.123.253:3001`
-- **Secret de webhook:** `WEBHOOK_SECRET=ventas-live-bridge-2026`
 
 ## Cómo funciona
 
@@ -19,10 +18,12 @@ Microservicio Node.js que conecta el WhatsApp del negocio con la aplicación.
 ## Variables de entorno (`.env`)
 
 ```
-WEBHOOK_URL=https://leidydiaz.live/api/whatsapp/webhook
+WEBHOOK_URL=https://vwaocoaeenavxkcshyuf.supabase.co/functions/v1/ingest-whatsapp
 SUPABASE_URL=https://vwaocoaeenavxkcshyuf.supabase.co
 SUPABASE_SERVICE_KEY=tu-service-key
-WEBHOOK_SECRET=ventas-live-bridge-2026
+WHATSAPP_LIVE_ONLY=true
+LIVE_STATUS_URL=https://leidycandy.me/api/live-sales/sessions/current
+LIVE_STATUS_USER_ID=id-del-operador
 ```
 
 ## Correr en local

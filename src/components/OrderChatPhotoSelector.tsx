@@ -27,13 +27,11 @@ interface Props {
   days?: number;
   editable?: boolean;
   showComprobantes?: boolean;
-  onSelectionChange?: (photos: OrderChatPhoto[], contextoVisual: string | null) => void;
+  onSelectionChange?: (photos: OrderChatPhoto[]) => void;
 }
 
 interface PhotosResponse {
   photos: OrderChatPhoto[];
-  contexto_visual: string | null;
-  timeline_steps: string[];
 }
 
 interface PhotosRequest {
@@ -76,10 +74,6 @@ function normalizePhotosResponse(data: any): PhotosResponse {
   }));
   return {
     photos,
-    contexto_visual: data?.contexto_visual ?? null,
-    timeline_steps: Array.isArray(data?.timeline_steps)
-      ? data.timeline_steps.map((step: unknown) => String(step ?? '').trim()).filter(Boolean).slice(0, 4)
-      : [],
   };
 }
 
@@ -145,34 +139,45 @@ export function OrderChatPhotoSelector({
   onSelectionChange,
 }: Props) {
   const [photos, setPhotos] = useState<OrderChatPhoto[]>([]);
-  const [contextoVisual, setContextoVisual] = useState<string | null>(null);
-  const [timelineSteps, setTimelineSteps] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [lightbox, setLightbox] = useState<OrderChatPhoto | null>(null);
+  const [verifiedIds, setVerifiedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!phone) return;
     let cancelled = false;
     setLoading(true);
 
-    fetchOrderChatPhotos({ phone, orderDate, mainPedidoId, days })
-      .then((data) => {
+    Promise.all([
+      fetchOrderChatPhotos({ phone, orderDate, mainPedidoId, days }),
+      apiFetch(`/api/live-sales/day-orders?phone=${encodeURIComponent(phone)}`).catch(() => null)
+    ])
+      .then(([data, dayOrdersResp]) => {
         if (cancelled) return;
+
+        if (dayOrdersResp?.ok && Array.isArray(dayOrdersResp.orders)) {
+          const allPagos = dayOrdersResp.orders.flatMap((order: any) => order.pagos ?? []);
+          const verified = new Set<string>(
+            allPagos
+              .filter((p: any) => p.estado === 'verificado_macrodroid' || p.estado === 'verificado_manual')
+              .map((p: any) => String(p.panel_mensaje_id))
+              .filter(Boolean)
+          );
+          setVerifiedIds(verified);
+        }
+
         const next = data.photos.map((photo: OrderChatPhoto) => ({
           ...photo,
           selected: !isComprobantePhoto(photo) && photo.selected_final === true,
         }));
         setPhotos(next);
-        setContextoVisual(data.contexto_visual);
-        setTimelineSteps(data.timeline_steps);
-        onSelectionChange?.(next.filter((photo: OrderChatPhoto) => !isComprobantePhoto(photo)), data.contexto_visual);
+        onSelectionChange?.(next.filter((photo: OrderChatPhoto) => !isComprobantePhoto(photo)));
       })
       .catch(() => {
         if (!cancelled) {
           setPhotos([]);
-          setContextoVisual(null);
-          setTimelineSteps([]);
-          onSelectionChange?.([], null);
+          setVerifiedIds(new Set());
+          onSelectionChange?.([]);
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -184,13 +189,14 @@ export function OrderChatPhotoSelector({
     if (!editable) return;
     setPhotos(prev => {
       const next = prev.map(photo => photo.id === id ? { ...photo, selected: !photo.selected } : photo);
-      onSelectionChange?.(next.filter((photo: OrderChatPhoto) => !isComprobantePhoto(photo)), contextoVisual);
+      onSelectionChange?.(next.filter((photo: OrderChatPhoto) => !isComprobantePhoto(photo)));
       return next;
     });
   };
 
   const prendas = photos.filter(photo => !isComprobantePhoto(photo));
   const comprobantes = photos.filter(photo => isComprobantePhoto(photo));
+  const pendingComprobantes = comprobantes.filter(photo => !verifiedIds.has(photo.id));
   const selectedCount = prendas.filter(p => p.selected).length;
   const aiCount = prendas.filter(p => p.selected_by_ai).length;
 
@@ -217,7 +223,7 @@ export function OrderChatPhotoSelector({
     );
   }
 
-  if (prendas.length === 0 && (!showComprobantes || comprobantes.length === 0)) {
+  if (prendas.length === 0 && (!showComprobantes || pendingComprobantes.length === 0)) {
     return (
       <div className="space-y-2">
         <Header total={0} selected={0} ai={0} />
@@ -268,14 +274,14 @@ export function OrderChatPhotoSelector({
         </div>
       )}
 
-      {showComprobantes && comprobantes.length > 0 && (
+      {showComprobantes && pendingComprobantes.length > 0 && (
         <div className="space-y-2">
           <p className="text-[10px] font-extrabold uppercase tracking-widest text-violet-600">
-            Comprobantes para verificar ({comprobantes.length})
+            COMPROBANTES PARA VERIFICAR ({pendingComprobantes.length})
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-            {comprobantes.map((photo) => (
-              <div key={photo.id} className="w-24 flex-shrink-0 space-y-1">
+            {pendingComprobantes.map((photo) => (
+              <div key={photo.id} className="w-24 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setLightbox(photo)}
@@ -284,31 +290,9 @@ export function OrderChatPhotoSelector({
                 >
                   <img src={photo.thumb_url ?? photo.media_url} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setLightbox(photo)}
-                  className="w-full rounded-xl bg-violet-50 py-1 text-[10px] font-black text-violet-700 border border-violet-200"
-                >
-                  Ver comprobante
-                </button>
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {(timelineSteps.length > 0 || contextoVisual) && (
-        <div className="rounded-2xl border border-pink-100 bg-pink-50 px-3 py-2">
-          <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: BRAND }}>Resumen del chat</p>
-          {timelineSteps.length > 0 ? (
-            <div className="mt-1 space-y-1.5">
-              {timelineSteps.map((step, idx) => (
-                <p key={idx} className="text-[11px] font-semibold leading-relaxed text-gray-700">{step}</p>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-1 text-[11px] font-semibold leading-relaxed text-gray-600">{contextoVisual}</p>
-          )}
         </div>
       )}
 

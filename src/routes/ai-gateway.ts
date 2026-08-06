@@ -326,7 +326,6 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
   function defaultAiFeatures() {
     return {
       product_vision: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
-      chat_summary: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
       photo_selection: { enabled: false, model: DEFAULT_OPENROUTER_MODEL },
       notif_parser: { enabled: true, model: DEFAULT_OPENROUTER_MODEL },
     };
@@ -869,6 +868,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
   // Recibe { clienteId } — lee mensajes de panel_mensajes y genera un resumen del pedido.
   // También extrae datos de comprobantes con el prompt configurable y vincula al Sistema Pulpo.
   router.post('/summarize-conversation', async (req: Request, res: Response) => {
+    return res.status(410).json({ error: 'Función desactivada' });
     try {
       const userId = req.headers['x-user-id'] as string;
       if (!userId) return res.status(401).json({ error: 'x-user-id requerido' });
@@ -888,7 +888,7 @@ Responde ÚNICAMENTE con este JSON (sin texto adicional, sin markdown):
       if ((startAt || endAt) && !hasLiveRange) {
         return res.status(400).json({ error: 'Rango de Live invalido' });
       }
-      const LIVE_LATE_PROOF_GRACE_MINUTES = 5;
+      const LIVE_LATE_PROOF_GRACE_MINUTES = 0;
       const liveQueryEnd = hasLiveRange
         ? new Date(rangeEnd!.getTime() + LIVE_LATE_PROOF_GRACE_MINUTES * 60 * 1000)
         : rangeEnd;

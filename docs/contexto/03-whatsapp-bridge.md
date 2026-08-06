@@ -2,6 +2,9 @@
 
 ## Estado actual
 
+El modo de producciÃ³n usa `WHATSAPP_LIVE_ONLY=true`: fuera de una sesiÃ³n Live
+activa, el bridge ignora el mensaje antes de descargar la media.
+
 El bridge conecta la sesión de WhatsApp por QR y funciona únicamente como receptor.
 No encola, no envía, no reintenta y no ejecuta notificaciones automáticas.
 

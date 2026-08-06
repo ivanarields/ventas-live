@@ -36,6 +36,57 @@ function containsAll(shortWords: string[], longWords: string[]) {
   return shortWords.every(word => setLong.has(word));
 }
 
+// Matcheo flexible para nombres largos (24+ chars) que pueden venir truncados
+// por sistemas como Yasta. Acepta variantes donde una palabra es prefijo de la otra
+// (ej: MICHEL ⊂ MICHELLE, ROBERT ⊂ ROBERTO).
+// Solo se aplica si AL MENOS UNO de los nombres tiene >= 24 caracteres (zona de truncamiento)
+// y solo a UNA palabra a la vez (las demás deben coincidir exacto).
+const TRUNCATION_THRESHOLD = 24;
+const MIN_PREFIX_LENGTH = 4; // palabra truncada mínima de 4 chars (ej: SOLI ⊂ SOLIZ)
+
+function looksLikeTruncationMatch(a: string[], b: string[], normA: string, normB: string): boolean {
+  // Solo aplicar si alguno está cerca del límite de truncamiento
+  if (normA.length < TRUNCATION_THRESHOLD && normB.length < TRUNCATION_THRESHOLD) return false;
+  if (a.length !== b.length || a.length < 2) return false;
+
+  // Crear copias mutables
+  const setA = [...a];
+  const setB = [...b];
+  let exactMatches = 0;
+
+  // Primero remover todas las palabras exactas
+  for (let i = setA.length - 1; i >= 0; i--) {
+    const idx = setB.indexOf(setA[i]);
+    if (idx >= 0) {
+      setB.splice(idx, 1);
+      setA.splice(i, 1);
+      exactMatches++;
+    }
+  }
+
+  // Si quedan palabras, verificar si son prefijos válidos (truncamiento)
+  if (setA.length === 0 && setB.length === 0) return false; // No hay diferencias → ya matchearía exacto
+  if (setA.length !== setB.length) return false; // Debe haber simetría
+
+  // Solo permitir UNA palabra truncada (la última truncada por Yasta)
+  if (setA.length > 1) return false;
+
+  const wordA = setA[0];
+  const wordB = setB[0];
+  if (!wordA || !wordB) return false;
+  if (wordA.length < MIN_PREFIX_LENGTH || wordB.length < MIN_PREFIX_LENGTH) return false;
+
+  // La más corta debe ser prefijo de la más larga (ej: MICHEL es prefijo de MICHELLE)
+  const shorter = wordA.length <= wordB.length ? wordA : wordB;
+  const longer = wordA.length > wordB.length ? wordA : wordB;
+  if (!longer.startsWith(shorter)) return false;
+
+  // Y la diferencia no debe ser muy grande (max 3 chars de diferencia)
+  if (longer.length - shorter.length > 3) return false;
+
+  return exactMatches >= a.length - 1; // Todas menos una coinciden exacto
+}
+
 function initialsMatch(initials: string[], words: string[]) {
   if (initials.length === 0) return true;
   const available = [...words];
@@ -58,6 +109,13 @@ export function scorePersonName(a: unknown, b: unknown): NameMatchResult {
 
   if (sameWordSet(left.words, right.words)) {
     return { score: 0.98, kind: 'same_words', sharedWords: shared };
+  }
+
+  // Detección de truncamiento (Yasta corta nombres largos)
+  // Ej: "URQUIZA COCA ANGELA MICHEL" (26 chars) ≈ "ANGELA MICHELLE URQUIZA COCA" (28 chars)
+  // Solo si al menos uno tiene 24+ caracteres y solo cambia 1 palabra (prefijo)
+  if (looksLikeTruncationMatch(left.words, right.words, left.normalized, right.normalized)) {
+    return { score: 0.97, kind: 'same_words', sharedWords: shared };
   }
 
   if (minWords >= 2) {

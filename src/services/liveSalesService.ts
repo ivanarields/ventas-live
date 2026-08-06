@@ -162,8 +162,10 @@ export function findMacrodroidMatchForLivePayment(
     const to = center + windowMs;
 
     const matched = (candidates ?? []).find((p: any) => {
-      const paidAt = new Date(p.date).getTime();
-      if (!Number.isFinite(paidAt) || paidAt < from || paidAt > to) return false;
+      const paidTimes = [p.date, p.created_at]
+        .map((value) => new Date(value).getTime())
+        .filter(Number.isFinite);
+      if (!paidTimes.some((paidAt) => paidAt >= from && paidAt <= to)) return false;
       if (parseLiveMonto(p.pago) !== monto) return false;
 
       const sameCustomer = input.mainCustomerId && Number(p.customer_id) === Number(input.mainCustomerId);
@@ -531,6 +533,12 @@ export async function matchLivePaymentWithMacrodroid(
 ) {
   const monto = parseLiveMonto(input.pagoLive.monto);
   if (!monto || !input.pagoLive.nombre_detectado) return input.pagoLive;
+  if (
+    ['verificado_macrodroid', 'verificado_manual'].includes(String(input.pagoLive.estado)) &&
+    input.pagoLive.main_pago_id
+  ) {
+    return input.pagoLive;
+  }
 
   let messageCreatedAt: string | null = null;
   if (input.pagoLive.panel_mensaje_id) {
@@ -560,21 +568,24 @@ export async function matchLivePaymentWithMacrodroid(
   const to = new Date(Math.max(...centers) + windowMs).toISOString();
 
   // Excluir pagos MacroDroid que ya están vinculados a otro comprobante verificado
-  const { data: alreadyMatched } = await panelDb
+  let alreadyMatchedQuery = panelDb
     .from('pagos_venta_live')
     .select('main_pago_id')
     .not('main_pago_id', 'is', null)
     .eq('estado', 'verificado_macrodroid');
+  if (input.pagoLive.id) {
+    alreadyMatchedQuery = alreadyMatchedQuery.neq('id', input.pagoLive.id);
+  }
+  const { data: alreadyMatched } = await alreadyMatchedQuery;
   const excludeIds = (alreadyMatched ?? []).map((p: any) => p.main_pago_id).filter(Boolean);
 
   let query = mainDb
     .from('pagos')
-    .select('id,nombre,pago,date,method,customer_id')
+    .select('id,nombre,pago,date,created_at,method,customer_id')
     .eq('user_id', input.userId)
     .eq('pago', monto)
-    .gte('date', from)
-    .lte('date', to)
-    .order('date', { ascending: true });
+    .order('created_at', { ascending: false })
+    .limit(100);
 
   if (excludeIds.length > 0) {
     query = query.not('id', 'in', `(${excludeIds.join(',')})`) as typeof query;

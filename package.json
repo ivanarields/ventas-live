@@ -48,5 +48,22 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
-  }
+  },
+  "description": "",
+  "main": "query_sessions.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ivanarields/ventas-live.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ivanarields/ventas-live/issues"
+  },
+  "homepage": "https://github.com/ivanarields/ventas-live#readme"
 }

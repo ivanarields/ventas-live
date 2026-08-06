@@ -703,8 +703,7 @@
 .clone-kit-container {
   background: white;
   border-radius: 32px;
-  padding: 1.5rem;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
+  padding: 0.5rem 1rem 0.75rem;
   border: 1px solid #f1f5f9;
   width: 100%;
   max-width: 100%;
@@ -718,6 +717,8 @@
   border: none;
   cursor: pointer;
   transition: transform 0.1s;
+  padding: 0;
+  margin-bottom: 0.5rem;
 }
 
 .reset-button:active { transform: scale(0.95); }
@@ -729,7 +730,7 @@
   opacity: 0.8;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  margin-bottom: 1rem;
+  margin: 0;
 }
 
 .icons-grid {

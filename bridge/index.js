@@ -16,6 +16,9 @@ dotenv.config({ path: join(__dirname, '.env') });
 const WEBHOOK_URL    = process.env.WEBHOOK_URL;
 const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY;
+const LIVE_STATUS_URL = process.env.LIVE_STATUS_URL;
+const LIVE_STATUS_USER_ID = process.env.LIVE_STATUS_USER_ID || process.env.INGEST_USER_ID;
+const WHATSAPP_LIVE_ONLY = (process.env.WHATSAPP_LIVE_ONLY || 'true').toLowerCase() !== 'false';
 const BUCKET         = 'whatsapp-media';
 const PORT           = process.env.PORT || 3000;
 const IS_HEADLESS    = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.DOCKER_ENV;
@@ -67,6 +70,25 @@ function normalizePhone(raw) {
   let p = raw.replace(/@[a-z.]+$/, '');
   if (/^[678]\d{7}$/.test(p)) p = '591' + p;
   return p;
+}
+
+async function hasActiveProcessingLive() {
+  if (!WHATSAPP_LIVE_ONLY) return true;
+  if (!LIVE_STATUS_URL || !LIVE_STATUS_USER_ID) {
+    console.warn('LIVE_STATUS_URL/LIVE_STATUS_USER_ID no configurado; se permite reenviar al webhook.');
+    return true;
+  }
+
+  try {
+    const response = await axios.get(LIVE_STATUS_URL, {
+      timeout: 5000,
+      headers: { 'x-user-id': LIVE_STATUS_USER_ID },
+    });
+    return !!response.data?.active;
+  } catch (error) {
+    console.error('No se pudo consultar Live activo; se permite reenviar para evitar perdida:', error.message);
+    return true;
+  }
 }
 
 async function uploadMedia(base64, mimetype, phone, timestamp, messageId) {
@@ -184,6 +206,11 @@ client.on('message_create', async (msg) => {
     // Usar número real si existe, sino normalizar el from (que puede ser LID)
     const fromPhone = realPhone ? normalizePhone(realPhone) : normalizePhone(msg.from);
 
+    if (WHATSAPP_LIVE_ONLY && !(await hasActiveProcessingLive())) {
+      console.log(`WhatsApp ignorado fuera de Live activo | De: ${fromPhone || msg.from} | Media: ${msg.hasMedia ? 'si' : 'no'}`);
+      return;
+    }
+
     if (msg.hasMedia) {
       console.log('📥 Descargando media...');
       const media = await msg.downloadMedia();
@@ -210,7 +237,10 @@ client.on('message_create', async (msg) => {
     };
 
     console.log(`🚀 Enviando [${msg.hasMedia ? 'Media' : 'Texto'}] de ${fromPhone}...`);
-    const r = await axios.post(WEBHOOK_URL, payload, { timeout: 15000 });
+    const webhookHeaders = SUPABASE_KEY
+      ? { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
+      : {};
+    const r = await axios.post(WEBHOOK_URL, payload, { timeout: 15000, headers: webhookHeaders });
     if (r.status === 200) console.log('✔️  Mensaje guardado en Supabase');
 
   } catch (e) {
