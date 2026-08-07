@@ -5571,14 +5571,14 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto px-4 py-1 divide-y divide-gray-100/60">
           {filteredPeople.length === 0 ? (
             <div className="text-center py-12 opacity-20">
               <Users className="w-12 h-12 mx-auto mb-3" />
               <p className="text-xs font-bold uppercase tracking-widest">No se encontraron personas</p>
             </div>
           ) : (
-            filteredPeople.map((person: any, idx: number) => {
+filteredPeople.map((person: any, idx: number) => {
               const formatName = (name: string) => {
                 if (!name) return '';
                 return name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
@@ -5599,23 +5599,19 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
                 <div 
                   key={`${person.id || person.nombre}-${idx}`}
                   onClick={() => onSelectPerson(person.id)}
-                  className="w-full bg-white border border-gray-100 rounded-2xl px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors group cursor-pointer"
-                  style={{ boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}
+                  className="w-full py-2.5 px-1 flex items-center justify-between hover:bg-gray-50/50 transition-colors group cursor-pointer"
                 >
                   <div className="text-left min-w-0 flex-1 pr-2">
-                    <p className="text-sm font-black text-gray-900 leading-snug truncate">
+                    <p className="text-[12.5px] font-semibold text-gray-800 leading-snug truncate">
                       {formatName(person.nombre)}
                     </p>
                     {phoneText && (
-                      <p className="text-[11px] text-gray-400 font-bold mt-0.5 tracking-[0.05em]">
+                      <p className="text-[10px] text-gray-400 font-bold mt-0.5 tracking-[0.05em]">
                         {phoneText}
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div className="text-right">
-                      <p className="text-base font-black text-brand leading-none">Bs {person.total}</p>
-                    </div>
+                  <div className="flex items-center gap-2.5 flex-shrink-0">
                     {!person.waNumber && (
                       <button
                         onClick={(e) => {
@@ -5625,7 +5621,7 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
                             name: person.nombre
                           });
                         }}
-                        className="p-2 bg-gray-100 rounded-full text-gray-400 hover:text-brand transition-colors active:scale-95 flex items-center justify-center"
+                        className="p-1.5 bg-gray-50 rounded-full text-gray-400 hover:text-brand transition-colors active:scale-95 flex items-center justify-center"
                         title="Vincular WhatsApp"
                       >
                         <Plus className="w-3.5 h-3.5" />
