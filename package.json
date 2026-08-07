@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build": "vite build && npm run build:server",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=api/server-bundle.mjs",
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
@@ -41,6 +42,7 @@
     "@types/react-dom": "^19.2.3",
     "archiver": "^7.0.1",
     "autoprefixer": "^10.4.21",
+    "esbuild": "^0.27.3",
     "form-data": "^4.0.5",
     "node-fetch": "^3.3.2",
     "pg": "^8.20.0",
