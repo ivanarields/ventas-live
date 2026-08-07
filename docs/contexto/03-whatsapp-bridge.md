@@ -8,6 +8,13 @@ activa, el bridge ignora el mensaje antes de descargar la media.
 El bridge conecta la sesión de WhatsApp por QR y funciona únicamente como receptor.
 No encola, no envía, no reintenta y no ejecuta notificaciones automáticas.
 
+## Captura robusta de mensajes y media
+
+La recepcion escucha `message` y `message_create` con deduplicacion por ID.
+Las imagenes se descargan hasta tres veces antes de enviarse al webhook.
+Si la descarga falla, el payload marca `mediaDownloadFailed` para dejar el
+incidente visible sin crear una evidencia falsa.
+
 ## Alojamiento
 
 - Host: DigitalOcean droplet
