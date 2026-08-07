@@ -53,17 +53,16 @@ function buildPhotosPath({ phone, orderDate, mainPedidoId, days = 4 }: PhotosReq
 }
 
 function thumbnailUrl(mediaUrl: string) {
-  if (!mediaUrl.includes('/storage/v1/object/public/')) return mediaUrl;
-  try {
-    const url = new URL(mediaUrl);
-    url.pathname = url.pathname.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
-    url.searchParams.set('width', '240');
-    url.searchParams.set('height', '320');
-    url.searchParams.set('resize', 'cover');
-    url.searchParams.set('quality', '55');
-    return url.toString();
-  } catch {
-    return mediaUrl;
+  // El proyecto no tiene habilitado el transformador de imágenes de Supabase.
+  // La URL original es pública y el CSS ya la muestra como miniatura; al tocar
+  // la imagen se sigue usando `media_url` para abrirla en tamaño completo.
+  return mediaUrl;
+}
+
+function handleImageError(event: React.SyntheticEvent<HTMLImageElement>, originalUrl: string) {
+  const image = event.currentTarget;
+  if (image.src !== originalUrl) {
+    image.src = originalUrl;
   }
 }
 
@@ -255,7 +254,14 @@ export function OrderChatPhotoSelector({
               }}
               title={editable ? 'Tocar para marcar/desmarcar. Doble toque para ampliar.' : 'Doble toque para ampliar.'}
             >
-              <img src={photo.thumb_url ?? photo.media_url} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+              <img
+                src={photo.thumb_url ?? photo.media_url}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+                decoding="async"
+                onError={(event) => handleImageError(event, photo.media_url)}
+              />
               {selected && (
                 <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full text-white shadow"
                   style={{ background: BRAND }}>
@@ -288,7 +294,14 @@ export function OrderChatPhotoSelector({
                   className="relative h-28 w-24 overflow-hidden rounded-2xl border-2 border-violet-200 bg-gray-50"
                   title="Ver comprobante"
                 >
-                  <img src={photo.thumb_url ?? photo.media_url} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                  <img
+                    src={photo.thumb_url ?? photo.media_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    onError={(event) => handleImageError(event, photo.media_url)}
+                  />
                 </button>
               </div>
             ))}
