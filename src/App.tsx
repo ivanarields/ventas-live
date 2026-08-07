@@ -1742,6 +1742,20 @@ export default function App() {
             onSaved={loadData}
           />
         )}
+        {showPeopleModal && (
+          <PeopleModal
+            people={people}
+            onClose={() => setShowPeopleModal(false)}
+            onSelectPerson={(id: string) => {
+              setSelectedPersonId(id);
+              setShowPeopleModal(false);
+            }}
+            onLinkNumber={(c: any) => {
+              setLinkingCustomer(c);
+              setShowLinkModal(true);
+            }}
+          />
+        )}
         {showAddModal === 'category' && (
           <AddCategoryModal 
             onClose={() => setShowAddModal('transaction')} 
@@ -2084,7 +2098,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
     const nameMatch = (p.customerName ?? '').toLowerCase().includes(q);
     const labelMatch = (p.label ?? '').toLowerCase().includes(q);
 
-    const phone = getOccupantPhone(p) || '';
+    const phone = String(getOccupantPhone(p) || '');
     const cleanQuery = q.replace(/\D/g, '');
     const cleanPhone = phone.replace(/\D/g, '');
     const phoneMatch = cleanQuery && cleanPhone && (
@@ -3424,50 +3438,29 @@ function PaymentsView({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-1 bg-gray-100/80 p-0.5 rounded-xl">
-        <button
-          onClick={() => setPaymentChannel('normal')}
-          className={cn(
-            "h-7 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-            paymentChannel === 'normal' ? "bg-white text-brand shadow-sm" : "text-gray-400"
-          )}
-        >
-          Live
-        </button>
-        <button
-          onClick={() => setPaymentChannel('web')}
-          className={cn(
-            "h-7 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-            paymentChannel === 'web' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400"
-          )}
-        >
-          Web
-        </button>
-      </div>
-
       {/* Stats Panel */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-1.5">
         <button 
           onClick={onOpenCalendar}
-          className={`card-modern p-3 flex flex-col items-center justify-center text-center transition-all hover:scale-[1.02] active:scale-[0.98] ${isToday ? '' : 'bg-brand/5 border-brand/20'}`}
+          className={`bg-white rounded-2xl border border-base-border shadow-sm py-1.5 px-1 flex flex-col items-center justify-center text-center transition-all hover:scale-[1.02] active:scale-[0.98] ${isToday ? '' : 'bg-brand/5 border-brand/20'}`}
         >
-          <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${isToday ? 'text-base-text-muted' : 'text-brand'}`}>{dateLabel}</span>
-          <span className={`text-xl font-extrabold leading-none ${isToday ? 'text-base-text' : 'text-brand'}`}>Bs {stats.totalSelected}</span>
+          <span className={`text-[8px] font-bold uppercase tracking-wider mb-0.5 ${isToday ? 'text-base-text-muted' : 'text-brand'} truncate max-w-full px-0.5`}>{dateLabel}</span>
+          <span className={`text-base font-black leading-none ${isToday ? 'text-base-text' : 'text-brand'}`}>Bs {stats.totalSelected}</span>
         </button>
         
-        <div className="card-modern p-3 flex flex-col items-center justify-center text-center">
-          <span className="text-[9px] font-bold text-base-text-muted uppercase tracking-wider mb-1">Pagos</span>
-          <span className="text-xl font-extrabold text-base-text leading-none">{stats.count}</span>
+        <div className="bg-white rounded-2xl border border-base-border shadow-sm py-1.5 px-1 flex flex-col items-center justify-center text-center">
+          <span className="text-[8px] font-bold text-base-text-muted uppercase tracking-wider mb-0.5">Pagos</span>
+          <span className="text-base font-black text-base-text leading-none">{stats.count}</span>
         </div>
 
         <button 
           onClick={onOpenPeople}
-          className="card-modern p-3 flex flex-col items-center justify-center text-center transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-white rounded-2xl border border-base-border shadow-sm py-1.5 px-1 flex flex-col items-center justify-center text-center transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <span className="text-[9px] font-bold text-base-text-muted uppercase tracking-wider mb-1">
+          <span className="text-[8px] font-bold text-base-text-muted uppercase tracking-wider mb-0.5 truncate max-w-full px-0.5">
             {stats.people === 1 ? 'Persona' : 'Personas'}
           </span>
-          <span className="text-xl font-extrabold text-base-text leading-none">{stats.people}</span>
+          <span className="text-base font-black text-base-text leading-none">{stats.people}</span>
         </button>
       </div>
 
@@ -5522,9 +5515,15 @@ const MinusCircle = ({ className }: { className?: string }) => (
 function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
   const [search, setSearch] = useState('');
 
-  const filteredPeople = people.filter((p: any) => 
-    p.nombre.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredPeople = people.filter((p: any) => {
+    const searchLower = search.toLowerCase();
+    const matchesName = (p.nombre || '').toLowerCase().includes(searchLower);
+    const cleanSearch = searchLower.replace(/\D/g, '');
+    const cleanPhone = String(p.phone || '').replace(/\D/g, '');
+    const cleanWa = String(p.waNumber || '').replace(/\D/g, '');
+    const matchesNumber = cleanSearch && (cleanPhone.includes(cleanSearch) || cleanWa.includes(cleanSearch));
+    return matchesName || matchesNumber;
+  });
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
@@ -5579,49 +5578,64 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
               <p className="text-xs font-bold uppercase tracking-widest">No se encontraron personas</p>
             </div>
           ) : (
-            filteredPeople.map((person: any, idx: number) => (
-              <div 
-                key={`${person.id || person.nombre}-${idx}`}
-                onClick={() => onSelectPerson(person.id)}
-                className="w-full card-modern p-4 flex items-center justify-between hover:bg-gray-50 transition-colors group cursor-pointer"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500 font-bold text-xs">
-                    {person.nombre.charAt(0).toUpperCase()}
+            filteredPeople.map((person: any, idx: number) => {
+              const formatName = (name: string) => {
+                if (!name) return '';
+                return name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+              };
+
+              const formatDisplayPhone = (ph: string) => {
+                if (!ph) return '';
+                let clean = ph.trim().replace(/\D/g, '');
+                if (clean.startsWith('591') && clean.length > 8) {
+                  clean = clean.slice(3);
+                }
+                return clean;
+              };
+
+              const phoneText = formatDisplayPhone(person.waNumber || person.phone);
+
+              return (
+                <div 
+                  key={`${person.id || person.nombre}-${idx}`}
+                  onClick={() => onSelectPerson(person.id)}
+                  className="w-full bg-white border border-gray-100 rounded-2xl px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors group cursor-pointer"
+                  style={{ boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}
+                >
+                  <div className="text-left min-w-0 flex-1 pr-2">
+                    <p className="text-sm font-black text-gray-900 leading-snug truncate">
+                      {formatName(person.nombre)}
+                    </p>
+                    {phoneText && (
+                      <p className="text-[11px] text-gray-400 font-bold mt-0.5 tracking-[0.05em]">
+                        {phoneText}
+                      </p>
+                    )}
                   </div>
-                  <div className="text-left">
-                    <p className="text-sm font-bold text-base-text uppercase tracking-tight truncate max-w-[150px]">{getVisualName(person.nombre)}</p>
-                    <div className="flex items-center gap-2 text-[9px] font-bold text-base-text-muted uppercase tracking-wider">
-                      {person.waNumber && <span className="text-emerald-600">{person.waNumber} • </span>}
-                      <span>{person.count} {person.count === 1 ? 'Pago' : 'Pagos'}</span>
-                      <span>•</span>
-                      <span>Último: {formatAppDate(person.lastDate)}</span>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="text-right">
+                      <p className="text-base font-black text-brand leading-none">Bs {person.total}</p>
                     </div>
+                    {!person.waNumber && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onLinkNumber({
+                            id: person.customerId,
+                            name: person.nombre
+                          });
+                        }}
+                        className="p-2 bg-gray-100 rounded-full text-gray-400 hover:text-brand transition-colors active:scale-95 flex items-center justify-center"
+                        title="Vincular WhatsApp"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:translate-x-0.5 transition-transform" />
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className="text-base font-extrabold text-brand leading-none">Bs {person.total}</p>
-                    <ChevronRight className="w-4 h-4 text-gray-300 ml-auto mt-1 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                  {!person.waNumber && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onLinkNumber({
-                          id: person.customerId,
-                          name: person.nombre
-                        });
-                      }}
-                      className="p-2 bg-gray-100 rounded-full text-gray-400 hover:text-brand transition-colors"
-                      title="Vincular WhatsApp"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </motion.div>
