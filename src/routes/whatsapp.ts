@@ -43,7 +43,9 @@ export function createWhatsappRouter(_supabase: SupabaseClient) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`${BRIDGE_URL}/api/health`, { signal: controller.signal });
+      // El bridge expone /api/health como una página HTML. Para el estado
+      // programático debemos consultar /status, que devuelve JSON.
+      const response = await fetch(`${BRIDGE_URL}/status`, { signal: controller.signal });
       clearTimeout(timeout);
       const data = await response.json();
       res.status(response.ok ? 200 : 502).json(data);
@@ -55,7 +57,7 @@ export function createWhatsappRouter(_supabase: SupabaseClient) {
   router.get('/incoming-stats', async (_req: Request, res: Response) => {
     try {
       const { start, end } = boliviaTodayUtcRange();
-      const [{ count, error: countError }, { data: lastRows, error: lastError }] = await Promise.all([
+      const [{ count, error: countError }, { data: todayRows, error: todayError }, { data: lastRows, error: lastError }, { data: auditRows, error: auditError }] = await Promise.all([
         supabasePanel
           .from('panel_mensajes')
           .select('id', { count: 'exact', head: true })
@@ -63,17 +65,45 @@ export function createWhatsappRouter(_supabase: SupabaseClient) {
           .lt('created_at', end.toISOString()),
         supabasePanel
           .from('panel_mensajes')
+          .select('cliente_id, has_media')
+          .gte('created_at', start.toISOString())
+          .lt('created_at', end.toISOString())
+          .limit(5000),
+        supabasePanel
+          .from('panel_mensajes')
           .select('id, content, has_media, media_type, created_at')
           .order('created_at', { ascending: false })
           .limit(1),
+        supabasePanel
+          .from('panel_raw_webhooks')
+          .select('status, created_at')
+          .gte('created_at', start.toISOString())
+          .lt('created_at', end.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
       ]);
 
       if (countError) return res.status(500).json({ error: countError.message });
+      if (todayError) return res.status(500).json({ error: todayError.message });
       if (lastError) return res.status(500).json({ error: lastError.message });
 
       const last = lastRows?.[0] ?? null;
+      const today = todayRows ?? [];
+      const uniqueContactsToday = new Set(today.map((row: any) => row.cliente_id).filter(Boolean)).size;
+      const mediaCountToday = today.filter((row: any) => row.has_media === true).length;
+      const webhookStatusesToday = (auditRows ?? []).reduce((acc: Record<string, number>, row: any) => {
+        const status = String(row.status ?? 'unknown');
+        acc[status] = (acc[status] ?? 0) + 1;
+        return acc;
+      }, {});
       res.json({
         todayCount: count ?? 0,
+        uniqueContactsToday,
+        textCountToday: Math.max(0, (count ?? 0) - mediaCountToday),
+        mediaCountToday,
+        webhookAuditAvailable: !auditError,
+        webhookEventsToday: auditRows?.length ?? 0,
+        webhookStatusesToday,
         lastMessageAt: last?.created_at ?? null,
         lastMessageHasMedia: !!last?.has_media,
         lastMessageType: last?.media_type ?? null,

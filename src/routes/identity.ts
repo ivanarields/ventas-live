@@ -476,6 +476,17 @@ export function createIdentityRouter(
         .order('created_at', { ascending: false })
         .limit(30);
 
+      // Un comprobante pendiente puede pertenecer a un mensaje recibido fuera
+      // de la ventana del pedido anterior. Lo incluimos por su vínculo directo
+      // con pagos_venta_live para que nunca termine mezclado con las prendas.
+      const pagosPendientesQuery = supabasePanel
+        .from('pagos_venta_live')
+        .select('panel_mensaje_id, comprobante_media_url, comprobante_texto, estado, created_at')
+        .eq('cliente_id', cliente.id)
+        .in('estado', ['pendiente_whatsapp', 'revision_manual'])
+        .order('created_at', { ascending: false })
+        .limit(30);
+
       const evidenciasQuery = liveOrder?.id
         ? supabasePanel
           .from('evidencias_venta_live')
@@ -484,12 +495,44 @@ export function createIdentityRouter(
           .not('panel_mensaje_id', 'is', null)
         : Promise.resolve({ data: [] as any[] });
 
-      const [{ data: mensajes }, { data: evidencias }] = await Promise.all([
+      const [{ data: mensajes }, { data: evidencias }, { data: pagosPendientes }] = await Promise.all([
         mensajesQuery,
         evidenciasQuery,
+        pagosPendientesQuery,
       ]);
 
-      const photosRaw = (mensajes ?? []).filter(m =>
+      const pendingMessageIds = (pagosPendientes ?? [])
+        .map((p: any) => p.panel_mensaje_id)
+        .filter(Boolean);
+      const pendingMediaUrls = (pagosPendientes ?? [])
+        .map((p: any) => p.comprobante_media_url)
+        .filter(Boolean);
+
+      const [{ data: pendingMessagesById }, { data: pendingMessagesByMedia }] = await Promise.all([
+        pendingMessageIds.length > 0
+          ? supabasePanel
+            .from('panel_mensajes')
+            .select('id, media_url, media_type, direction, created_at, content')
+            .in('id', pendingMessageIds)
+          : Promise.resolve({ data: [] as any[] }),
+        pendingMediaUrls.length > 0
+          ? supabasePanel
+            .from('panel_mensajes')
+            .select('id, media_url, media_type, direction, created_at, content')
+            .in('media_url', pendingMediaUrls)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+
+      const uniqueMessages = new Map<string, any>();
+      for (const message of [
+        ...(mensajes ?? []),
+        ...(pendingMessagesById ?? []),
+        ...(pendingMessagesByMedia ?? []),
+      ]) {
+        if (message?.id) uniqueMessages.set(String(message.id), message);
+      }
+
+      const photosRaw = [...uniqueMessages.values()].filter(m =>
         m.media_url && (
           (m.media_type && m.media_type.startsWith('image/')) ||
           /\.(jpg|jpeg|png|webp)/i.test(m.media_url)
@@ -499,6 +542,13 @@ export function createIdentityRouter(
       const evidenceByMessageId = new Map<string, any>();
       for (const ev of evidencias ?? []) {
         if (ev.panel_mensaje_id) evidenceByMessageId.set(ev.panel_mensaje_id, ev);
+      }
+
+      const paymentByMessageId = new Map<string, any>();
+      const paymentByMediaUrl = new Map<string, any>();
+      for (const payment of pagosPendientes ?? []) {
+        if (payment.panel_mensaje_id) paymentByMessageId.set(String(payment.panel_mensaje_id), payment);
+        if (payment.comprobante_media_url) paymentByMediaUrl.set(String(payment.comprobante_media_url), payment);
       }
 
       // Marcar comprobantes de tienda: fotos que la tienda usó como prueba de pago
@@ -527,13 +577,15 @@ export function createIdentityRouter(
 
       const photos = photosRaw.map((photo: any) => {
         const ev = evidenceByMessageId.get(photo.id);
+        const payment = paymentByMessageId.get(String(photo.id))
+          ?? paymentByMediaUrl.get(String(photo.media_url));
         const meta = ev?.metadata && typeof ev.metadata === 'object' ? ev.metadata : {};
         const selectedByAi = meta.selected_by_ai === true || aiSelected.has(photo.id);
         const selectedFinal = typeof meta.selected_final === 'boolean' ? meta.selected_final : selectedByAi;
         return {
           ...photo,
-          tipo: storeProofMsgIds.has(photo.id) ? 'comprobante' : (ev?.tipo ?? null),
-          descripcion: ev?.descripcion ?? null,
+          tipo: storeProofMsgIds.has(photo.id) || payment ? 'comprobante' : (ev?.tipo ?? null),
+          descripcion: payment?.comprobante_texto ?? ev?.descripcion ?? null,
           selected_by_ai: selectedByAi,
           selected_final: selectedFinal,
           selection_source: meta.selection_source ?? (selectedByAi ? 'ai' : null),
