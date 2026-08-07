@@ -109,10 +109,34 @@ async function uploadMedia(base64, mimetype, phone, timestamp, messageId) {
   return null;
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function downloadMediaWithRetry(msg) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const candidate = attempt === 1 ? msg : await refreshMessage(msg);
+    try {
+      const media = await candidate?.downloadMedia?.();
+      if (media?.data && media?.mimetype) return media;
+      console.warn(`⚠️ Media vacía en intento ${attempt}/5`);
+    } catch (error) {
+      lastError = error;
+      console.warn(`⚠️ Error descargando media (${attempt}/5):`, error?.message || String(error));
+    }
+    if (attempt < 5) await wait(attempt * 1000);
+  }
+  if (lastError) console.error('❌ No se pudo descargar la media después de 5 intentos:', lastError?.message || String(lastError));
+  return null;
+}
+
 // ─── Cliente WhatsApp ───
 client = new Client({
   authStrategy: new LocalAuth({ dataPath: join(__dirname, '.wwebjs_auth') }),
   puppeteer: {
+    protocolTimeout: 120000,
+    timeout: 120000,
     headless: true,
     executablePath: IS_HEADLESS
       ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium')
@@ -187,10 +211,76 @@ client.on('change_state', (state) => {
   console.log(`🔄 Estado de WhatsApp: ${state}`);
 });
 
-client.on('message_create', async (msg) => {
+// WhatsApp Web.js puede emitir un mensaje entrante por `message` y, según
+// la versión/sesión, también por `message_create`. Procesamos ambos eventos
+// pero deduplicamos por el ID de WhatsApp para no guardar dos veces.
+const processingMessages = new Set();
+const recentlyProcessedMessages = new Set();
+
+function serializedMessageId(msg) {
+  const idData = msg?.id && typeof msg.id === 'object'
+    ? msg.id
+    : (msg?._data?.id && typeof msg._data.id === 'object' ? msg._data.id : {});
+  const isComplete = (candidate) => (
+    typeof candidate === 'string'
+    && candidate.trim()
+    && (candidate.includes('_') || candidate.includes('@'))
+  );
+  const candidates = [
+    msg?.id?._serialized,
+    msg?.id?.serialized,
+    typeof msg?.id === 'string' ? msg.id : null,
+    msg?._data?.id?._serialized,
+    msg?._data?.id?.serialized,
+  ];
+  const value = candidates.find(isComplete);
+  if (value) return value.trim();
+
+  const idPart = idData?.id;
+  const remote = idData?.remote || msg?.from || msg?._data?.from;
+  if (typeof idPart === 'string' && idPart.trim() && typeof remote === 'string' && remote.trim()) {
+    const fromMe = idData?.fromMe ?? msg?.fromMe ?? false;
+    return `${fromMe ? 'true' : 'false'}_${remote.trim()}_${idPart.trim()}`;
+  }
+
+  return null;
+}
+
+async function refreshMessage(msg) {
+  const messageId = serializedMessageId(msg);
+  if (!messageId || !client?.getMessageById) return msg;
+  try {
+    const fresh = await client.getMessageById(messageId);
+    if (fresh) return fresh;
+  } catch (error) {
+    console.warn('⚠️ No se pudo refrescar el mensaje antes de descargar media:', error?.message || String(error));
+  }
+  return msg;
+}
+
+function messageKey(msg) {
+  return serializedMessageId(msg) || [
+    msg?.from || '',
+    msg?.to || '',
+    msg?.timestamp || '',
+    msg?.fromMe ? 'out' : 'in',
+    msg?.hasMedia ? 'media' : String(msg?.body || ''),
+  ].join('|');
+}
+
+async function forwardMessage(msg, eventName) {
+  const key = messageKey(msg);
+  const messageId = serializedMessageId(msg);
+  if (!key || processingMessages.has(key) || recentlyProcessedMessages.has(key)) {
+    console.log(`↪️ Mensaje duplicado omitido (${eventName})`);
+    return;
+  }
+  processingMessages.add(key);
+
   try {
     let mediaUrl = null;
     let mediaMimetype = null;
+    let mediaDownloadFailed = false;
 
     // ── Obtener número REAL (WhatsApp moderno usa LID interno, no el número) ──
     let realPhone = null;
@@ -212,40 +302,56 @@ client.on('message_create', async (msg) => {
     }
 
     if (msg.hasMedia) {
-      console.log('📥 Descargando media...');
-      const media = await msg.downloadMedia();
+      console.log(`📥 Descargando media... id=${messageId || 'sin-id'}`);
+      const media = await downloadMediaWithRetry(msg);
       if (media && SUPABASE_URL && SUPABASE_KEY) {
         mediaMimetype = media.mimetype;
         mediaUrl = await uploadMedia(
           media.data, media.mimetype,
           fromPhone, msg.timestamp,
-          msg.id?._serialized
+          messageId
         );
       }
+      mediaDownloadFailed = !media || !mediaUrl;
     }
 
     const payload = {
-      id: msg.id._serialized,
+      id: messageId,
       from: msg.from,          // ID interno de WhatsApp (para referencia)
       fromPhone,               // ← número real limpio (ej: 59178456789)
       fromMe: msg.fromMe,      // true si el operador envió este mensaje
       to: msg.to,
       body: msg.body,
       hasMedia: msg.hasMedia,
-      mediaMimetype, mediaUrl,
+      mediaMimetype: mediaMimetype || msg._data?.mimetype || null,
+      mediaUrl,
+      mediaDownloadFailed,
       timestamp: msg.timestamp,
     };
 
-    console.log(`🚀 Enviando [${msg.hasMedia ? 'Media' : 'Texto'}] de ${fromPhone}...`);
+    console.log(`🚀 Enviando [${msg.hasMedia ? 'Media' : 'Texto'}] de ${fromPhone} (${eventName})...`);
     const webhookHeaders = SUPABASE_KEY
       ? { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
       : {};
     const r = await axios.post(WEBHOOK_URL, payload, { timeout: 15000, headers: webhookHeaders });
     if (r.status === 200) console.log('✔️  Mensaje guardado en Supabase');
+    recentlyProcessedMessages.add(key);
+    const timer = setTimeout(() => recentlyProcessedMessages.delete(key), 60_000);
+    timer.unref?.();
 
   } catch (e) {
     console.error('❌ Error:', e.message);
+  } finally {
+    processingMessages.delete(key);
   }
-});
+}
+
+client.on('message', (msg) => forwardMessage(msg, 'message').catch((error) => {
+  console.error('❌ Error en evento message:', error.message);
+}));
+
+client.on('message_create', (msg) => forwardMessage(msg, 'message_create').catch((error) => {
+  console.error('❌ Error en evento message_create:', error.message);
+}));
 
 client.initialize();
