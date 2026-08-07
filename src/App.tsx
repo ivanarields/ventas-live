@@ -2195,7 +2195,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -6 }}
       transition={{ duration: 0.12 }}
-      className="space-y-4 pb-6 max-w-lg mx-auto px-0 font-sans"
+      className="space-y-4 pb-6 max-w-lg mx-auto -mx-4 px-3 font-sans"
     >
       {/* Header */}
       <div className="flex items-center justify-between">
