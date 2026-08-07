@@ -586,6 +586,12 @@ async function deletePersonFromRoot(input: {
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
+const isServerlessRuntime = Boolean(
+  process.env.VERCEL ||
+  process.env.VERCEL_ENV ||
+  process.env.NOW_REGION ||
+  process.env.AWS_LAMBDA_FUNCTION_VERSION,
+);
 
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -4432,37 +4438,39 @@ Responde solo JSON:
 
   // Vercel ejecuta este archivo como función serverless: nunca debe arrancar
   // el servidor de desarrollo de Vite aunque NODE_ENV no venga definido.
-  if (!process.env.VERCEL && process.env.NODE_ENV !== "production") {
-    try {
-      const viteModule = await import("vite");
-      const vite = await viteModule.createServer({
-        server: { middlewareMode: true },
-        appType: "custom",
-      });
-      app.use(vite.middlewares);
-      const renderViteHtml = async (req: any, res: any, next: any, fileName: string) => {
-        try {
-          const { readFileSync } = await import("fs");
-          const html = readFileSync(path.join(process.cwd(), fileName), "utf-8");
-          const transformed = await vite.transformIndexHtml(req.url, html);
-          res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
-        } catch (e) { next(e); }
-      };
-      app.get("/tienda/terminos", (_req, res) => {
-        res.sendFile(path.join(process.cwd(), "public/terminos.html"));
-      });
-      app.get("/tienda/privacidad", (_req, res) => {
-        res.sendFile(path.join(process.cwd(), "public/privacidad.html"));
-      });
-      app.get(["/tienda", "/tienda/*"], (req, res, next) => {
-        renderViteHtml(req, res, next, "tienda.html");
-      });
-      app.get("*", async (req, res, next) => {
-        renderViteHtml(req, res, next, "index.html");
-      });
-    } catch (e) {
-      console.log("Vite no disponible en este entorno", e);
-    }
+  if (!isServerlessRuntime && process.env.NODE_ENV !== "production") {
+    void (async () => {
+      try {
+        const viteModule = await import("vite");
+        const vite = await viteModule.createServer({
+          server: { middlewareMode: true },
+          appType: "custom",
+        });
+        app.use(vite.middlewares);
+        const renderViteHtml = async (req: any, res: any, next: any, fileName: string) => {
+          try {
+            const { readFileSync } = await import("fs");
+            const html = readFileSync(path.join(process.cwd(), fileName), "utf-8");
+            const transformed = await vite.transformIndexHtml(req.url, html);
+            res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
+          } catch (e) { next(e); }
+        };
+        app.get("/tienda/terminos", (_req, res) => {
+          res.sendFile(path.join(process.cwd(), "public/terminos.html"));
+        });
+        app.get("/tienda/privacidad", (_req, res) => {
+          res.sendFile(path.join(process.cwd(), "public/privacidad.html"));
+        });
+        app.get(["/tienda", "/tienda/*"], (req, res, next) => {
+          renderViteHtml(req, res, next, "tienda.html");
+        });
+        app.get("*", async (req, res, next) => {
+          renderViteHtml(req, res, next, "index.html");
+        });
+      } catch (e) {
+        console.log("Vite no disponible en este entorno", e);
+      }
+    })();
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -4480,7 +4488,7 @@ Responde solo JSON:
     });
   }
 
-  if (!process.env.VERCEL) {
+  if (!isServerlessRuntime) {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT}`);
       console.log(`Endpoint for mobile payments: http://localhost:${PORT}/api/pagos`);
