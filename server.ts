@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { supabaseServer } from "./src/lib/supabaseServer.js";
