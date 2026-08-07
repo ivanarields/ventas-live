@@ -2195,7 +2195,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -6 }}
       transition={{ duration: 0.12 }}
-      className="space-y-4 pb-6 max-w-lg mx-auto -mx-4 px-3 font-sans"
+      className="space-y-4 pb-6 max-w-lg md:mx-auto -mx-4 px-4 font-sans"
     >
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -2263,7 +2263,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           const occupants = byLabel(code);
           const isCollapsed = collapsedLabels[code] === true;
           return (
-            <div key={code} className="border border-blue-100/70 rounded-3xl bg-[#F5F9FF]/20 px-1 py-3 space-y-3">
+            <div key={code} className="border border-blue-100/70 rounded-3xl bg-[#F5F9FF]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
               <div 
                 onClick={() => toggleCollapse(code)}
                 className="flex justify-between items-center px-1 cursor-pointer select-none"
@@ -2280,12 +2280,12 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               </div>
 
               {!isCollapsed && (
-                <div className="grid grid-cols-2 gap-1">
+                <div className="grid grid-cols-2 gap-2">
                   {occupants.map((p: any, i: number) => (
                     <button
                       key={p.id ?? i}
                       onClick={() => setSelectedPedido(p)}
-                      className="bg-white border border-gray-100 rounded-2xl px-1.5 py-2 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
+                      className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
                     >
                       <p className="font-black text-[12.5px] text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis block">
                         {formatDisplayName(p.customerName)}
@@ -2306,7 +2306,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           const occupants = byLabel(code);
           const isCollapsed = collapsedLabels[code] === true;
           return (
-            <div key={code} className="border border-rose-100/70 rounded-3xl bg-[#FFF5F7]/20 px-1 py-3 space-y-3">
+            <div key={code} className="border border-rose-100/70 rounded-3xl bg-[#FFF5F7]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
               <div 
                 onClick={() => toggleCollapse(code)}
                 className="flex justify-between items-center px-1 cursor-pointer select-none"
@@ -2323,12 +2323,12 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               </div>
 
               {!isCollapsed && (
-                <div className="grid grid-cols-2 gap-1">
+                <div className="grid grid-cols-2 gap-2">
                   {occupants.map((p: any, i: number) => (
                     <button
                       key={p.id ?? i}
                       onClick={() => setSelectedPedido(p)}
-                      className="bg-white border border-gray-100 rounded-2xl px-1.5 py-2 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
+                      className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
                     >
                       <p className="font-black text-[12.5px] text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis block">
                         {formatDisplayName(p.customerName)}
