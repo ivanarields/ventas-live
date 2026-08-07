@@ -202,7 +202,7 @@ export function OrderChatPhotoSelector({
   if (!phone) {
     return (
       <div className="space-y-2">
-        <Header total={0} selected={0} ai={0} />
+        {!showComprobantes && <Header total={0} selected={0} ai={0} />}
         <div className="flex h-16 items-center justify-center rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50">
           <span className="text-[11px] font-bold text-gray-400">Sin número de WhatsApp vinculado</span>
         </div>
@@ -213,7 +213,7 @@ export function OrderChatPhotoSelector({
   if (loading) {
     return (
       <div className="space-y-2">
-        <Header total={0} selected={0} ai={0} />
+        {!showComprobantes && <Header total={0} selected={0} ai={0} />}
         <div className="flex h-16 items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-100 bg-gray-50">
           <Loader2 size={14} className="animate-spin text-gray-400" />
           <span className="text-[11px] text-gray-400">Buscando fotos y selección IA...</span>
@@ -225,7 +225,7 @@ export function OrderChatPhotoSelector({
   if (prendas.length === 0 && (!showComprobantes || pendingComprobantes.length === 0)) {
     return (
       <div className="space-y-2">
-        <Header total={0} selected={0} ai={0} />
+        {!showComprobantes && <Header total={0} selected={0} ai={0} />}
         <div className="flex h-16 items-center justify-center rounded-2xl border-2 border-dashed border-gray-100 bg-gray-50">
           <span className="text-[11px] text-gray-400">No se encontraron fotos en este período</span>
         </div>
@@ -235,8 +235,8 @@ export function OrderChatPhotoSelector({
 
   return (
     <div className="space-y-2">
-      <Header total={prendas.length} selected={selectedCount} ai={aiCount} />
-      {prendas.length > 0 && (
+      {!showComprobantes && <Header total={prendas.length} selected={selectedCount} ai={aiCount} />}
+      {!showComprobantes && prendas.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
           {prendas.map((photo) => {
           const selected = photo.selected === true;
@@ -283,7 +283,7 @@ export function OrderChatPhotoSelector({
       {showComprobantes && pendingComprobantes.length > 0 && (
         <div className="space-y-2">
           <p className="text-[10px] font-extrabold uppercase tracking-widest text-violet-600">
-            COMPROBANTES PARA VERIFICAR ({pendingComprobantes.length})
+            COMPROBANTE PARA VERIFICAR ({pendingComprobantes.length})
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             {pendingComprobantes.map((photo) => (
