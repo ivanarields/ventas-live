@@ -75,8 +75,9 @@ async function handleSimpleLogin(req: any, res: any) {
 }
 
 export default async function handler(req: any, res: any) {
-  const pathname = String(req.url || '').split('?')[0];
-  if (req.method === 'POST' && pathname.endsWith('/api/auth/simple-login')) {
+  const body = readBody(req);
+  const isSimpleLoginPayload = body && typeof body === 'object' && ('username' in body) && ('pin' in body);
+  if (req.method === 'POST' && isSimpleLoginPayload) {
     return handleSimpleLogin(req, res);
   }
 
