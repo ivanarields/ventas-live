@@ -4431,7 +4431,9 @@ Responde solo JSON:
     }
   });
 
-  if (process.env.NODE_ENV !== "production") {
+  // Vercel ejecuta este archivo como función serverless: nunca debe arrancar
+  // el servidor de desarrollo de Vite aunque NODE_ENV no venga definido.
+  if (!process.env.VERCEL && process.env.NODE_ENV !== "production") {
     try {
       const viteModule = await import("vite");
       const vite = await viteModule.createServer({
