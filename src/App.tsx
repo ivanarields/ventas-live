@@ -5993,20 +5993,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       }));
   }, [person.payments, selectedPedido]);
 
-  const showComprobanteSection = useMemo(() => {
-    // Mostrar la sección si hay CUALQUIER pago panel pendiente para esta clienta,
-    // sin filtrar por fecha del pedido (los comprobantes pueden estar en distintas fechas).
-    return (person.payments || []).some((p: any) =>
-      p.livePaymentId && (
-        p.verificationOrigin === 'whatsapp_pending' ||
-        p.verificationOrigin === 'macrodroid_only' ||
-        p.verificationOrigin === 'other' ||
-        p.livePaymentStatus === 'pendiente_whatsapp' ||
-        p.livePaymentStatus === 'revision_manual' ||
-        p.isLivePending === true
-      )
-    );
-  }, [person.payments]);
+  // En este flujo el detalle solo muestra comprobantes de WhatsApp.
+  // No depende de que el análisis del pago haya terminado para renderizar la imagen.
+  const showComprobanteSection = true;
 
   const stats = useMemo(() => {
     const payments = (person.payments || [])
@@ -6182,7 +6171,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       phone: person.waNumber,
       orderDate: pedido.date,
       mainPedidoId: pedido.id,
-      days: 1,
+      days: 4,
+      receiptOnly: true,
     });
   };
 
