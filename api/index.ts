@@ -4,7 +4,7 @@ let appPromise: Promise<any> | null = null;
 
 const getApp = async () => {
   if (!appPromise) {
-    appPromise = import('./server-bundle.mjs').then((module) => module.default);
+    appPromise = import('../server-bundle.mjs').then((module) => module.default);
   }
   return appPromise;
 };
