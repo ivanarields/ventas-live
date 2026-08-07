@@ -2,11 +2,6 @@
   "name": "ventas-live",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/index.ts": {
-      "includeFiles": ["server-bundle.mjs"]
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
