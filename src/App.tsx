@@ -1918,23 +1918,39 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
   const ingresosHoy = pagosHoy.reduce((acc: number, p: any) => acc + (cleanAmount(p.pago) || 0), 0);
   const totalIngresos = pagosContables.reduce((acc: number, p: any) => acc + (cleanAmount(p.pago) || 0), 0);
 
-  // Métricas de pedidos
-  const pedidosProcesar = (pedidos ?? []).filter((p: any) => (p.status ?? '').toLowerCase() === 'procesar').length;
-  const pedidosListos   = (pedidos ?? []).filter((p: any) => (p.status ?? '').toLowerCase() === 'listo').length;
-  const pedidosTotal    = (pedidos ?? []).length;
+  // Pagos sin verificar (Pendientes de WhatsApp o revisión manual)
+  const pagosSinProcesar = (payments ?? []).filter((p: any) => {
+    if (!p) return false;
+    if (p.is_live_pending) return true;
+    const origin = String(p.verification_origin ?? p.verificationOrigin ?? '').toLowerCase();
+    if (origin === 'whatsapp_pending') return true;
+    const liveStatus = String(p.live_payment_status ?? p.livePaymentStatus ?? '').toLowerCase();
+    return liveStatus === 'pendiente_whatsapp' || liveStatus === 'revision_manual';
+  }).length;
+
+  // Pedidos listos en casillero
+  const pedidosListos = (pedidos ?? []).filter((p: any) => {
+    const s = (p.status ?? '').toLowerCase();
+    return s === 'listo' || s === 'preparado' || s === 'ready';
+  }).length;
+
+  // Pedidos entregados hoy
+  const pedidosEntregadosHoy = (pedidos ?? []).filter((p: any) => {
+    const s = (p.status ?? '').toLowerCase();
+    if (s !== 'entregado') return false;
+    const updatedDate = new Date(p.updatedAt || p.updated_at || p.date || p.fecha);
+    return updatedDate.toDateString() === todayStr;
+  }).length;
 
   // Próximo live
   const nextLive = (lives ?? []).find((l: any) => l.status === 'scheduled');
 
-  // Ingresos del mes desde transacciones
+  // Ingresos del mes
   const thisMonth = today.getMonth();
   const thisYear  = today.getFullYear();
   const ingresosMes = (transactions ?? [])
     .filter((t: any) => t.type === 'income' && new Date(t.fecha || t.date).getMonth() === thisMonth && new Date(t.fecha || t.date).getFullYear() === thisYear)
     .reduce((acc: number, t: any) => acc + (t.amount || 0), 0);
-
-  // Pagos recientes
-  const pagosRecientes = [...(payments ?? [])].sort((a: any, b: any) => new Date(b.date || b.fecha).getTime() - new Date(a.date || a.fecha).getTime()).slice(0, 5);
 
   return (
     <motion.div
@@ -1942,148 +1958,113 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className="space-y-5 -mx-4 -mt-4 px-4 pt-4 pb-4"
-      style={{ background: 'linear-gradient(180deg, #fff0f5 0%, #f8f9fa 140px)' }}
+      className="space-y-4 -mx-4 -mt-4 px-4 pt-4 pb-4 font-sans"
+      style={{ background: 'linear-gradient(180deg, #fff0f5 0%, #f8f9fa 120px)' }}
     >
-      {/* PWA Banner */}
+      {/* Banner PWA compacto */}
       {isInstallable && (
-        <div className="flex items-center justify-between bg-white/80 backdrop-blur rounded-2xl px-4 py-3 border border-brand/10 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-brand flex items-center justify-center">
-              <Rocket className="w-4 h-4 text-white" />
+        <div className="flex items-center justify-between bg-white/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-brand/10">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-brand flex items-center justify-center">
+              <Rocket className="w-3.5 h-3.5 text-white" />
             </div>
             <div>
-              <p className="text-[13px] font-bold text-gray-900">Instalar app</p>
-              <p className="text-[10px] text-gray-400">Sin barra de navegador</p>
+              <p className="text-[12px] font-bold text-gray-900 leading-tight">Instalar app</p>
+              <p className="text-[9px] text-gray-400">Sin barra del navegador</p>
             </div>
           </div>
-          <button onClick={onInstall} className="btn-pill-primary py-1.5 px-3 text-xs">Instalar</button>
+          <button onClick={onInstall} className="btn-pill-primary py-1 px-2.5 text-[10px]">Instalar</button>
         </div>
       )}
 
-      {/* Hero card: Ingresos hoy */}
-      <div className="rounded-[24px] p-5 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #ff2d78 0%, #ff6fa3 100%)', boxShadow: '0 16px 40px rgba(255,45,120,0.28)' }}>
-        <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full bg-white/10" />
-        <div className="absolute -right-2 bottom-0 w-16 h-16 rounded-full bg-white/5" />
-        <p className="text-[11px] font-black uppercase tracking-widest opacity-80 mb-1">Ingresos hoy</p>
-        <h2 className="text-4xl font-black leading-none mb-3">Bs {ingresosHoy.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</h2>
-        <div className="flex items-center gap-4">
+      {/* Tarjeta de Ingresos compacta */}
+      <div className="rounded-[20px] px-4 py-3.5 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #ff2d78 0%, #ff6fa3 100%)' }}>
+        <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-0.5">Ingresos hoy</p>
+        <h2 className="text-2xl font-black leading-none mb-2.5">Bs {ingresosHoy.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</h2>
+        
+        <div className="grid grid-cols-3 gap-2 border-t border-white/10 pt-2">
           <div>
-            <p className="text-[10px] opacity-70 font-bold uppercase tracking-wide">Pagos hoy</p>
-            <p className="text-xl font-black">{pagosHoy.length}</p>
+            <p className="text-[9px] opacity-70 font-bold uppercase tracking-wide">Pagos hoy</p>
+            <p className="text-base font-black leading-none mt-0.5">{pagosHoy.length}</p>
           </div>
-          <div className="w-px h-8 bg-white/20" />
           <div>
-            <p className="text-[10px] opacity-70 font-bold uppercase tracking-wide">Total acumulado</p>
-            <p className="text-xl font-black">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
+            <p className="text-[9px] opacity-70 font-bold uppercase tracking-wide">Acumulado</p>
+            <p className="text-base font-black leading-none mt-0.5">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
           </div>
-          <div className="w-px h-8 bg-white/20" />
           <div>
-            <p className="text-[10px] opacity-70 font-bold uppercase tracking-wide">Mes</p>
-            <p className="text-xl font-black">Bs {ingresosMes.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
+            <p className="text-[9px] opacity-70 font-bold uppercase tracking-wide">Mes actual</p>
+            <p className="text-base font-black leading-none mt-0.5">Bs {ingresosMes.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
           </div>
         </div>
       </div>
 
-      {/* Stats grid: pedidos */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white rounded-2xl p-3.5 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-          <p className="text-2xl font-black text-amber-500">{pedidosProcesar}</p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Procesar</p>
-        </div>
-        <div className="bg-white rounded-2xl p-3.5 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-          <p className="text-2xl font-black text-blue-500">{pedidosListos}</p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Listos</p>
-        </div>
-        <div className="bg-white rounded-2xl p-3.5 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-          <p className="text-2xl font-black text-gray-700">{pedidosTotal}</p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Total</p>
-        </div>
-      </div>
-
-      {/* Acceso rápido */}
-      <div className={`grid ${sectionVisibility?.tienda ? 'grid-cols-2' : 'grid-cols-3'} gap-3`}>
-        <button
-          onClick={() => onNavigate?.('entrega')}
-          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
-          style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
-        >
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
-            <Package className="w-4 h-4" style={{ color: '#ff2d78' }} />
-          </div>
-          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Etiquetas</p>
-          <p className="text-[9px] text-gray-400">{pedidosListos} listo{pedidosListos !== 1 ? 's' : ''}</p>
-        </button>
-        <button
+      {/* Resumen del Dashboard Funcional */}
+      <div className="grid grid-cols-3 gap-2">
+        <button 
           onClick={() => onNavigate?.('payments')}
-          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
-          style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center"
         >
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
-            <Wallet className="w-4 h-4" style={{ color: '#ff2d78' }} />
-          </div>
-          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Pagos</p>
-          <p className="text-[9px] text-gray-400">Historial</p>
+          <span className="text-xl font-black text-amber-500">{pagosSinProcesar}</span>
+          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Pagos sin<br/>procesar</span>
         </button>
-        {!sectionVisibility?.tienda && (
-          <button
-            onClick={() => onNavigate?.('tienda')}
-            className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all text-center"
-            style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
-          >
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
-              <Store className="w-4 h-4" style={{ color: '#ff2d78' }} />
-            </div>
-            <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide leading-tight">Panel Tienda</p>
-            <p className="text-[9px] text-gray-400">Pedidos web</p>
-          </button>
-        )}
+
+        <button 
+          onClick={() => onNavigate?.('entrega')}
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center"
+        >
+          <span className="text-xl font-black text-[#007AFF]">{pedidosListos}</span>
+          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Listos en<br/>casillero</span>
+        </button>
+
+        <button 
+          onClick={() => onNavigate?.('payments')}
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center"
+        >
+          <span className="text-xl font-black text-emerald-600">{pedidosEntregadosHoy}</span>
+          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Entregados<br/>hoy</span>
+        </button>
       </div>
 
       {/* Próximo live */}
       {nextLive && (
-        <div className="bg-white rounded-2xl p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#fff0f5' }}>
-            <Video className="w-5 h-5" style={{ color: '#ff2d78' }} />
+        <div className="bg-white rounded-2xl p-3 flex items-center gap-3 border border-gray-100">
+          <div className="w-8.5 h-8.5 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#fff0f5' }}>
+            <Video className="w-4 h-4" style={{ color: '#ff2d78' }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#ff2d78' }}>Próximo Live</p>
-            <p className="font-black text-[14px] text-gray-900 truncate">{nextLive.title}</p>
-            <p className="text-[11px] text-gray-400 font-medium">{formatAppDate(nextLive.scheduledAt)}</p>
+            <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: '#ff2d78' }}>Próximo Live</p>
+            <p className="font-black text-xs text-gray-900 truncate leading-tight mt-0.5">{nextLive.title}</p>
+            <p className="text-[10px] text-gray-400 font-medium leading-none mt-0.5">{formatAppDate(nextLive.scheduledAt)}</p>
           </div>
-          <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#ff2d78' }} />
+          <div className="w-1.5 h-1.5 rounded-full animate-pulse bg-[#ff2d78]" />
         </div>
       )}
 
-      {/* Pagos recientes */}
-      <div className="space-y-2.5">
-        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">Pagos recientes</p>
-        {pagosRecientes.length === 0 ? (
-          <div className="bg-white rounded-2xl p-6 text-center" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-            <p className="text-[13px] font-bold text-gray-300">Sin pagos registrados</p>
+      {/* Accesos rápidos */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => onNavigate?.('entrega')}
+          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100"
+        >
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#fff0f5' }}>
+            <Package className="w-3.5 h-3.5" style={{ color: '#ff2d78' }} />
           </div>
-        ) : (
-          pagosRecientes.map((p: any, i: number) => (
-            <div key={p.id ?? i} className="bg-white rounded-2xl px-4 py-3 flex items-center gap-3" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 font-black text-[13px] text-white" style={{ background: 'linear-gradient(135deg,#ff2d78,#ff6fa3)' }}>
-                {(p.nombre ?? '?')[0]}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-black text-[13px] text-gray-900 truncate">{p.nombre}</p>
-                <p className="text-[10px] text-gray-400 font-medium">{new Date(p.date || p.fecha).toLocaleDateString('es-BO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
-              </div>
-              <p className="font-black text-[15px]" style={{ color: '#ff2d78' }}>Bs {cleanAmount(p.pago)}</p>
-            </div>
-          ))
-        )}
+          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide mt-1 leading-none">Ver Casilleros</p>
+        </button>
+        <button
+          onClick={() => onNavigate?.('payments')}
+          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100"
+        >
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#fff0f5' }}>
+            <Wallet className="w-3.5 h-3.5" style={{ color: '#ff2d78' }} />
+          </div>
+          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide mt-1 leading-none">Ver Pagos</p>
+        </button>
       </div>
     </motion.div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ENTREGA VIEW — visualización del sistema de casilleros
-// ─────────────────────────────────────────────────────────────────────────────
 function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedidos: any[]; customers: any[]; onSelectPerson: (id: string) => void; onRefresh: () => void }) {
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
@@ -2102,7 +2083,16 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
     const q = searchQuery.toLowerCase().trim();
     const nameMatch = (p.customerName ?? '').toLowerCase().includes(q);
     const labelMatch = (p.label ?? '').toLowerCase().includes(q);
-    return nameMatch || labelMatch;
+
+    const phone = getOccupantPhone(p) || '';
+    const cleanQuery = q.replace(/\D/g, '');
+    const cleanPhone = phone.replace(/\D/g, '');
+    const phoneMatch = cleanQuery && cleanPhone && (
+      cleanPhone.includes(cleanQuery) || 
+      (cleanPhone.startsWith('591') && cleanPhone.slice(3).includes(cleanQuery))
+    );
+
+    return nameMatch || labelMatch || phoneMatch;
   });
 
   const NUMERIC = Array.from({ length: 100 }, (_, i) => String(i + 1));
