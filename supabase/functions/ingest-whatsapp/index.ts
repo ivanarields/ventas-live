@@ -1,5 +1,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
+
 const SUPABASE_URL = Deno.env.get('PANEL_SUPABASE_URL') || Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('PANEL_SUPABASE_SERVICE_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // DB principal (ChehiAppAbril) — para depositar identity_evidence
@@ -8,6 +10,7 @@ const MAIN_KEY = Deno.env.get('MAIN_SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get(
 const INGEST_USER_ID = Deno.env.get('INGEST_USER_ID') || '';;
 const SERVER_URL = Deno.env.get('SERVER_URL') || Deno.env.get('APP_SERVER_URL') || '';
 const WHATSAPP_LIVE_ONLY = (Deno.env.get('WHATSAPP_LIVE_ONLY') || 'true').toLowerCase() !== 'false';
+const RECEIPT_ANALYSIS_MAX_ATTEMPTS = 3;
 
 function normalizePhone(raw: string): string | null {
   if (!raw) return null;
@@ -19,8 +22,8 @@ function normalizePhone(raw: string): string | null {
 async function hasActiveProcessingLive(): Promise<boolean> {
   if (!WHATSAPP_LIVE_ONLY) return true;
   if (!MAIN_URL || !MAIN_KEY) {
-    console.warn('[whatsapp-live-only] Configuracion incompleta; se permite guardar para evitar perdida accidental.');
-    return true;
+    console.error('[whatsapp-live-only] Configuracion incompleta; se bloquea la ingesta para respetar el interruptor Live.');
+    return false;
   }
 
   const mainDb = createClient(MAIN_URL, MAIN_KEY);
@@ -40,12 +43,43 @@ async function hasActiveProcessingLive(): Promise<boolean> {
 
   if (error) {
     console.error('[whatsapp-live-only] Error consultando Live activo:', error);
-    return true; // ante error, permitir para no perder mensajes
+    return false;
   }
 
   const activo = !!data;
   console.log(`[whatsapp-live-only] Live activo: ${activo} (session id: ${data?.id ?? 'ninguna'})`);
   return activo;
+}
+
+async function requestReceiptAnalysis(url: string, payload: Record<string, unknown>, userId: string) {
+  let lastError = 'Error desconocido';
+
+  for (let attempt = 1; attempt <= RECEIPT_ANALYSIS_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (response.ok) return result;
+
+      lastError = `HTTP ${response.status}: ${JSON.stringify(result).slice(0, 300)}`;
+      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === RECEIPT_ANALYSIS_MAX_ATTEMPTS) break;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      if (attempt === RECEIPT_ANALYSIS_MAX_ATTEMPTS) break;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 400 * attempt));
+  }
+
+  throw new Error(lastError);
 }
 
 Deno.serve(async (req) => {
@@ -200,34 +234,6 @@ async function processMessage(req: Request) {
       console.log(`✅ Mensaje guardado correctamente.`);
     }
 
-    if (!mensajeError && SERVER_URL && direction === 'in' && ((content && /#\d+/.test(content)) || hasUsableMedia)) {
-      EdgeRuntime.waitUntil((async () => {
-        try {
-          const response = await fetch(`${SERVER_URL.replace(/\/$/, '')}/api/store/ingest-wa`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fromWa: clientPhone,
-              messageText: content,
-              hasProof: hasUsableMedia,
-              mediaUrl,
-              mediaType: mediaMimetype,
-              panelMessageId: mensajeData?.id ?? messageId,
-              messageCreatedAt: mensajeData?.created_at ?? new Date().toISOString(),
-            }),
-          });
-          if (!response.ok) {
-            const detail = await response.text().catch(() => '');
-            console.error(`[store-wa-auto] Error procesando tienda: ${response.status} ${detail}`);
-          } else {
-            console.log('[store-wa-auto] Mensaje de tienda procesado');
-          }
-        } catch (error) {
-          console.error('[store-wa-auto] No se pudo avisar al servidor:', error);
-        }
-      })());
-    }
-
     // ── ANÁLISIS AUTOMÁTICO DE COMPROBANTES LIVE ──────────────────────────
     // Si llega imagen entrante y hay un Live activo, disparar análisis IA al instante.
     // El backend valida si hay live activo y crea el pago si la imagen es comprobante real.
@@ -236,13 +242,9 @@ async function processMessage(req: Request) {
       if (looksLikeImage) {
         EdgeRuntime.waitUntil((async () => {
           try {
-            const response = await fetch(`${SERVER_URL.replace(/\/$/, '')}/api/live-sales/analyze-receipt`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-user-id': INGEST_USER_ID,
-              },
-              body: JSON.stringify({
+            const result = await requestReceiptAnalysis(
+              `${SERVER_URL.replace(/\/$/, '')}/api/live-sales/analyze-receipt`,
+              {
                 clienteId: clienteData.id,
                 phone: clientPhone,
                 panelMensajeId: mensajeData.id,
@@ -250,17 +252,12 @@ async function processMessage(req: Request) {
                 mediaType: mediaMimetype,
                 messageContent: content,
                 messageCreatedAt: mensajeData.created_at ?? new Date().toISOString(),
-              }),
-            });
-            if (!response.ok) {
-              const detail = await response.text().catch(() => '');
-              console.error(`[live-receipt-auto] Error: ${response.status} ${detail}`);
-            } else {
-              const result = await response.json().catch(() => ({}));
-              console.log(`[live-receipt-auto] OK: ${JSON.stringify(result).slice(0, 200)}`);
-            }
+              },
+              INGEST_USER_ID,
+            );
+            console.log(`[live-receipt-auto] OK: ${JSON.stringify(result).slice(0, 300)}`);
           } catch (error) {
-            console.error('[live-receipt-auto] No se pudo analizar:', error);
+            console.error(`[live-receipt-auto] Falló después de ${RECEIPT_ANALYSIS_MAX_ATTEMPTS} intentos:`, error);
           }
         })());
       }
