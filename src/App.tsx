@@ -2798,6 +2798,7 @@ function PaymentsView({
     }
   };
 
+  /* Legacy batch summary flow intentionally disabled: Live only gates ingestion.
   const processClosedLiveSession = async (session: any) => {
     return;
     if (procesandoLive) return;
@@ -2923,6 +2924,7 @@ function PaymentsView({
     }
   };
 
+  */
   const handleLiveButton = async () => {
     if (procesandoLive) return;
     const state = liveSessionState ?? await refreshLiveSessionState();
