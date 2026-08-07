@@ -2109,6 +2109,23 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
   const ALPHA   = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
 
   const byLabel = (code: string) => filteredActivos.filter(p => p.label === code);
+  const formatDisplayName = (name: string) => {
+    if (!name) return '';
+    const formatted = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    const words = formatted.trim().split(/\s+/);
+    if (words.length <= 3) return formatted;
+    return words.slice(0, 3).join(' ') + '...';
+  };
+
+  const formatDisplayPhone = (phone: string) => {
+    if (!phone || phone === 'Sin número') return 'Sin número';
+    let clean = phone.trim().replace(/\D/g, '');
+    if (clean.startsWith('591') && clean.length > 8) {
+      clean = clean.slice(3);
+    }
+    return clean;
+  };
+
 
   const getOccupantPhone = (occupant: any) => {
     const c = customers.find(cust => 
@@ -2254,7 +2271,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                 <div className="flex items-center gap-1.5">
                   {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-[#007AFF]" /> : <ChevronDown className="w-3.5 h-3.5 text-[#007AFF]" />}
                   <span className="text-[#007AFF] font-black text-sm uppercase tracking-wider">
-                    {code}
+                    Casillero {code}
                   </span>
                 </div>
                 <span className="bg-[#E3F2FD] text-[#007AFF] font-bold text-[10px] px-2.5 py-0.5 rounded-full">
@@ -2270,11 +2287,11 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                       onClick={() => setSelectedPedido(p)}
                       className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between"
                     >
-                      <p className="font-extrabold text-[11px] text-gray-900 truncate leading-snug">
-                        {p.customerName}
+                      <p className="font-black text-[13.5px] text-gray-900 leading-tight">
+                        {formatDisplayName(p.customerName)}
                       </p>
-                      <p className="text-[9px] text-gray-400 font-semibold mt-1">
-                        {getOccupantPhone(p)}
+                      <p className="text-[11px] text-emerald-600 font-bold mt-1">
+                        {formatDisplayPhone(getOccupantPhone(p))}
                       </p>
                     </button>
                   ))}
@@ -2297,7 +2314,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                 <div className="flex items-center gap-1.5">
                   {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-[#FF2D55]" /> : <ChevronDown className="w-3.5 h-3.5 text-[#FF2D55]" />}
                   <span className="text-[#FF2D55] font-black text-sm uppercase tracking-wider">
-                    {code}
+                    Casillero {code}
                   </span>
                 </div>
                 <span className="bg-[#FFE5EC] text-[#FF2D55] font-bold text-[10px] px-2.5 py-0.5 rounded-full">
@@ -2313,11 +2330,11 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                       onClick={() => setSelectedPedido(p)}
                       className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between"
                     >
-                      <p className="font-extrabold text-[11px] text-gray-900 truncate leading-snug">
-                        {p.customerName}
+                      <p className="font-black text-[13.5px] text-gray-900 leading-tight">
+                        {formatDisplayName(p.customerName)}
                       </p>
-                      <p className="text-[9px] text-gray-400 font-semibold mt-1">
-                        {getOccupantPhone(p)}
+                      <p className="text-[11px] text-emerald-600 font-bold mt-1">
+                        {formatDisplayPhone(getOccupantPhone(p))}
                       </p>
                     </button>
                   ))}
@@ -2367,19 +2384,36 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
             {/* Ficha Principal */}
             <div className="flex flex-col items-center text-center mb-5">
               <div className={cn(
-                'w-16 h-16 rounded-2xl flex items-center justify-center text-white font-black text-3xl mb-3',
+                'px-4 py-2.5 rounded-2xl flex items-center justify-center text-white font-black text-base mb-3 uppercase tracking-wide',
                 selectedPedido.labelType === 'letter' 
                   ? 'bg-rose-600' 
                   : 'bg-blue-600'
               )}>
-                {selectedPedido.label}
+                Casillero {selectedPedido.label}
               </div>
 
-              <h3 className="font-black text-lg text-gray-900 leading-snug uppercase px-2 mb-2">
+              <h3 className="font-black text-lg text-gray-900 leading-snug uppercase px-2 mb-1">
                 {selectedPedido.customerName}
               </h3>
 
-              <div className="flex items-center gap-1.5">
+              {(() => {
+                const phone = getOccupantPhone(selectedPedido);
+                return phone && phone !== 'Sin número' ? (
+                  <a
+                    href={`https://wa.me/${phone.replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-bold text-[#007AFF] hover:underline tracking-wide mb-3 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>{formatDisplayPhone(phone)}</span>
+                  </a>
+                ) : (
+                  <span className="text-sm text-gray-400 font-bold tracking-wide mb-3">Sin número</span>
+                );
+              })()}
+
+              <div className="flex items-center gap-1.5 mt-1">
                 <span className={cn(
                   "px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border",
                   selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB'
@@ -2408,21 +2442,21 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
             </div>
 
             {/* Acciones */}
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={handleDeliver}
                 disabled={isDelivering}
-                className="w-full py-3 rounded-2xl font-extrabold text-xs uppercase tracking-wider text-white disabled:opacity-60 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="py-3 px-1 rounded-2xl font-extrabold text-[11px] uppercase tracking-wider text-white disabled:opacity-60 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1 cursor-pointer"
               >
                 {isDelivering ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     <span>Entregando...</span>
                   </>
                 ) : (
                   <>
-                    <Check className="w-4 h-4 stroke-[3px]" />
-                    <span>Marcar como entregado</span>
+                    <Check className="w-3.5 h-3.5 stroke-[3px]" />
+                    <span>Marcar entregado</span>
                   </>
                 )}
               </button>
@@ -2430,10 +2464,10 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               {selectedPedido.customerId && (
                 <button
                   onClick={() => { setSelectedPedido(null); onSelectPerson(selectedPedido.customerId); }}
-                  className="w-full py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-gray-100 hover:bg-gray-200 text-gray-700 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  className="py-3 px-1 rounded-2xl font-bold text-[11px] uppercase tracking-wider bg-gray-100 hover:bg-gray-200 text-gray-700 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1"
                 >
                   <UserIcon className="w-3.5 h-3.5" />
-                  <span>Ver perfil</span>
+                  <span>Ver pedido</span>
                 </button>
               )}
             </div>

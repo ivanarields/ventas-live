@@ -4,7 +4,8 @@
   "description": "Puente WhatsApp → Supabase Edge Function",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "postinstall": "node scripts/patch-wwebjs-ids.cjs"
   },
   "dependencies": {
     "axios": "^1.6.7",
