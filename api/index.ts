@@ -86,6 +86,9 @@ export default async function handler(req: any, res: any) {
     return app(req, res);
   } catch (error: any) {
     console.error('[api] server boot error:', error?.message ?? error);
-    return res.status(500).json({ error: 'Error iniciando el servidor' });
+    const diagnostic = new URL(String(req.url || ''), 'https://internal.local').searchParams.get('diag') === '1';
+    return res.status(500).json(diagnostic
+      ? { error: 'Error iniciando el servidor', detail: String(error?.message ?? error) }
+      : { error: 'Error iniciando el servidor' });
   }
 }
