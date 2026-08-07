@@ -2080,6 +2080,17 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
 }
 
 function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedidos: any[]; customers: any[]; onSelectPerson: (id: string) => void; onRefresh: () => void }) {
+  const getOccupantPhone = (occupant: any) => {
+    if (!occupant) return 'Sin número';
+    const c = (customers || []).find(cust => 
+      cust && (
+        cust.id === occupant.customerId || 
+        (cust.name && occupant.customerName && cust.name.trim().toLowerCase() === occupant.customerName.trim().toLowerCase())
+      )
+    );
+    return c?.phone || occupant.customerWhatsApp || occupant.phone || 'Sin número';
+  };
+
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
   const [isCleaningTests, setIsCleaningTests] = useState(false);
@@ -2131,13 +2142,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
   };
 
 
-  const getOccupantPhone = (occupant: any) => {
-    const c = customers.find(cust => 
-      cust.id === occupant.customerId || 
-      (cust.name && occupant.customerName && cust.name.trim().toLowerCase() === occupant.customerName.trim().toLowerCase())
-    );
-    return c?.phone || occupant.customerWhatsApp || occupant.phone || 'Sin número';
-  };
+
 
   const handleDeliver = async () => {
     if (!selectedPedido || isDelivering) return;
