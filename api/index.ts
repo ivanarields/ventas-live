@@ -4,7 +4,7 @@ let appPromise: Promise<any> | null = null;
 
 const getApp = async () => {
   if (!appPromise) {
-    appPromise = import('../server.ts').then((module) => module.default);
+    appPromise = import('./server-bundle.mjs').then((module) => module.default);
   }
   return appPromise;
 };
@@ -24,20 +24,6 @@ async function handleSimpleLogin(req: any, res: any) {
     const pin = String(body?.pin ?? '').trim();
     const allowedUsername = String(process.env.ADMIN_SIMPLE_USERNAME || 'leidycandy').trim().toLowerCase();
     const allowedPin = String(process.env.ADMIN_SIMPLE_PIN || '7020').trim();
-
-    if (new URL(String(req.url || ''), 'https://internal.local').searchParams.get('diag') === '1') {
-      return res.status(200).json({
-        method: req.method,
-        bodyType: typeof req.body,
-        bodyKeys: Object.keys(body),
-        usernameLength: username.length,
-        pinLength: pin.length,
-        configuredUsername: Boolean(process.env.ADMIN_SIMPLE_USERNAME),
-        configuredPin: Boolean(process.env.ADMIN_SIMPLE_PIN),
-        configuredSupabaseUrl: Boolean(process.env.SUPABASE_URL),
-        configuredServiceKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
-      });
-    }
 
     if (username !== allowedUsername || pin !== allowedPin) {
       return res.status(401).json({ error: 'Usuario o PIN incorrecto' });
@@ -86,9 +72,6 @@ export default async function handler(req: any, res: any) {
     return app(req, res);
   } catch (error: any) {
     console.error('[api] server boot error:', error?.message ?? error);
-    const diagnostic = new URL(String(req.url || ''), 'https://internal.local').searchParams.get('diag') === '1';
-    return res.status(500).json(diagnostic
-      ? { error: 'Error iniciando el servidor', detail: String(error?.message ?? error) }
-      : { error: 'Error iniciando el servidor' });
+    return res.status(500).json({ error: 'Error iniciando el servidor' });
   }
 }
