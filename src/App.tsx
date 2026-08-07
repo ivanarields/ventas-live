@@ -2088,23 +2088,34 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
   const [isCleaningTests, setIsCleaningTests] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'numeric' | 'alpha'>('numeric');
+  const [collapsedLabels, setCollapsedLabels] = useState<Record<string, boolean>>({});
 
   const activos = pedidos.filter(p => {
     const s = (p.status ?? '').toLowerCase();
     return s === 'listo' || s === 'preparado' || s === 'ready';
   });
 
+  const filteredActivos = activos.filter(p => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    const nameMatch = (p.customerName ?? '').toLowerCase().includes(q);
+    const labelMatch = (p.label ?? '').toLowerCase().includes(q);
+    return nameMatch || labelMatch;
+  });
+
   const NUMERIC = Array.from({ length: 100 }, (_, i) => String(i + 1));
   const ALPHA   = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
-  const MAX_SIMPLE = 5;
 
-  const byLabel = (code: string) => activos.filter(p => p.label === code);
-  const alphaOccupant = (code: string) => activos.find(p => p.label === code) ?? null;
+  const byLabel = (code: string) => filteredActivos.filter(p => p.label === code);
 
-  const abrev = (name: string) => {
-    const parts = (name ?? '').trim().split(' ');
-    if (parts.length === 1) return parts[0].slice(0, 10);
-    return parts[0] + ' ' + parts[1][0] + '.';
+  const getOccupantPhone = (occupant: any) => {
+    const c = customers.find(cust => 
+      cust.id === occupant.customerId || 
+      (cust.name && occupant.customerName && cust.name.trim().toLowerCase() === occupant.customerName.trim().toLowerCase())
+    );
+    return c?.phone || occupant.customerWhatsApp || occupant.phone || 'Sin número';
   };
 
   const handleDeliver = async () => {
@@ -2153,6 +2164,13 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
     }
   };
 
+  const showNumeric = activeTab === 'numeric';
+  const showAlpha   = activeTab === 'alpha';
+
+  const toggleCollapse = (code: string) => {
+    setCollapsedLabels(prev => ({ ...prev, [code]: !prev[code] }));
+  };
+
   return (
     <motion.div
       key="entrega"
@@ -2160,204 +2178,241 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -6 }}
       transition={{ duration: 0.12 }}
-      className="space-y-6 pb-6"
+      className="space-y-4 pb-6 max-w-lg mx-auto px-1 font-sans"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-1">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Etiquetas</h2>
-          <p className="text-[11px] text-gray-400 font-medium mt-0.5">
+          <h2 className="text-3xl font-black text-gray-900 tracking-tight">Etiquetas</h2>
+          <p className="text-xs text-gray-400 font-medium mt-0.5">
             {activos.length} pedido{activos.length !== 1 ? 's' : ''} activo{activos.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex gap-1.5">
-          <button
-            onClick={handleTestCleanup}
-            disabled={isCleaningTests}
-            className="flex items-center gap-1 rounded-full px-2.5 py-1 transition-all bg-amber-50 text-amber-700 disabled:opacity-60"
-          >
-            <Wrench className="w-3 h-3" />
-            <span className="text-[10px] font-bold">{isCleaningTests ? 'Limpiando' : 'Reset'}</span>
-          </button>
-        </div>
+
+        <button
+          onClick={handleTestCleanup}
+          disabled={isCleaningTests}
+          className="flex items-center gap-1 rounded-full px-3 py-1 bg-[#FDF2E9] hover:bg-[#FBE5D6] text-[#D35400] transition-all disabled:opacity-60 text-xs font-bold border border-[#FADBD8]/40"
+        >
+          <Wrench className="w-3.5 h-3.5 animate-pulse" />
+          <span>Reset</span>
+        </button>
       </div>
 
-      {/* ── NUMÉRICOS activos ── */}
-      {NUMERIC.some(code => byLabel(code).length > 0) && (
-        <section className="space-y-2">
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
-            Etiquetas de 1 bolsa
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {NUMERIC.filter(code => byLabel(code).length > 0).map(code => {
-              const occupants = byLabel(code);
-              return (
-                <div key={code} className="rounded-2xl p-3 border-2 bg-blue-50/50 border-blue-100 transition-all">
-                  <p className="text-[9px] font-black text-blue-300 uppercase tracking-widest mb-1.5 px-0.5">Etiqueta {code}</p>
-                  <div className="space-y-1">
-                    {occupants.map((p: any, i: number) => (
-                      <button
-                        key={p.id ?? i}
-                        onClick={() => setSelectedPedido(p)}
-                        className="w-full rounded-xl px-2.5 py-2 text-left bg-blue-500 text-white active:scale-95 transition-all"
-                      >
-                        <span className="text-[11px] font-bold block leading-tight">{p.customerName}</span>
-                        <span className="text-[8px] font-black uppercase tracking-widest opacity-80">
-                          {p.source === 'WEB' || p.labelType === 'WEB' ? `WEB ${p.label || ''}` : 'LIVE'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* ── ALFABÉTICOS activos ── */}
-      {ALPHA.some(code => byLabel(code).length > 0) && (
-        <section className="space-y-2">
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] px-1">
-            Etiquetas de 2+ bolsas
-          </p>
-          <div className="space-y-2">
-            {ALPHA.filter(code => byLabel(code).length > 0).map(code => {
-              const occupants = byLabel(code);
-              return (
-                <div key={code} className="w-full rounded-2xl px-4 py-3 border-2 flex flex-col gap-2 transition-all text-left bg-[#FFF0F5] border-brand/20">
-                  <div>
-                    <p className="text-[9px] font-black text-brand/40 uppercase tracking-widest mb-0.5">Etiqueta {code}</p>
-                    <p className="font-black text-[14px] text-gray-900 leading-tight">{occupants[0]?.customerName}</p>
-                    <p className="text-[11px] font-bold text-brand mt-0.5">
-                      {occupants.length} pedido{occupants.length !== 1 ? 's' : ''} · {occupants.reduce((s: number, p: any) => s + (p.bagCount || 0), 0)} bolsas total
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {occupants.map((p: any, i: number) => (
-                      <button
-                        key={p.id ?? i}
-                        onClick={() => setSelectedPedido(p)}
-                        className="rounded-xl px-2.5 py-1.5 bg-brand/10 text-brand text-[11px] font-bold active:scale-95 transition-all"
-                      >
-                        {(p.source === 'WEB' || p.labelType === 'WEB') ? 'WEB' : 'LIVE'} · {p.itemCount ?? 0} prendas · {p.bagCount} bolsa{p.bagCount !== 1 ? 's' : ''}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-      {/* Estado vacío */}
-      {activos.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-            <Package className="w-8 h-8 text-gray-300" />
-          </div>
-          <p className="text-[13px] font-bold text-gray-400">Sin etiquetas asignadas</p>
-          <p className="text-[11px] text-gray-300 mt-1">Las etiquetas aparecen cuando un pedido se marca como listo</p>
+      {/* Buscador + Círculos de Categoría */}
+      <div className="flex items-center gap-2.5">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Buscar cliente"
+            className="w-full pl-10 pr-8 py-3 bg-[#F8F9FA] rounded-2xl border border-gray-200 text-xs font-medium focus:outline-none focus:border-gray-300 focus:bg-white transition-all placeholder:text-gray-400"
+          />
+          {searchQuery && (
+            <button 
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
-      )}
 
-      {/* Modal detalle del pedido */}
+        {/* Círculo Azul (Numéricas) */}
+        <button
+          onClick={() => setActiveTab('numeric')}
+          className={cn(
+            "w-8 h-8 rounded-full bg-[#007AFF] transition-all cursor-pointer flex-shrink-0 relative",
+            activeTab === 'numeric' ? "ring-2 ring-offset-2 ring-[#007AFF] scale-105" : "opacity-40 hover:opacity-60"
+          )}
+        />
+
+        {/* Círculo Rosa (Alfabéticas) */}
+        <button
+          onClick={() => setActiveTab('alpha')}
+          className={cn(
+            "w-8 h-8 rounded-full bg-[#FF2D55] transition-all cursor-pointer flex-shrink-0 relative",
+            activeTab === 'alpha' ? "ring-2 ring-offset-2 ring-[#FF2D55] scale-105" : "opacity-40 hover:opacity-60"
+          )}
+        />
+      </div>
+
+      {/* Lista de Casilleros */}
+      <div className="space-y-3">
+        {/* NUMÉRICAS */}
+        {showNumeric && NUMERIC.filter(code => byLabel(code).length > 0).map(code => {
+          const occupants = byLabel(code);
+          const isCollapsed = collapsedLabels[code] === true;
+          return (
+            <div key={code} className="border border-blue-100/70 rounded-3xl bg-[#F5F9FF]/20 p-3 space-y-3">
+              <div 
+                onClick={() => toggleCollapse(code)}
+                className="flex justify-between items-center px-1 cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-1.5">
+                  {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-[#007AFF]" /> : <ChevronDown className="w-3.5 h-3.5 text-[#007AFF]" />}
+                  <span className="text-[#007AFF] font-black text-sm uppercase tracking-wider">
+                    {code}
+                  </span>
+                </div>
+                <span className="bg-[#E3F2FD] text-[#007AFF] font-bold text-[10px] px-2.5 py-0.5 rounded-full">
+                  4 bolsas
+                </span>
+              </div>
+
+              {!isCollapsed && (
+                <div className="grid grid-cols-2 gap-2">
+                  {occupants.map((p: any, i: number) => (
+                    <button
+                      key={p.id ?? i}
+                      onClick={() => setSelectedPedido(p)}
+                      className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between"
+                    >
+                      <p className="font-extrabold text-[11px] text-gray-900 truncate leading-snug">
+                        {p.customerName}
+                      </p>
+                      <p className="text-[9px] text-gray-400 font-semibold mt-1">
+                        {getOccupantPhone(p)}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* ALFABÉTICAS */}
+        {showAlpha && ALPHA.filter(code => byLabel(code).length > 0).map(code => {
+          const occupants = byLabel(code);
+          const isCollapsed = collapsedLabels[code] === true;
+          return (
+            <div key={code} className="border border-rose-100/70 rounded-3xl bg-[#FFF5F7]/20 p-3 space-y-3">
+              <div 
+                onClick={() => toggleCollapse(code)}
+                className="flex justify-between items-center px-1 cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-1.5">
+                  {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-[#FF2D55]" /> : <ChevronDown className="w-3.5 h-3.5 text-[#FF2D55]" />}
+                  <span className="text-[#FF2D55] font-black text-sm uppercase tracking-wider">
+                    {code}
+                  </span>
+                </div>
+                <span className="bg-[#FFE5EC] text-[#FF2D55] font-bold text-[10px] px-2.5 py-0.5 rounded-full">
+                  4 bolsas
+                </span>
+              </div>
+
+              {!isCollapsed && (
+                <div className="grid grid-cols-2 gap-2">
+                  {occupants.map((p: any, i: number) => (
+                    <button
+                      key={p.id ?? i}
+                      onClick={() => setSelectedPedido(p)}
+                      className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between"
+                    >
+                      <p className="font-extrabold text-[11px] text-gray-900 truncate leading-snug">
+                        {p.customerName}
+                      </p>
+                      <p className="text-[9px] text-gray-400 font-semibold mt-1">
+                        {getOccupantPhone(p)}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Estado Vacío */}
+        {activos.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center bg-white rounded-3xl border border-gray-100">
+            <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mb-3 border border-gray-100">
+              <Package className="w-6 h-6 text-gray-300" />
+            </div>
+            <p className="text-xs font-bold text-gray-600">Sin etiquetas asignadas</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">Las etiquetas se asignan automáticamente al marcar un pedido como listo</p>
+          </div>
+        )}
+      </div>
+
+      {/* Modal detalle del pedido (Minimalista) */}
       {selectedPedido && (
         <div
-          className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
           onClick={() => setSelectedPedido(null)}
         >
           <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 10 }}
+            initial={{ scale: 0.95, opacity: 0, y: 8 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.9, opacity: 0, y: 10 }}
-            transition={{ type: "spring", duration: 0.35, bounce: 0.15 }}
+            exit={{ scale: 0.95, opacity: 0, y: 8 }}
+            transition={{ type: "spring", duration: 0.25 }}
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-[400px] bg-white rounded-[32px] p-6 shadow-2xl border border-gray-100 relative overflow-hidden"
+            className="w-full max-w-[380px] bg-white rounded-3xl p-5 border border-gray-100 relative overflow-hidden"
           >
-            {/* Background design elements for premium look */}
-            <div className="absolute top-0 right-0 w-24 h-24 bg-brand/5 rounded-full blur-2xl -mr-6 -mt-6" />
-            <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl -ml-10 -mb-10" />
-
-            {/* Header with Close Button */}
-            <div className="flex justify-between items-start mb-6">
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Detalle de Entrega</span>
+            {/* Header Modal */}
+            <div className="flex justify-between items-center mb-5">
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Ficha de Casillero</span>
               <button
                 onClick={() => setSelectedPedido(null)}
-                className="p-1.5 hover:bg-gray-100 active:scale-95 rounded-full transition-all text-gray-400 hover:text-gray-700 cursor-pointer"
+                className="p-1 hover:bg-gray-100 active:scale-95 rounded-full transition-all text-gray-400 hover:text-gray-700 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Profile/Identity card */}
-            <div className="flex flex-col items-center text-center mb-6">
-              <div className="relative mb-3">
-                <div className={cn(
-                  'w-20 h-20 rounded-[24px] flex items-center justify-center text-white font-black text-4xl shadow-lg relative z-10',
-                  selectedPedido.labelType === 'letter' 
-                    ? 'bg-gradient-to-br from-brand to-[#ff5d99] shadow-brand/20' 
-                    : 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-500/20'
-                )}>
-                  {selectedPedido.label}
-                </div>
-                <div className={cn(
-                  'absolute inset-0 rounded-[24px] blur-md scale-95 opacity-50 z-0',
-                  selectedPedido.labelType === 'letter' ? 'bg-brand' : 'bg-blue-500'
-                )} />
+            {/* Ficha Principal */}
+            <div className="flex flex-col items-center text-center mb-5">
+              <div className={cn(
+                'w-16 h-16 rounded-2xl flex items-center justify-center text-white font-black text-3xl mb-3',
+                selectedPedido.labelType === 'letter' 
+                  ? 'bg-rose-600' 
+                  : 'bg-blue-600'
+              )}>
+                {selectedPedido.label}
               </div>
 
-              <h3 className="font-black text-xl text-gray-900 leading-snug px-2 mb-2 uppercase">
+              <h3 className="font-black text-lg text-gray-900 leading-snug uppercase px-2 mb-2">
                 {selectedPedido.customerName}
               </h3>
 
-              {/* Tags */}
-              <div className="flex flex-wrap items-center justify-center gap-1.5">
+              <div className="flex items-center gap-1.5">
                 <span className={cn(
-                  "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border",
+                  "px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border",
                   selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB'
-                    ? "bg-emerald-50 text-emerald-600 border-emerald-100"
-                    : "bg-violet-50 text-violet-600 border-violet-100"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-purple-50 text-purple-700 border-purple-200"
                 )}>
-                  {selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB' ? 'Compra web' : 'Pedido live'}
+                  {selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB' ? 'Compra Web' : 'Pedido Live'}
                 </span>
-                
-                <span className={cn(
-                  "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border",
-                  selectedPedido.labelType === 'letter'
-                    ? "bg-rose-50 text-brand border-brand/10"
-                    : "bg-blue-50 text-blue-600 border-blue-100"
-                )}>
-                  Etiqueta {selectedPedido.labelType === 'letter' ? 'exclusiva' : 'compartida'}
+
+                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-gray-100 text-gray-600 border border-gray-200">
+                  {selectedPedido.labelType === 'letter' ? 'Etiqueta Exclusiva' : 'Etiqueta Compartida'}
                 </span>
               </div>
             </div>
 
-            {/* Counters Section */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-gray-50/80 border border-gray-100/50 rounded-2xl p-4 flex flex-col items-center justify-center transition-all hover:bg-gray-50">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center mb-2">
-                  <Package className="w-4 h-4 text-amber-600" />
-                </div>
-                <span className="text-2xl font-black text-gray-800 leading-none">{selectedPedido.bagCount}</span>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Bolsas</span>
+            {/* Contadores Bolsas / Prendas */}
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="bg-gray-50 border border-gray-200/60 rounded-2xl p-3 text-center">
+                <span className="text-xl font-black text-gray-900 block leading-none">{selectedPedido.bagCount}</span>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1 block">Bolsa(s)</span>
               </div>
-              <div className="bg-gray-50/80 border border-gray-100/50 rounded-2xl p-4 flex flex-col items-center justify-center transition-all hover:bg-gray-50">
-                <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center mb-2">
-                  <Shirt className="w-4 h-4 text-brand" />
-                </div>
-                <span className="text-2xl font-black text-gray-800 leading-none">{selectedPedido.itemCount ?? 0}</span>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Prendas</span>
+              <div className="bg-gray-50 border border-gray-200/60 rounded-2xl p-3 text-center">
+                <span className="text-xl font-black text-gray-900 block leading-none">{selectedPedido.itemCount ?? 0}</span>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1 block">Prenda(s)</span>
               </div>
             </div>
 
-            {/* Actions */}
+            {/* Acciones */}
             <div className="space-y-2">
               <button
                 onClick={handleDeliver}
                 disabled={isDelivering}
-                className="w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider text-white disabled:opacity-60 shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
-                style={{ background: 'linear-gradient(135deg, #10B981, #059669)' }}
+                className="w-full py-3 rounded-2xl font-extrabold text-xs uppercase tracking-wider text-white disabled:opacity-60 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isDelivering ? (
                   <>
@@ -2375,29 +2430,19 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               {selectedPedido.customerId && (
                 <button
                   onClick={() => { setSelectedPedido(null); onSelectPerson(selectedPedido.customerId); }}
-                  className="w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
-                  style={{ background: '#fff0f5', color: '#ff2d78' }}
+                  className="w-full py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-gray-100 hover:bg-gray-200 text-gray-700 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  <UserIcon className="w-4 h-4" />
+                  <UserIcon className="w-3.5 h-3.5" />
                   <span>Ver perfil</span>
                 </button>
               )}
-
-              <button
-                onClick={() => setSelectedPedido(null)}
-                className="w-full py-3 rounded-2xl bg-gray-50 hover:bg-gray-100 text-gray-500 font-bold text-xs uppercase tracking-wider active:scale-[0.98] transition-all cursor-pointer border border-gray-100"
-              >
-                Cerrar
-              </button>
             </div>
           </motion.div>
         </div>
       )}
-
     </motion.div>
   );
 }
-
 function CalendarView({ lives, onAdd }: any) {
   return (
     <motion.div 
