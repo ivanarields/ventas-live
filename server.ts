@@ -1033,19 +1033,28 @@ const isServerlessRuntime = Boolean(
 
     const pagos = data ?? [];
     const pagoIds = pagos.map((p: any) => Number(p.id)).filter(Number.isFinite);
-    let liveByPagoId = new Map<number, any>();
-
-    if (pagoIds.length > 0) {
-      const { data: livePagos, error: liveError } = await supabasePanel
+    const linkedLiveRequest = pagoIds.length > 0
+      ? supabasePanel
         .from('pagos_venta_live')
         .select('id,main_pago_id,estado,match_reason')
-        .in('main_pago_id', pagoIds);
+        .in('main_pago_id', pagoIds)
+      : Promise.resolve({ data: [], error: null });
+    const pendingLiveRequest = supabasePanel
+      .from('pagos_venta_live')
+      .select('id,nombre_detectado,monto,estado,comprobante_at,created_at,phone,main_pago_id')
+      .in('estado', ['pendiente_whatsapp', 'revision_manual'])
+      .is('main_pago_id', null)
+      .order('created_at', { ascending: false });
+    const [linkedLiveResult, pendingLiveResult] = await Promise.all([linkedLiveRequest, pendingLiveRequest]);
+    const liveByPagoId = new Map<number, any>();
 
-      if (!liveError) {
-        liveByPagoId = new Map((livePagos ?? []).map((p: any) => [Number(p.main_pago_id), p]));
-      } else {
-        console.warn('[pagos-lista] no se pudo enriquecer con panel WhatsApp:', liveError.message);
+    if (!linkedLiveResult.error) {
+      liveByPagoId.clear();
+      for (const livePago of linkedLiveResult.data ?? []) {
+        liveByPagoId.set(Number(livePago.main_pago_id), livePago);
       }
+    } else {
+      console.warn('[pagos-lista] no se pudo enriquecer con panel WhatsApp:', linkedLiveResult.error.message);
     }
 
     const enriched = pagos.map((p: any) => {
@@ -1071,12 +1080,7 @@ const isServerlessRuntime = Boolean(
       };
     });
 
-    const { data: pendingLivePagos, error: pendingLiveError } = await supabasePanel
-      .from('pagos_venta_live')
-      .select('id,nombre_detectado,monto,estado,comprobante_at,created_at,phone,main_pago_id')
-      .in('estado', ['pendiente_whatsapp', 'revision_manual'])
-      .is('main_pago_id', null)
-      .order('created_at', { ascending: false });
+    const { data: pendingLivePagos, error: pendingLiveError } = pendingLiveResult;
 
     if (pendingLiveError) {
       console.warn('[pagos-lista] no se pudo incluir pendientes WhatsApp:', pendingLiveError.message);

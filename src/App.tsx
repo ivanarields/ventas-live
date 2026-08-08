@@ -502,6 +502,27 @@ const formatTransactionDate = (dateValue: any): string => {
   return `${months[date.getMonth()]} ${date.getDate()}`;
 };
 
+const getLocalDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getScheduledDateKey = (value: any): string => {
+  const raw = String(value ?? '');
+  return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : '';
+};
+
+const formatScheduledDate = (dateKey: string, todayKey = getLocalDateKey()): string => {
+  if (dateKey === todayKey) return 'HOY';
+  const today = new Date(`${todayKey}T12:00:00`);
+  const date = new Date(`${dateKey}T12:00:00`);
+  const dayDistance = Math.round((date.getTime() - today.getTime()) / 86400000);
+  if (dayDistance === 1) return 'MAÑANA';
+  return date.toLocaleDateString('es-BO', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '').toUpperCase();
+};
+
 import { DetailedAnalysis, type CategoryData } from './components/DetailedAnalysis';
 const AdminTiendaView = React.lazy(() => import('./components/AdminTiendaView').then(m => ({ default: m.AdminTiendaView })));
 import { authApi, clientesApi, pagosApi, pedidosApi, transaccionesApi, categoriasApi, livesApi, ideasApi, adminApi, setAuthContext, clearAuthContext, apiFetch } from './lib/api';
@@ -626,10 +647,41 @@ interface Pedido {
   labelType?: string;
   totalAmount: number;
   status: string;
+  historical_linked_at?: string | null;
   paymentIds?: string[];
   source?: string;
   webItemsList?: any[];
 }
+
+interface DashboardCache {
+  savedAt: number;
+  payments: Payment[];
+  pedidos: Pedido[];
+  transactions: Transaction[];
+  lives: LiveSession[];
+}
+
+const dashboardCacheKey = (userId: string) => `ventas-live-dashboard-v1:${userId}`;
+
+const readDashboardCache = (userId: string): DashboardCache | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(dashboardCacheKey(userId)) || 'null');
+    if (!parsed || !Array.isArray(parsed.payments) || !Array.isArray(parsed.pedidos)) return null;
+    return parsed as DashboardCache;
+  } catch {
+    return null;
+  }
+};
+
+const writeDashboardCache = (userId: string, data: Omit<DashboardCache, 'savedAt'>) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(dashboardCacheKey(userId), JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // El caché es opcional; si el almacenamiento está lleno no debe bloquear la app.
+  }
+};
 
 interface Idea {
   id: string;
@@ -980,18 +1032,12 @@ const Logo = () => (
 const TabButton = ({ active, icon: Icon, label, onClick }: any) => (
   <button
     onClick={onClick}
-    className={`flex flex-col items-center justify-center flex-1 py-1.5 transition-all relative ${active ? 'text-brand' : 'text-base-text-muted'}`}
+    className={`flex flex-col items-center justify-center flex-1 py-0.5 transition-all relative ${active ? 'text-brand' : 'text-base-text-muted'}`}
   >
-    <div className={`p-1.5 rounded-xl transition-all ${active ? 'bg-brand/10' : ''}`}>
-      <Icon className={`w-5 h-5 ${active ? 'scale-110' : 'scale-100'}`} />
+    <div className={`p-1 rounded-xl transition-all ${active ? 'bg-brand/10' : ''}`}>
+      <Icon className={`w-5 h-5 ${active ? 'scale-105' : 'scale-100'}`} />
     </div>
-    {label && <span className="text-[8px] font-bold uppercase tracking-wide mt-0.5">{label}</span>}
-    {active && (
-      <motion.div
-        layoutId="tab-indicator"
-        className="absolute bottom-1 w-1 h-1 bg-brand rounded-full"
-      />
-    )}
+    {label && <span className="text-[8px] font-black uppercase tracking-wide mt-0.5">{label}</span>}
   </button>
 );
 
@@ -999,7 +1045,7 @@ export default function App() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentTab, setCurrentTab] = useState<'home' | 'entrega' | 'payments' | 'finance' | 'tienda' | 'settings'>('home');
+  const [currentTab, setCurrentTab] = useState<'inicio' | 'entrega' | 'payments' | 'finance' | 'tienda' | 'settings'>('inicio');
   const [sectionVisibility, setSectionVisibility] = useState<SectionVisibility>(DEFAULT_SECTION_VISIBILITY);
   const [selectedPaymentDates, setSelectedPaymentDates] = useState<Date[]>([new Date()]);
   const [selectedPaymentTime, setSelectedPaymentTime] = useState<string>("");
@@ -1080,50 +1126,43 @@ export default function App() {
       (currentTab === 'finance' && sectionVisibility.dinero) ||
       (currentTab === 'tienda' && sectionVisibility.tienda)
     ) {
-      setCurrentTab('home');
+      setCurrentTab('inicio');
     }
   }, [currentTab, sectionVisibility.dinero, sectionVisibility.tienda]);
 
   const loadData = async () => {
     if (!user) return;
+    const userId = user.id;
+    const cached = readDashboardCache(userId);
+    if (cached) {
+      setPayments(cached.payments);
+      setPedidos(cached.pedidos);
+      setTransactions(cached.transactions ?? []);
+      setLives(cached.lives ?? []);
+    }
+    setOrders([]);
+    setGiveaways([]);
+    setLoadingData(true);
+
+    // Inicio solo necesita estas cuatro fuentes. Se muestran apenas terminan,
+    // sin esperar clientes, categorías o ideas de pantallas secundarias.
+    const dashboardRequest = Promise.all([
+      pagosApi.list(),
+      pedidosApi.list(),
+      transaccionesApi.list(),
+      livesApi.list(),
+    ]);
+
+    // Se cargan en paralelo, pero ya no bloquean la primera pantalla.
+    const supportRequest = Promise.all([
+      clientesApi.list(),
+      categoriasApi.list(),
+      ideasApi.list(),
+    ]);
+
     try {
-      const [
-        rawClientes,
-        rawPagos,
-        rawPedidos,
-        rawTx,
-        rawCats,
-        rawLives,
-        rawIdeas,
-      ] = await Promise.all([
-        clientesApi.list(),
-        pagosApi.list(),
-        pedidosApi.list(),
-        transaccionesApi.list(),
-        categoriasApi.list(),
-        livesApi.list(),
-        ideasApi.list(),
-      ]);
-
-      // Normalizar clientes al shape esperado por la app
-      setCustomers(rawClientes.map((c: any) => ({
-        id: String(c.id),
-        name: c.full_name,
-        canonicalName: c.canonical_name ?? c.normalized_name,
-        phone: c.phone ?? '',
-        waNumber: c.wa_number ?? c.phone ?? '',
-        notes: c.notes ?? '',
-        activeLabel: c.active_label ?? '',
-        activeLabelType: c.active_label_type ?? '',
-        totalSpent: c.total_spent ?? 0,
-        totalItems: c.total_items ?? 0,
-        pendingItems: c.pending_items ?? 0,
-        deliveredItems: c.delivered_items ?? 0,
-        createdAt: c.created_at,
-      })));
-
-      // Normalizar pagos
-      setPayments(rawPagos.map((p: any) => ({
+      const [rawPagos, rawPedidos, rawTx, rawLives] = await dashboardRequest;
+      const normalizedPayments = rawPagos.map((p: any) => ({
         id: String(p.id),
         nombre: p.nombre,
         pago: Number(p.pago),
@@ -1141,10 +1180,8 @@ export default function App() {
         const tA = parseAppDate(a.date)?.getTime() || 0;
         const tB = parseAppDate(b.date)?.getTime() || 0;
         return tB - tA;
-      }));
-
-      // Normalizar pedidos
-      setPedidos(rawPedidos.map((p: any) => ({
+      });
+      const normalizedPedidos = rawPedidos.map((p: any) => ({
         id: String(p.id),
         customerId: p.customer_id ? String(p.customer_id) : '',
         customerName: p.customer_name ?? '',
@@ -1155,13 +1192,12 @@ export default function App() {
         status: p.status ?? 'procesar',
         totalAmount: Number(p.total_amount ?? 0),
         date: p.date,
+        historical_linked_at: p.historical_linked_at ?? null,
         labelVersion: p.label_version ?? 1,
         source: p.source ?? '',
         webItemsList: p.web_items_list ?? [],
-      })));
-
-      // Transacciones
-      setTransactions(rawTx.map((t: any) => ({
+      }));
+      const normalizedTransactions = rawTx.map((t: any) => ({
         id: String(t.id),
         type: t.type,
         amount: Number(t.amount),
@@ -1179,9 +1215,51 @@ export default function App() {
         const tA = parseAppDate(a.date)?.getTime() || 0;
         const tB = parseAppDate(b.date)?.getTime() || 0;
         return tB - tA;
+      });
+      const normalizedLives = rawLives.map((l: any) => ({
+        id: String(l.id),
+        title: l.title,
+        scheduledAt: l.scheduled_at,
+        duration: l.duration,
+        status: l.status,
+        notes: l.notes,
       }));
 
-      // Categorías
+      setPayments(normalizedPayments);
+      setPedidos(normalizedPedidos);
+      setTransactions(normalizedTransactions);
+      setLives(normalizedLives);
+      writeDashboardCache(userId, {
+        payments: normalizedPayments,
+        pedidos: normalizedPedidos,
+        transactions: normalizedTransactions,
+        lives: normalizedLives,
+      });
+    } catch (err) {
+      console.error('[loadData] Error cargando datos de Inicio:', err);
+    } finally {
+      setLoadingData(false);
+    }
+
+    try {
+      const [rawClientes, rawCats, rawIdeas] = await supportRequest;
+
+      setCustomers(rawClientes.map((c: any) => ({
+        id: String(c.id),
+        name: c.full_name,
+        canonicalName: c.canonical_name ?? c.normalized_name,
+        phone: c.phone ?? '',
+        waNumber: c.wa_number ?? c.phone ?? '',
+        notes: c.notes ?? '',
+        activeLabel: c.active_label ?? '',
+        activeLabelType: c.active_label_type ?? '',
+        totalSpent: c.total_spent ?? 0,
+        totalItems: c.total_items ?? 0,
+        pendingItems: c.pending_items ?? 0,
+        deliveredItems: c.delivered_items ?? 0,
+        createdAt: c.created_at,
+      })));
+
       if (rawCats.length === 0) {
         for (const cat of [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES]) {
           await categoriasApi.create(cat);
@@ -1206,30 +1284,14 @@ export default function App() {
         })));
       }
 
-      // Lives
-      setLives(rawLives.map((l: any) => ({
-        id: String(l.id),
-        title: l.title,
-        scheduledAt: l.scheduled_at,
-        duration: l.duration,
-        status: l.status,
-        notes: l.notes,
-      })));
-
-      // Ideas
       setSavedIdeas(rawIdeas.map((i: any) => ({
         id: String(i.id),
         content: i.content,
         category: i.category,
         createdAt: i.created_at,
       })));
-
-      // orders ya no se usan (legacy Firebase), queda vacío
-      setOrders([]);
-      setGiveaways([]);
-
     } catch (err) {
-      console.error('[loadData] Error cargando datos:', err);
+      console.error('[loadData] Error cargando datos secundarios:', err);
     }
   };
 
@@ -1587,14 +1649,14 @@ export default function App() {
       {/* Content */}
       <main className="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-6 pb-24 pt-4" style={{ background: '#f8f9fa' }}>
         <AnimatePresence mode="wait" initial={false}>
-          {currentTab === 'home' && (
-            <HomeView
+          {currentTab === 'inicio' && (
+            <InicioView
               orders={orders}
               lives={lives}
               transactions={transactions}
               payments={payments}
               pedidos={pedidos}
-              key="home"
+              key="inicio"
               onAdd={() => setShowAddModal('order')}
               isInstallable={isInstallable}
               onInstall={handleInstallClick}
@@ -1652,13 +1714,13 @@ export default function App() {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="glass-nav fixed bottom-0 w-full max-w-[480px] px-2 py-1 flex justify-between items-center z-50 gap-1 overflow-x-auto">
-        <TabButton active={currentTab === 'home'} icon={Home} label="Cobros" onClick={() => setCurrentTab('home')} />
-        <TabButton active={currentTab === 'entrega'} icon={Package} label="Etiquetas" onClick={() => setCurrentTab('entrega')} />
-        <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => setCurrentTab('payments')} />
-        {!sectionVisibility.dinero && <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Dinero" onClick={() => setCurrentTab('finance')} />}
-        {!sectionVisibility.tienda && <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => setCurrentTab('tienda')} />}
-        <TabButton active={currentTab === 'settings'} icon={Settings} label="Config" onClick={() => setCurrentTab('settings')} />
+      <nav className="glass-nav fixed inset-x-0 bottom-0 mx-auto w-full max-w-[480px] px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-auto pointer-events-auto">
+        <TabButton active={currentTab === 'inicio'} icon={Home} label="Inicio" onClick={() => { setCurrentTab('inicio'); setSelectedPersonId(null); }} />
+        <TabButton active={currentTab === 'entrega'} icon={Package} label="Etiquetas" onClick={() => { setCurrentTab('entrega'); setSelectedPersonId(null); }} />
+        <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => { setCurrentTab('payments'); setSelectedPersonId(null); }} />
+        {!sectionVisibility.dinero && <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Dinero" onClick={() => { setCurrentTab('finance'); setSelectedPersonId(null); }} />}
+        {!sectionVisibility.tienda && <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => { setCurrentTab('tienda'); setSelectedPersonId(null); }} />}
+        <TabButton active={currentTab === 'settings'} icon={Settings} label="Config" onClick={() => { setCurrentTab('settings'); setSelectedPersonId(null); }} />
       </nav>
 
       {/* Add Modals */}
@@ -1834,34 +1896,33 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="relative w-full max-w-sm bg-white rounded-[32px] p-6 shadow-2xl overflow-hidden"
+        className="relative w-full max-w-[340px] bg-white rounded-[26px] p-4 shadow-xl overflow-hidden"
       >
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-3">
           <div>
-            <h3 className="text-lg font-extrabold text-base-text tracking-tight">Seleccionar Fecha</h3>
-            <p className="text-[10px] font-bold text-base-text-muted uppercase tracking-widest mt-0.5">Puedes elegir varios días</p>
+            <h3 className="text-base font-extrabold text-base-text tracking-tight">Seleccionar fecha</h3>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <X className="w-5 h-5 text-base-text-muted" />
+          <button type="button" onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+            <X className="w-4.5 h-4.5 text-base-text-muted" />
           </button>
         </div>
 
-        <div className="space-y-6">
-          <div className="flex justify-between items-center bg-gray-50 p-3 rounded-2xl">
-            <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))}>
-              <ChevronLeft className="w-5 h-5 text-base-text-muted" />
+        <div className="space-y-3">
+          <div className="flex justify-between items-center bg-gray-50 p-2 rounded-xl">
+            <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-1 rounded-lg hover:bg-white">
+              <ChevronLeft className="w-4.5 h-4.5 text-base-text-muted" />
             </button>
-            <span className="text-xs font-bold text-base-text uppercase tracking-widest">
+            <span className="text-[10px] font-black text-base-text uppercase tracking-widest">
               {viewDate.toLocaleString('es', { month: 'long', year: 'numeric' })}
             </span>
-            <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))}>
-              <ChevronRight className="w-5 h-5 text-base-text-muted" />
+            <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-1 rounded-lg hover:bg-white">
+              <ChevronRight className="w-4.5 h-4.5 text-base-text-muted" />
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-1 text-center">
+          <div className="grid grid-cols-7 gap-y-1 text-center">
             {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => (
-              <span key={`${d}-${i}`} className="text-[10px] font-bold text-base-text-muted mb-2">{d}</span>
+              <span key={`${d}-${i}`} className="text-[9px] font-bold text-base-text-muted mb-1">{d}</span>
             ))}
             {Array.from({ length: firstDayOfMonth }).map((_, i) => (
               <div key={`empty-${i}`} />
@@ -1878,9 +1939,10 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
                 <button 
                   key={day} 
                   onClick={() => toggleDate(new Date(viewDate.getFullYear(), viewDate.getMonth(), day))}
-                  className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all ${isSelected ? 'bg-brand text-white shadow-lg shadow-brand/20' : isToday ? 'bg-brand/5 border border-brand/20' : 'hover:bg-gray-50'}`}
+                  type="button"
+                  className={`h-8 w-8 mx-auto rounded-lg flex flex-col items-center justify-center relative transition-all ${isSelected ? 'bg-brand text-white shadow-md shadow-brand/20' : isToday ? 'bg-brand/5 border border-brand/20' : 'hover:bg-gray-50'}`}
                 >
-                  <span className={`text-[11px] font-bold ${isSelected ? 'text-white' : isToday ? 'text-brand' : 'text-base-text'}`}>{day}</span>
+                  <span className={`text-[10px] font-bold ${isSelected ? 'text-white' : isToday ? 'text-brand' : 'text-base-text'}`}>{day}</span>
                   {hasPayments && (
                     <div className={`w-1 h-1 rounded-full mt-0.5 ${isSelected ? 'bg-white' : 'bg-brand'}`} />
                   )}
@@ -1889,29 +1951,29 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
             })}
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <div className="flex-1">
-              <label className="text-[9px] font-bold text-base-text-muted uppercase tracking-widest ml-1 mb-1 block">Filtrar por Hora</label>
+              <label className="text-[8px] font-bold text-base-text-muted uppercase tracking-widest ml-1 mb-1 block">Filtrar por hora</label>
               <input 
                 type="time" 
                 value={selectedTime}
                 onChange={(e) => setSelectedTime(e.target.value)}
-                className="w-full p-3 bg-gray-50 rounded-2xl text-xs font-bold text-base-text outline-none focus:bg-gray-100 transition-all"
+                className="w-full p-2.5 bg-gray-50 rounded-xl text-xs font-bold text-base-text outline-none focus:bg-gray-100 transition-all"
               />
             </div>
             <div className="flex-1 flex items-end">
-              <button 
+              <button type="button"
                 onClick={() => setSelectedDates([new Date()])}
-                className="w-full py-3 bg-gray-50 hover:bg-gray-100 rounded-2xl text-[11px] font-bold text-base-text uppercase tracking-widest transition-colors"
+                className="w-full py-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl text-[10px] font-bold text-base-text uppercase tracking-widest transition-colors"
               >
                 Hoy
               </button>
             </div>
           </div>
 
-          <button 
+          <button type="button"
             onClick={() => onSelect(selectedDates, selectedTime)}
-            className="w-full py-4 bg-brand text-white rounded-2xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-brand/20 active:scale-95 transition-all"
+            className="w-full py-3 bg-brand text-white rounded-xl text-[11px] font-bold uppercase tracking-widest shadow-md shadow-brand/20 active:scale-95 transition-all"
           >
             Aplicar Selección ({selectedDates.length})
           </button>
@@ -1923,10 +1985,37 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
 
 // --- Views ---
 
-function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate, onSelectPerson, sectionVisibility }: any) {
+function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate, onSelectPerson, sectionVisibility }: any) {
   const today = new Date();
   const todayStr = today.toDateString();
   const [showEntregadosModal, setShowEntregadosModal] = useState(false);
+  const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string | null>(null);
+  const todayKey = getLocalDateKey(today);
+
+  const upcomingDeliveryGroups = useMemo(() => {
+    const grouped = new globalThis.Map<string, any[]>();
+    (pedidos ?? []).forEach((pedido: any) => {
+      const dateKey = getScheduledDateKey(pedido.historical_linked_at);
+      const status = String(pedido.status ?? '').toLowerCase();
+      if (!dateKey || dateKey < todayKey || status === 'entregado') return;
+      const current = grouped.get(dateKey) ?? [];
+      current.push(pedido);
+      grouped.set(dateKey, current);
+    });
+
+    return [...grouped.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .map(([dateKey, ordersForDate]) => ({
+        dateKey,
+        orders: ordersForDate,
+        bags: ordersForDate.reduce((total, pedido) => total + Number(pedido.bagCount ?? 1), 0),
+      }));
+  }, [pedidos, todayKey]);
+
+  const activeDeliveryDate = upcomingDeliveryGroups.some(group => group.dateKey === selectedDeliveryDate)
+    ? selectedDeliveryDate
+    : upcomingDeliveryGroups[0]?.dateKey ?? null;
+  const activeDeliveryGroup = upcomingDeliveryGroups.find(group => group.dateKey === activeDeliveryDate) ?? null;
 
   // Formateadores de ayuda
   const formatName = (name: string) => {
@@ -2105,74 +2194,61 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
         </div>
       )}
 
-      {/* Accesos rápidos */}
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={() => onNavigate?.('entrega')}
-          className="bg-white rounded-2xl p-3.5 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100 shadow-sm"
-        >
-          <div className="w-8.5 h-8.5 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
-            <Package className="w-4 h-4" style={{ color: '#ff2d78' }} />
+      {/* Próximas entregas programadas */}
+      <section className="bg-white rounded-[24px] p-4 border border-gray-100 shadow-sm space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.12em]">Próximas entregas</p>
+            <p className="text-[10px] text-gray-400 font-semibold mt-1">Pedidos programados para entregar</p>
           </div>
-          <p className="text-[10.5px] font-black text-gray-700 uppercase tracking-wide mt-1.5 leading-none">Ver Casilleros</p>
-        </button>
-        <button
-          onClick={() => onNavigate?.('payments')}
-          className="bg-white rounded-2xl p-3.5 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100 shadow-sm"
-        >
-          <div className="w-8.5 h-8.5 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
-            <Wallet className="w-4 h-4" style={{ color: '#ff2d78' }} />
-          </div>
-          <p className="text-[10.5px] font-black text-gray-700 uppercase tracking-wide mt-1.5 leading-none">Ver Pagos</p>
-        </button>
-      </div>
+          {upcomingDeliveryGroups.length > 0 && (
+            <span className="bg-blue-50 text-[#007AFF] font-black text-[9px] px-2.5 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
+              {upcomingDeliveryGroups.reduce((total, group) => total + group.orders.length, 0)} pedido{upcomingDeliveryGroups.reduce((total, group) => total + group.orders.length, 0) !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
 
-      {/* Entregas de hoy (Resumen visual en la base del Dashboard) */}
-      <div className="bg-white rounded-[24px] p-4 border border-gray-100 shadow-sm space-y-3">
-        <p className="text-[10.5px] font-black text-gray-400 uppercase tracking-[0.15em]">Entregas de hoy</p>
-        {listEntregadosHoy.length === 0 ? (
-          <div className="text-center py-6 text-gray-300">
-            <Package className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
-            <p className="text-[11px] font-bold uppercase tracking-wider">Sin entregas hoy</p>
+        <MinimalCalendar
+          compact
+          value={activeDeliveryDate}
+          onChange={setSelectedDeliveryDate}
+          scheduledDates={upcomingDeliveryGroups.map(group => group.dateKey)}
+          minDate={todayKey}
+        />
+
+        {activeDeliveryGroup ? (
+          <div className="space-y-1.5 pt-1">
+            {activeDeliveryGroup.orders.map((pedido: any) => (
+              <button
+                key={pedido.id}
+                type="button"
+                onClick={() => pedido.customerId && onSelectPerson?.(pedido.customerId)}
+                className="w-full py-2.5 px-2 flex items-center justify-between gap-3 text-left rounded-xl hover:bg-gray-50 active:scale-[0.99] transition-all"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-black text-gray-800 truncate">{formatName(pedido.customerName)}</p>
+                  <p className="text-[9.5px] text-gray-400 font-semibold mt-0.5">
+                    {pedido.bagCount ?? 1} bolsa{Number(pedido.bagCount ?? 1) !== 1 ? 's' : ''} · {pedido.itemCount ?? 0} prenda{Number(pedido.itemCount ?? 0) !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <span className={cn(
+                  "text-[9.5px] font-black px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap",
+                  pedido.labelType === 'letter' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
+                )}>
+                  Casillero {pedido.label || '—'}
+                </span>
+                <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+              </button>
+            ))}
           </div>
         ) : (
-          <div className="divide-y divide-gray-100/60 max-h-[220px] overflow-y-auto pr-1">
-            {listEntregadosHoy.map((p: any, idx: number) => {
-              const phoneText = formatDisplayPhone(p.customerWhatsApp || p.phone);
-              return (
-                <div 
-                  key={`${p.id}-${idx}`} 
-                  onClick={() => {
-                    if (p.customerId && onSelectPerson) {
-                      onSelectPerson(p.customerId);
-                    }
-                  }}
-                  className="py-2.5 flex items-center justify-between cursor-pointer hover:bg-gray-50/50 transition-colors rounded-xl px-1"
-                >
-                  <div className="text-left min-w-0 flex-1 pr-2">
-                    <p className="text-xs font-bold text-gray-800 truncate leading-snug">
-                      {formatName(p.customerName)}
-                    </p>
-                    {phoneText && (
-                      <p className="text-[9.5px] text-gray-400 font-semibold mt-0.5">
-                        {phoneText}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${p.labelType === 'letter' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>
-                      Casillero {p.label}
-                    </span>
-                    <div className="w-5 h-5 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500">
-                      <Check className="w-3 h-3" />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="text-center py-4 text-gray-300">
+            <Package className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
+            <p className="text-[11px] font-bold uppercase tracking-wider">Sin entregas programadas</p>
+            <p className="text-[10px] font-medium mt-1">Las fechas aparecerán aquí al programar un pedido</p>
           </div>
         )}
-      </div>
+      </section>
 
       {/* Modal Popup para ver Entregados Hoy */}
       <AnimatePresence>
@@ -2271,6 +2347,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
 
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [isCleaningTests, setIsCleaningTests] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'numeric' | 'alpha'>('numeric');
@@ -2317,6 +2394,34 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       clean = clean.slice(3);
     }
     return clean;
+  };
+
+  const handleScheduleDate = async (dateKey: string) => {
+    if (!selectedPedido || !dateKey) return;
+    try {
+      const isoDate = new Date(`${dateKey}T12:00:00`).toISOString();
+      await pedidosApi.update(selectedPedido.id, { historical_linked_at: isoDate });
+      setShowDatePicker(false);
+      setSelectedPedido(null);
+      onRefresh();
+    } catch (error) {
+      console.error('Error al actualizar fecha de entrega:', error);
+      alert('No se pudo programar la entrega');
+    }
+  };
+
+  const handleClearSchedule = async (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!selectedPedido) return;
+    try {
+      await pedidosApi.update(selectedPedido.id, { historical_linked_at: null });
+      setSelectedPedido({ ...selectedPedido, historical_linked_at: null });
+      setShowDatePicker(false);
+      onRefresh();
+    } catch (error) {
+      console.error('Error al remover fecha de entrega:', error);
+      alert('No se pudo quitar la programación');
+    }
   };
 
 
@@ -2471,7 +2576,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                   {occupants.map((p: any, i: number) => (
                     <button
                       key={p.id ?? i}
-                      onClick={() => setSelectedPedido(p)}
+                      onClick={() => { setSelectedPedido(p); setShowDatePicker(false); }}
                       className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
                     >
                       <p className="font-black text-[12.5px] text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis block">
@@ -2514,7 +2619,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                   {occupants.map((p: any, i: number) => (
                     <button
                       key={p.id ?? i}
-                      onClick={() => setSelectedPedido(p)}
+                      onClick={() => { setSelectedPedido(p); setShowDatePicker(false); }}
                       className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
                     >
                       <p className="font-black text-[12.5px] text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis block">
@@ -2547,7 +2652,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       {selectedPedido && (
         <div
           className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setSelectedPedido(null)}
+          onClick={() => { setSelectedPedido(null); setShowDatePicker(false); }}
         >
           <motion.div
             initial={{ scale: 0.95, opacity: 0, y: 8 }}
@@ -2555,13 +2660,13 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
             exit={{ scale: 0.95, opacity: 0, y: 8 }}
             transition={{ type: "spring", duration: 0.25 }}
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-[380px] bg-white rounded-3xl p-5 border border-gray-100 relative overflow-hidden"
+            className="w-full max-w-[340px] bg-white rounded-[26px] p-4 border border-gray-100 relative overflow-hidden shadow-xl"
           >
             {/* Header Modal */}
             <div className="flex justify-between items-center mb-5">
               <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Ficha de Casillero</span>
               <button
-                onClick={() => setSelectedPedido(null)}
+                onClick={() => { setSelectedPedido(null); setShowDatePicker(false); }}
                 className="p-1 hover:bg-gray-100 active:scale-95 rounded-full transition-all text-gray-400 hover:text-gray-700 cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -2602,7 +2707,11 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
 
               {/* Programador de Entrega Rápido */}
               <div className="w-full mt-1.5 px-1 relative">
-                <label className="relative flex items-center justify-center gap-1.5 bg-[#F5F9FF] border border-blue-100 hover:bg-[#E3F2FD] rounded-2xl px-4 py-2.5 text-xs font-black text-[#007AFF] cursor-pointer active:scale-95 transition-all shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowDatePicker(prev => !prev)}
+                  className="w-full relative flex items-center justify-center gap-1.5 bg-[#F5F9FF] border border-blue-100 hover:bg-[#E3F2FD] rounded-2xl px-4 py-2.5 text-xs font-black text-[#007AFF] cursor-pointer active:scale-95 transition-all shadow-xs"
+                >
                   <Calendar className="w-4 h-4 text-[#007AFF]" />
                   <span className="uppercase tracking-wider">
                     {selectedPedido.historical_linked_at 
@@ -2617,50 +2726,11 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                         })()}`
                       : 'Programar Entrega'}
                   </span>
-                  <input
-                    type="date"
-                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                    value={selectedPedido.historical_linked_at ? new Date(selectedPedido.historical_linked_at).toISOString().split('T')[0] : ''}
-                    onChange={async (e) => {
-                      const val = e.target.value;
-                      if (val) {
-                        try {
-                          const isoDate = new Date(val + 'T12:00:00').toISOString();
-                          await pedidosApi.update(selectedPedido.id, { historical_linked_at: isoDate });
-                          
-                          // Actualizar estado local del modal al instante
-                          const updated = { ...selectedPedido, historical_linked_at: isoDate };
-                          setSelectedPedido(updated);
-                          
-                          // Refrescar lista de pedidos
-                          if (typeof onRefresh === 'function') {
-                            onRefresh();
-                          }
-                        } catch (err) {
-                          console.error('Error al actualizar fecha de entrega:', err);
-                        }
-                      }
-                    }}
-                  />
-                </label>
+                </button>
                 {selectedPedido.historical_linked_at && (
                   <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      try {
-                        await pedidosApi.update(selectedPedido.id, { historical_linked_at: null });
-                        
-                        // Actualizar estado local del modal al instante
-                        const updated = { ...selectedPedido, historical_linked_at: null };
-                        setSelectedPedido(updated);
-                        
-                        if (typeof onRefresh === 'function') {
-                          onRefresh();
-                        }
-                      } catch (err) {
-                        console.error('Error al remover fecha de entrega:', err);
-                      }
-                    }}
+                    type="button"
+                    onClick={handleClearSchedule}
                     className="absolute right-[-6px] top-1/2 -translate-y-1/2 bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 p-1.5 rounded-full shadow-sm transition-all active:scale-90 z-10"
                     title="Eliminar programación"
                   >
@@ -2713,11 +2783,168 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
               )}
             </div>
           </motion.div>
+          {showDatePicker && (
+            <div
+              className="absolute inset-0 z-[260] flex items-center justify-center p-3"
+              onClick={() => setShowDatePicker(false)}
+            >
+              <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
+              <motion.div
+                initial={{ scale: 0.94, opacity: 0, y: 8 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.94, opacity: 0, y: 8 }}
+                className="relative w-full max-w-[340px] bg-white rounded-[26px] p-4 shadow-xl"
+                onClick={event => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Seleccionar fecha</span>
+                  <button type="button" onClick={() => setShowDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+                    <X className="w-4 h-4 text-gray-400" />
+                  </button>
+                </div>
+                <MinimalCalendar
+                  value={getScheduledDateKey(selectedPedido.historical_linked_at) || null}
+                  onChange={handleScheduleDate}
+                  scheduledDates={pedidos.map(pedido => getScheduledDateKey(pedido.historical_linked_at)).filter(Boolean)}
+                  minDate={getLocalDateKey()}
+                />
+              </motion.div>
+            </div>
+          )}
         </div>
       )}
     </motion.div>
   );
 }
+
+function MinimalCalendar({
+  value,
+  onChange,
+  scheduledDates,
+  minDate = getLocalDateKey(),
+  compact = false,
+}: {
+  value?: string | null;
+  onChange: (dateKey: string) => void;
+  scheduledDates: string[];
+  minDate?: string;
+  compact?: boolean;
+}) {
+  const normalizedDates = useMemo(() => Array.from(new Set(
+    (scheduledDates ?? [])
+      .map(getScheduledDateKey)
+      .filter(dateKey => dateKey && dateKey >= minDate)
+  )).sort(), [scheduledDates, minDate]);
+  const [currentDate, setCurrentDate] = useState(() => {
+    const initialKey = value && value >= minDate ? value : minDate;
+    return new Date(`${initialKey}T12:00:00`);
+  });
+
+  useEffect(() => {
+    if (!value) return;
+    const valueDate = new Date(`${value.slice(0, 10)}T12:00:00`);
+    if (!Number.isNaN(valueDate.getTime())) setCurrentDate(valueDate);
+  }, [value]);
+
+  if (compact) {
+    return normalizedDates.length === 0 ? (
+      <div className="rounded-2xl bg-gray-50 border border-dashed border-gray-200 px-3 py-4 text-center">
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sin fechas programadas</p>
+      </div>
+    ) : (
+      <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar -mx-1 px-1">
+        {normalizedDates.map(dateKey => {
+          const active = dateKey === value;
+          const date = new Date(`${dateKey}T12:00:00`);
+          return (
+            <button
+              key={dateKey}
+              type="button"
+              onClick={() => onChange(dateKey)}
+              className={cn(
+                'min-w-[92px] rounded-2xl border px-3 py-2 text-left transition-all active:scale-95',
+                active ? 'bg-[#ff2d78] border-[#ff2d78] text-white shadow-sm' : 'bg-gray-50 border-gray-100 text-gray-700 hover:border-gray-200'
+              )}
+            >
+              <p className={cn('text-[9px] font-black uppercase tracking-wider', active ? 'text-white/80' : 'text-gray-400')}>
+                {formatScheduledDate(dateKey, minDate)}
+              </p>
+              <p className="text-sm font-black mt-0.5">{date.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' }).replace(/\./g, '')}</p>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const monthName = currentDate.toLocaleDateString('es-BO', { month: 'long', year: 'numeric' }).toUpperCase();
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const days = Array.from({ length: firstDay + totalDays }, (_, index) => index < firstDay ? null : index - firstDay + 1);
+  const scheduledSet = new Set(normalizedDates);
+  const previousMonth = new Date(year, month - 1, 1);
+  const canGoPrevious = `${year}-${String(month + 1).padStart(2, '0')}-01` > minDate;
+
+  return (
+    <div className="w-full font-sans select-none">
+      <div className="flex items-center justify-between bg-[#F8F9FA] rounded-2xl p-2.5 mb-4 border border-gray-100/40">
+        <button
+          type="button"
+          disabled={!canGoPrevious}
+          onClick={() => setCurrentDate(previousMonth)}
+          className="p-1 rounded-full transition-all text-gray-500 hover:bg-gray-200/60 active:scale-90 disabled:opacity-20 disabled:pointer-events-none"
+          aria-label="Mes anterior"
+        >
+          <ChevronLeft className="w-5 h-5 stroke-[2.5px]" />
+        </button>
+        <span className="text-xs font-black text-gray-700 tracking-wider">{monthName}</span>
+        <button
+          type="button"
+          onClick={() => setCurrentDate(new Date(year, month + 1, 1))}
+          className="p-1 rounded-full transition-all text-gray-500 hover:bg-gray-200/60 active:scale-90"
+          aria-label="Mes siguiente"
+        >
+          <ChevronRight className="w-5 h-5 stroke-[2.5px]" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-y-2 mb-2 text-center">
+        {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((day, index) => (
+          <span key={`${day}-${index}`} className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{day}</span>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-y-2.5 text-center">
+        {days.map((day, index) => {
+          if (!day) return <div key={`empty-${index}`} className="h-9" />;
+          const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const isPast = dateKey < minDate;
+          const isSelected = dateKey === value;
+          const hasScheduled = scheduledSet.has(dateKey);
+          return (
+            <button
+              key={dateKey}
+              type="button"
+              disabled={isPast}
+              onClick={() => onChange(dateKey)}
+              className={cn(
+                'w-9 h-9 mx-auto flex flex-col items-center justify-center relative rounded-2xl text-xs font-bold transition-all duration-200',
+                isPast ? 'text-gray-200 cursor-not-allowed' : 'text-gray-800 hover:bg-gray-100 active:scale-95 cursor-pointer',
+                isSelected && 'bg-[#ff2d78] text-white shadow-sm font-black scale-105 hover:bg-[#ff2d78]'
+              )}
+            >
+              <span>{day}</span>
+              {hasScheduled && <span className={cn('w-1 h-1 rounded-full mt-0.5 absolute bottom-1.5', isSelected ? 'bg-white' : 'bg-[#ff2d78]')} />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CalendarView({ lives, onAdd }: any) {
   return (
     <motion.div 
@@ -3613,9 +3840,6 @@ function PaymentsView({
     >
       <div className="flex justify-between items-center px-1">
         <div className="flex-1">
-          <p className="text-[10px] font-black text-brand tracking-widest uppercase mb-1">
-            VISTA DE PAGOS
-          </p>
           <h2 className="text-2xl font-extrabold text-base-text tracking-tight uppercase">Pagos</h2>
         </div>
         <div className="flex gap-2">
@@ -3675,19 +3899,17 @@ function PaymentsView({
         </div>
       </div>
 
-      {/* Stats Panel */}
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr] gap-1">
         <button 
           onClick={onOpenCalendar}
-          className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3 px-2 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
           {(() => {
-            const isTodayLabel = String(dateLabel).toUpperCase().trim() === 'TOTAL HOY' || String(dateLabel).toUpperCase().trim() === 'HOY';
-            const displaySubLabel = isTodayLabel ? 'HOY' : String(dateLabel).toUpperCase();
+            const displaySubLabel = String(dateLabel).toUpperCase().replace(/^TOTAL[\s-]*/, '');
             return (
               <div className="flex flex-col text-left leading-[1.05] min-w-0 pr-1">
                 <span className="text-[8px] font-bold text-pink-500 uppercase tracking-tight">TOTAL</span>
-                <span className="text-[9.5px] font-black text-pink-600 uppercase truncate">{displaySubLabel}</span>
+                <span className="text-[9.5px] font-black text-pink-600 uppercase">{displaySubLabel}</span>
               </div>
             );
           })()}
@@ -4200,11 +4422,11 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-base-text/20 backdrop-blur-sm" onClick={onClose} />
       <motion.div 
-        initial={{ y: '100%' }}
-        animate={{ y: 0 }}
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
         className="bg-white w-full max-w-sm rounded-[32px] p-8 relative z-10 shadow-2xl"
       >
         <div className="flex justify-between items-center mb-8">
@@ -4287,7 +4509,7 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
           <button 
             type="submit" 
             disabled={isSubmitting}
-            className="w-full btn-pill-primary py-4 mt-4 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-[#ff2d78] text-white rounded-2xl py-3 mt-2 flex items-center justify-center gap-2 text-sm font-black uppercase tracking-wider hover:bg-[#ff2d78]/90 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             {isSubmitting ? (
               <>
@@ -6639,7 +6861,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5 flex flex-col gap-6 pb-10">
+        <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5 flex flex-col gap-6 pb-20">
           <div className="grid grid-cols-2 gap-3 mb-2">
             <div className="bg-[#FFF1F2] rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
               <span className="text-[9px] font-extrabold text-[#BE185D] uppercase tracking-widest block mb-1">Total del Pedido</span>
@@ -6892,7 +7114,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5">
+      <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5 pb-20">
         <div className="grid grid-cols-2 gap-3 mb-6">
           <div className="bg-[#FFF1F2] rounded-[20px] p-4 border border-[#FFE4E6] flex flex-col justify-center">
             <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">Total Acumulado</span>
