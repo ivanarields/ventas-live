@@ -916,7 +916,7 @@ import {
   type EvidenceInput,
 } from '../services/identityService.js';
 
-export function createIdentityRouter(
+export function createIdentityRouterDuplicate(
   supabase: SupabaseClient,
   supabaseStore?: SupabaseClient,
   supabasePanel?: SupabaseClient,

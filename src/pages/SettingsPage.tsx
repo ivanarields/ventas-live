@@ -49,6 +49,13 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
 
 type TabId = 'sistema' | 'ia' | 'datos' | 'base';
 
+const PAGE_TRANSITION = {
+  initial: { opacity: 0, scale: 0.98 },
+  animate: { opacity: 1, scale: 1 },
+  exit: { opacity: 0, scale: 0.98 },
+  transition: { duration: 0.16, ease: 'easeOut' },
+} as const;
+
 type CustomerLite = {
   id: string;
   name: string;
@@ -105,10 +112,7 @@ function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = 
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.1, ease: 'linear' }}
+      {...PAGE_TRANSITION}
       className="space-y-3 pb-12"
     >
       {/* Header */}

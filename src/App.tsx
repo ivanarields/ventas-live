@@ -216,9 +216,10 @@ import {
   ArrowUpRight,
   ArrowDownRight
 } from 'lucide-react';
-import { 
-  format, 
-  addMonths, 
+import {
+  format,
+  addDays,
+  addMonths,
   subMonths, 
   startOfMonth, 
   endOfMonth, 
@@ -1016,6 +1017,15 @@ const DEFAULT_INCOME_CATEGORIES: Omit<Category, 'id'>[] = [
 
 const COLORS = ['#ff2d55', '#ff85a2', '#69c9d0', '#010101', '#ff0050'];
 
+// Una sola transición para la navegación entre páginas. Los modales mantienen
+// sus propias animaciones de escala para no alterar su comportamiento.
+const PAGE_TRANSITION = {
+  initial: { opacity: 0, scale: 0.98 },
+  animate: { opacity: 1, scale: 1 },
+  exit: { opacity: 0, scale: 0.98 },
+  transition: { duration: 0.16, ease: 'easeOut' },
+} as const;
+
 // Components
 const Logo = () => (
   <div className="flex items-center gap-3 select-none">
@@ -1647,7 +1657,7 @@ export default function App() {
   return (
     <div className="app-container">
       {/* Content */}
-      <main className="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-6 pb-24 pt-4" style={{ background: '#f8f9fa' }}>
+      <main className="min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto hide-scrollbar p-4 space-y-6 pb-24 pt-4" style={{ background: '#f8f9fa' }}>
         <AnimatePresence mode="wait" initial={false}>
           {currentTab === 'inicio' && (
             <InicioView
@@ -1703,7 +1713,7 @@ export default function App() {
             />
           )}
           {currentTab === 'tienda' && (
-            <motion.div key="tienda" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.12 }}>
+            <motion.div key="tienda" {...PAGE_TRANSITION}>
               <React.Suspense fallback={<div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand" /></div>}>
                 <AdminTiendaView userId={user?.id ?? ''} authToken={authToken ?? ''} />
               </React.Suspense>
@@ -1714,7 +1724,7 @@ export default function App() {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="glass-nav fixed inset-x-0 bottom-0 mx-auto w-full max-w-[480px] px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-auto pointer-events-auto">
+      <nav className="glass-nav fixed left-1/2 bottom-0 -translate-x-1/2 w-full max-w-[480px] min-w-0 px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-hidden pointer-events-auto">
         <TabButton active={currentTab === 'inicio'} icon={Home} label="Inicio" onClick={() => { setCurrentTab('inicio'); setSelectedPersonId(null); }} />
         <TabButton active={currentTab === 'entrega'} icon={Package} label="Etiquetas" onClick={() => { setCurrentTab('entrega'); setSelectedPersonId(null); }} />
         <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => { setCurrentTab('payments'); setSelectedPersonId(null); }} />
@@ -1991,13 +2001,15 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
   const [showEntregadosModal, setShowEntregadosModal] = useState(false);
   const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string | null>(null);
   const todayKey = getLocalDateKey(today);
+  const deliveryCalendarStart = startOfWeek(today, { weekStartsOn: 1 });
+  const deliveryCalendarEndKey = getLocalDateKey(addDays(deliveryCalendarStart, 13));
 
   const upcomingDeliveryGroups = useMemo(() => {
     const grouped = new globalThis.Map<string, any[]>();
     (pedidos ?? []).forEach((pedido: any) => {
       const dateKey = getScheduledDateKey(pedido.historical_linked_at);
       const status = String(pedido.status ?? '').toLowerCase();
-      if (!dateKey || dateKey < todayKey || status === 'entregado') return;
+      if (!dateKey || dateKey < todayKey || dateKey > deliveryCalendarEndKey || status === 'entregado') return;
       const current = grouped.get(dateKey) ?? [];
       current.push(pedido);
       grouped.set(dateKey, current);
@@ -2010,12 +2022,14 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
         orders: ordersForDate,
         bags: ordersForDate.reduce((total, pedido) => total + Number(pedido.bagCount ?? 1), 0),
       }));
-  }, [pedidos, todayKey]);
+  }, [pedidos, todayKey, deliveryCalendarEndKey]);
 
-  const activeDeliveryDate = upcomingDeliveryGroups.some(group => group.dateKey === selectedDeliveryDate)
-    ? selectedDeliveryDate
-    : upcomingDeliveryGroups[0]?.dateKey ?? null;
+  const activeDeliveryDate = selectedDeliveryDate ?? upcomingDeliveryGroups[0]?.dateKey ?? null;
   const activeDeliveryGroup = upcomingDeliveryGroups.find(group => group.dateKey === activeDeliveryDate) ?? null;
+  const upcomingDeliveryOrders = useMemo(
+    () => upcomingDeliveryGroups.flatMap(group => group.orders),
+    [upcomingDeliveryGroups]
+  );
 
   // Formateadores de ayuda
   const formatName = (name: string) => {
@@ -2085,10 +2099,7 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.15, ease: 'easeOut' }}
+      {...PAGE_TRANSITION}
       className="space-y-4 -mx-4 -mt-4 px-4 pt-4 pb-4 font-sans"
       style={{ background: 'linear-gradient(180deg, #fff0f5 0%, #f8f9fa 120px)' }}
     >
@@ -2213,31 +2224,35 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
           value={activeDeliveryDate}
           onChange={setSelectedDeliveryDate}
           scheduledDates={upcomingDeliveryGroups.map(group => group.dateKey)}
+          scheduledOrders={upcomingDeliveryOrders}
           minDate={todayKey}
         />
 
         {activeDeliveryGroup ? (
-          <div className="space-y-1.5 pt-1">
+          <div className="border-t border-gray-100 pt-2">
             {activeDeliveryGroup.orders.map((pedido: any) => (
               <button
                 key={pedido.id}
                 type="button"
                 onClick={() => pedido.customerId && onSelectPerson?.(pedido.customerId)}
-                className="w-full py-2.5 px-2 flex items-center justify-between gap-3 text-left rounded-xl hover:bg-gray-50 active:scale-[0.99] transition-all"
+                className="w-full py-3 px-2 flex items-center justify-between gap-3 text-left border-b border-gray-100 last:border-b-0 hover:bg-gray-50/70 active:scale-[0.99] transition-all"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-gray-800 truncate">{formatName(pedido.customerName)}</p>
-                  <p className="text-[9.5px] text-gray-400 font-semibold mt-0.5">
-                    {pedido.bagCount ?? 1} bolsa{Number(pedido.bagCount ?? 1) !== 1 ? 's' : ''} · {pedido.itemCount ?? 0} prenda{Number(pedido.itemCount ?? 0) !== 1 ? 's' : ''}
-                  </p>
-                </div>
+                <span
+                  className={cn(
+                    'w-2.5 h-2.5 rounded-full flex-shrink-0',
+                    Number(pedido.bagCount ?? 1) > 1 ? 'bg-[#ff2d78]' : 'bg-[#007AFF]'
+                  )}
+                  aria-hidden="true"
+                />
+                <p className="text-xs font-black text-gray-800 truncate flex-1">{formatName(pedido.customerName)}</p>
                 <span className={cn(
-                  "text-[9.5px] font-black px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap",
-                  pedido.labelType === 'letter' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
+                  "text-[9.5px] font-black px-2.5 py-1.5 rounded-xl uppercase tracking-wider whitespace-nowrap border shadow-sm",
+                  pedido.labelType === 'letter'
+                    ? 'border-rose-100/80 bg-rose-50/60 text-rose-600'
+                    : 'border-blue-100/80 bg-blue-50/60 text-blue-600'
                 )}>
                   Casillero {pedido.label || '—'}
                 </span>
-                <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
               </button>
             ))}
           </div>
@@ -2483,10 +2498,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
   return (
     <motion.div
       key="entrega"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.12 }}
+      {...PAGE_TRANSITION}
       className="space-y-4 pb-6 max-w-lg md:mx-auto -mx-4 px-4 font-sans"
     >
       {/* Header */}
@@ -2821,12 +2833,14 @@ function MinimalCalendar({
   value,
   onChange,
   scheduledDates,
+  scheduledOrders = [],
   minDate = getLocalDateKey(),
   compact = false,
 }: {
   value?: string | null;
   onChange: (dateKey: string) => void;
   scheduledDates: string[];
+  scheduledOrders?: any[];
   minDate?: string;
   compact?: boolean;
 }) {
@@ -2835,6 +2849,17 @@ function MinimalCalendar({
       .map(getScheduledDateKey)
       .filter(dateKey => dateKey && dateKey >= minDate)
   )).sort(), [scheduledDates, minDate]);
+  const scheduledOrdersByDate = useMemo(() => {
+    const grouped = new globalThis.Map<string, any[]>();
+    (scheduledOrders ?? []).forEach((order: any) => {
+      const dateKey = getScheduledDateKey(order?.historical_linked_at ?? order?.dateKey);
+      if (!dateKey || dateKey < minDate) return;
+      const current = grouped.get(dateKey) ?? [];
+      current.push(order);
+      grouped.set(dateKey, current);
+    });
+    return grouped;
+  }, [scheduledOrders, minDate]);
   const [currentDate, setCurrentDate] = useState(() => {
     const initialKey = value && value >= minDate ? value : minDate;
     return new Date(`${initialKey}T12:00:00`);
@@ -2847,32 +2872,54 @@ function MinimalCalendar({
   }, [value]);
 
   if (compact) {
-    return normalizedDates.length === 0 ? (
-      <div className="rounded-2xl bg-gray-50 border border-dashed border-gray-200 px-3 py-4 text-center">
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sin fechas programadas</p>
-      </div>
-    ) : (
-      <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar -mx-1 px-1">
-        {normalizedDates.map(dateKey => {
-          const active = dateKey === value;
-          const date = new Date(`${dateKey}T12:00:00`);
-          return (
-            <button
-              key={dateKey}
-              type="button"
-              onClick={() => onChange(dateKey)}
-              className={cn(
-                'min-w-[92px] rounded-2xl border px-3 py-2 text-left transition-all active:scale-95',
-                active ? 'bg-[#ff2d78] border-[#ff2d78] text-white shadow-sm' : 'bg-gray-50 border-gray-100 text-gray-700 hover:border-gray-200'
-              )}
-            >
-              <p className={cn('text-[9px] font-black uppercase tracking-wider', active ? 'text-white/80' : 'text-gray-400')}>
-                {formatScheduledDate(dateKey, minDate)}
-              </p>
-              <p className="text-sm font-black mt-0.5">{date.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' }).replace(/\./g, '')}</p>
-            </button>
-          );
-        })}
+    const compactStart = startOfWeek(new Date(`${minDate}T12:00:00`), { weekStartsOn: 1 });
+    const compactDays = Array.from({ length: 14 }, (_, index) => addDays(compactStart, index));
+    const dayLabels = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
+
+    return (
+      <div className="w-full font-sans select-none">
+        <div className="grid grid-cols-7 gap-1 text-center mb-1">
+          {dayLabels.map(day => (
+            <span key={day} className="text-[9px] font-black text-gray-400 tracking-wide">{day}</span>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {compactDays.map(date => {
+            const dateKey = getLocalDateKey(date);
+            const ordersForDate = scheduledOrdersByDate.get(dateKey) ?? [];
+            const isPast = dateKey < minDate;
+            const isSelected = dateKey === value;
+            const markers = ordersForDate.slice(0, 3);
+
+            return (
+              <button
+                key={dateKey}
+                type="button"
+                disabled={isPast}
+                onClick={() => onChange(dateKey)}
+                className={cn(
+                  'h-12 rounded-xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95',
+                  isPast ? 'text-gray-200 cursor-not-allowed' : 'text-[#1f2937] hover:bg-gray-50 cursor-pointer',
+                  isSelected && 'bg-[#fff0f5] text-[#ff2d78] font-black hover:bg-[#fff0f5]'
+                )}
+              >
+                <span className="text-[14px] leading-none font-black">{format(date, 'd')}</span>
+                <span className="h-2 flex items-center justify-center gap-1">
+                  {markers.map((order: any, markerIndex: number) => (
+                    <span
+                      key={`${dateKey}-${order.id ?? markerIndex}`}
+                      className={cn(
+                        'w-1.5 h-1.5 rounded-full',
+                        Number(order.bagCount ?? 1) > 1 ? 'bg-[#ff2d78]' : 'bg-[#007AFF]'
+                      )}
+                      aria-hidden="true"
+                    />
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -2947,11 +2994,8 @@ function MinimalCalendar({
 
 function CalendarView({ lives, onAdd }: any) {
   return (
-    <motion.div 
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.1, ease: "linear" }}
+    <motion.div
+      {...PAGE_TRANSITION}
       className="space-y-6"
     >
       <div className="flex justify-between items-center px-1">
@@ -3831,11 +3875,8 @@ function PaymentsView({
     : 'Iniciar bloque de Live desde este momento';
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.1, ease: "linear" }}
+    <motion.div
+      {...PAGE_TRANSITION}
       className="space-y-4"
     >
       <div className="flex justify-between items-center px-1">
@@ -4710,10 +4751,7 @@ function FinanceView({ transactions, payments, categories, onAdd, onEdit, onRefr
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.1, ease: "linear" }}
+      {...PAGE_TRANSITION}
       className="space-y-6 pb-20"
     >
       <AnimatePresence>
@@ -6789,12 +6827,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
 
   if (view === 'verify' && selectedPedido) {
     return (
-      <motion.div 
-        initial={{ opacity: 0, x: '100%' }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: '100%' }}
-        transition={{ duration: 0.15, ease: "linear" }}
-        className="absolute inset-0 z-[120] bg-white flex flex-col no-scrollbar"
+      <motion.div
+        {...PAGE_TRANSITION}
+        className="fixed inset-0 z-[120] w-full max-w-[480px] mx-auto bg-white flex flex-col overflow-x-hidden no-scrollbar"
       >
         <div className="clone-header-container">
           <div className="flex items-start gap-3">
@@ -7043,12 +7078,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   }
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, x: '100%' }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: '100%' }}
-      transition={{ duration: 0.15, ease: "linear" }}
-      className="absolute inset-0 z-[120] bg-white flex flex-col no-scrollbar"
+    <motion.div
+      {...PAGE_TRANSITION}
+      className="fixed inset-0 z-[120] w-full max-w-[480px] mx-auto bg-white flex flex-col overflow-x-hidden no-scrollbar"
     >
       <div className="clone-header-container">
         <div className="flex items-start gap-3">
