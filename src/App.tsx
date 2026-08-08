@@ -3618,29 +3618,31 @@ function PaymentsView({
           onClick={onOpenCalendar}
           className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3 px-2 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <div className="flex flex-col text-left leading-[1.1] min-w-0 pr-1">
-            <span className="text-[8px] font-bold text-pink-500 uppercase tracking-tight">TOTAL</span>
-            <span className="text-[9.5px] font-black text-pink-600 uppercase truncate">{dateLabel}</span>
-          </div>
+          {(() => {
+            const isTodayLabel = String(dateLabel).toUpperCase().trim() === 'TOTAL HOY' || String(dateLabel).toUpperCase().trim() === 'HOY';
+            const displaySubLabel = isTodayLabel ? 'HOY' : String(dateLabel).toUpperCase();
+            return (
+              <div className="flex flex-col text-left leading-[1.05] min-w-0 pr-1">
+                <span className="text-[8px] font-bold text-pink-500 uppercase tracking-tight">TOTAL</span>
+                <span className="text-[9.5px] font-black text-pink-600 uppercase truncate">{displaySubLabel}</span>
+              </div>
+            );
+          })()}
           <span className="text-[13.5px] font-black text-pink-700 flex-shrink-0">Bs {stats.totalSelected}</span>
         </button>
         
-        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3 px-2 flex items-center justify-between">
-          <div className="flex flex-col text-left leading-[1.1] min-w-0 pr-1">
-            <span className="text-[8px] font-bold text-blue-500 uppercase tracking-tight">CANT.</span>
-            <span className="text-[9.5px] font-black text-blue-600 uppercase truncate">PAGOS</span>
-          </div>
+        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3 px-2.5 flex items-center justify-between">
+          <span className="text-[10px] font-black uppercase text-blue-600 truncate mr-1">Pagos</span>
           <span className="text-[13.5px] font-black text-blue-700 leading-none flex-shrink-0">{stats.count}</span>
         </div>
 
         <button 
           onClick={onOpenPeople}
-          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3 px-2 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3 px-2.5 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <div className="flex flex-col text-left leading-[1.1] min-w-0 pr-1">
-            <span className="text-[8px] font-bold text-emerald-500 uppercase tracking-tight">TOTAL</span>
-            <span className="text-[9.5px] font-black text-emerald-600 uppercase truncate">PERSONAS</span>
-          </div>
+          <span className="text-[10px] font-black uppercase text-emerald-600 truncate mr-1">
+            {stats.people === 1 ? 'Persona' : 'Personas'}
+          </span>
           <span className="text-[13.5px] font-black text-emerald-700 leading-none flex-shrink-0">{stats.people}</span>
         </button>
       </div>
