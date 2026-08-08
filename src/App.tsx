@@ -1599,6 +1599,7 @@ export default function App() {
               isInstallable={isInstallable}
               onInstall={handleInstallClick}
               onNavigate={(tab: string) => setCurrentTab(tab as any)}
+              onSelectPerson={(id: string) => setSelectedPersonId(id)}
               sectionVisibility={sectionVisibility}
             />
           )}
@@ -1922,9 +1923,25 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
 
 // --- Views ---
 
-function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate, sectionVisibility }: any) {
+function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate, onSelectPerson, sectionVisibility }: any) {
   const today = new Date();
   const todayStr = today.toDateString();
+  const [showEntregadosModal, setShowEntregadosModal] = useState(false);
+
+  // Formateadores de ayuda
+  const formatName = (name: string) => {
+    if (!name) return '';
+    return name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  };
+
+  const formatDisplayPhone = (ph: string) => {
+    if (!ph) return '';
+    let clean = ph.trim().replace(/\D/g, '');
+    if (clean.startsWith('591') && clean.length > 8) {
+      clean = clean.slice(3);
+    }
+    return clean;
+  };
 
   // Métricas de pagos
   const pagosContables = (payments ?? []).filter(isCountablePayment);
@@ -1949,12 +1966,23 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
   }).length;
 
   // Pedidos entregados hoy
-  const pedidosEntregadosHoy = (pedidos ?? []).filter((p: any) => {
+  const listEntregadosHoy = (pedidos ?? []).filter((p: any) => {
     const s = (p.status ?? '').toLowerCase();
     if (s !== 'entregado') return false;
     const updatedDate = new Date(p.updatedAt || p.updated_at || p.date || p.fecha);
     return updatedDate.toDateString() === todayStr;
-  }).length;
+  });
+  const pedidosEntregadosHoyCount = listEntregadosHoy.length;
+
+  // Ocupación de casilleros (Total capacidad física = 126)
+  const activos = (pedidos ?? []).filter((p: any) => {
+    const s = (p.status ?? '').toLowerCase();
+    return s === 'listo' || s === 'preparado' || s === 'ready';
+  });
+  const uniqueLabels = new Set(activos.map((p: any) => p.label).filter(Boolean));
+  const occupiedCount = uniqueLabels.size;
+  const capacity = 126;
+  const occupancyPercent = capacity > 0 ? Math.round((occupiedCount / capacity) * 100) : 0;
 
   // Próximo live
   const nextLive = (lives ?? []).find((l: any) => l.status === 'scheduled');
@@ -1977,7 +2005,7 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
     >
       {/* Banner PWA compacto */}
       {isInstallable && (
-        <div className="flex items-center justify-between bg-white/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-brand/10">
+        <div className="flex items-center justify-between bg-white/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-brand/10 shadow-sm">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-brand flex items-center justify-center">
               <Rocket className="w-3.5 h-3.5 text-white" />
@@ -1991,23 +2019,23 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
         </div>
       )}
 
-      {/* Tarjeta de Ingresos compacta */}
+      {/* Tarjeta de Ingresos compacta rediseñada */}
       <div className="rounded-[20px] px-4 py-3.5 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #ff2d78 0%, #ff6fa3 100%)' }}>
         <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-0.5">Ingresos hoy</p>
         <h2 className="text-2xl font-black leading-none mb-2.5">Bs {ingresosHoy.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</h2>
         
-        <div className="grid grid-cols-3 gap-2 border-t border-white/10 pt-2">
+        <div className="grid grid-cols-3 gap-2.5 border-t border-white/20 pt-2.5 mt-2">
           <div>
-            <p className="text-[9px] opacity-70 font-bold uppercase tracking-wide">Pagos hoy</p>
-            <p className="text-base font-black leading-none mt-0.5">{pagosHoy.length}</p>
+            <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Pagos hoy</p>
+            <p className="text-sm font-black leading-none mt-1">{pagosHoy.length} reg.</p>
           </div>
           <div>
-            <p className="text-[9px] opacity-70 font-bold uppercase tracking-wide">Acumulado</p>
-            <p className="text-base font-black leading-none mt-0.5">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
+            <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Mes actual</p>
+            <p className="text-sm font-black leading-none mt-1">Bs {ingresosMes.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
           </div>
           <div>
-            <p className="text-[9px] opacity-70 font-bold uppercase tracking-wide">Mes actual</p>
-            <p className="text-base font-black leading-none mt-0.5">Bs {ingresosMes.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
+            <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Acumulado</p>
+            <p className="text-sm font-black leading-none mt-1">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
           </div>
         </div>
       </div>
@@ -2016,7 +2044,7 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
       <div className="grid grid-cols-3 gap-2">
         <button 
           onClick={() => onNavigate?.('payments')}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center"
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm"
         >
           <span className="text-xl font-black text-amber-500">{pagosSinProcesar}</span>
           <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Pagos sin<br/>procesar</span>
@@ -2024,24 +2052,38 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
 
         <button 
           onClick={() => onNavigate?.('entrega')}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center"
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm"
         >
           <span className="text-xl font-black text-[#007AFF]">{pedidosListos}</span>
           <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Listos en<br/>casillero</span>
         </button>
 
         <button 
-          onClick={() => onNavigate?.('payments')}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center"
+          onClick={() => setShowEntregadosModal(true)}
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm"
         >
-          <span className="text-xl font-black text-emerald-600">{pedidosEntregadosHoy}</span>
+          <span className="text-xl font-black text-emerald-600">{pedidosEntregadosHoyCount}</span>
           <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Entregados<br/>hoy</span>
         </button>
       </div>
 
+      {/* Ocupación de Casilleros */}
+      <div className="bg-white rounded-2xl p-3 border border-gray-100 shadow-sm space-y-1.5">
+        <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-gray-500">
+          <span>Ocupación de Casilleros</span>
+          <span className="text-brand">{occupiedCount} / {capacity} ({occupancyPercent}%)</span>
+        </div>
+        <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-brand to-[#ff6fa3] rounded-full transition-all duration-500" 
+            style={{ width: `${occupancyPercent}%` }}
+          />
+        </div>
+      </div>
+
       {/* Próximo live */}
       {nextLive && (
-        <div className="bg-white rounded-2xl p-3 flex items-center gap-3 border border-gray-100">
+        <div className="bg-white rounded-2xl p-3 flex items-center gap-3 border border-gray-100 shadow-sm">
           <div className="w-8.5 h-8.5 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#fff0f5' }}>
             <Video className="w-4 h-4" style={{ color: '#ff2d78' }} />
           </div>
@@ -2058,23 +2100,150 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
       <div className="grid grid-cols-2 gap-2">
         <button
           onClick={() => onNavigate?.('entrega')}
-          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100"
+          className="bg-white rounded-2xl p-3.5 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100 shadow-sm"
         >
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#fff0f5' }}>
-            <Package className="w-3.5 h-3.5" style={{ color: '#ff2d78' }} />
+          <div className="w-8.5 h-8.5 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
+            <Package className="w-4 h-4" style={{ color: '#ff2d78' }} />
           </div>
-          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide mt-1 leading-none">Ver Casilleros</p>
+          <p className="text-[10.5px] font-black text-gray-700 uppercase tracking-wide mt-1.5 leading-none">Ver Casilleros</p>
         </button>
         <button
           onClick={() => onNavigate?.('payments')}
-          className="bg-white rounded-2xl p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100"
+          className="bg-white rounded-2xl p-3.5 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all border border-gray-100 shadow-sm"
         >
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#fff0f5' }}>
-            <Wallet className="w-3.5 h-3.5" style={{ color: '#ff2d78' }} />
+          <div className="w-8.5 h-8.5 rounded-xl flex items-center justify-center" style={{ background: '#fff0f5' }}>
+            <Wallet className="w-4 h-4" style={{ color: '#ff2d78' }} />
           </div>
-          <p className="text-[10px] font-black text-gray-700 uppercase tracking-wide mt-1 leading-none">Ver Pagos</p>
+          <p className="text-[10.5px] font-black text-gray-700 uppercase tracking-wide mt-1.5 leading-none">Ver Pagos</p>
         </button>
       </div>
+
+      {/* Entregas de hoy (Resumen visual en la base del Dashboard) */}
+      <div className="bg-white rounded-[24px] p-4 border border-gray-100 shadow-sm space-y-3">
+        <p className="text-[10.5px] font-black text-gray-400 uppercase tracking-[0.15em]">Entregas de hoy</p>
+        {listEntregadosHoy.length === 0 ? (
+          <div className="text-center py-6 text-gray-300">
+            <Package className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
+            <p className="text-[11px] font-bold uppercase tracking-wider">Sin entregas hoy</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100/60 max-h-[220px] overflow-y-auto pr-1">
+            {listEntregadosHoy.map((p: any, idx: number) => {
+              const phoneText = formatDisplayPhone(p.customerWhatsApp || p.phone);
+              return (
+                <div 
+                  key={`${p.id}-${idx}`} 
+                  onClick={() => {
+                    if (p.customerId && onSelectPerson) {
+                      onSelectPerson(p.customerId);
+                    }
+                  }}
+                  className="py-2.5 flex items-center justify-between cursor-pointer hover:bg-gray-50/50 transition-colors rounded-xl px-1"
+                >
+                  <div className="text-left min-w-0 flex-1 pr-2">
+                    <p className="text-xs font-bold text-gray-800 truncate leading-snug">
+                      {formatName(p.customerName)}
+                    </p>
+                    {phoneText && (
+                      <p className="text-[9.5px] text-gray-400 font-semibold mt-0.5">
+                        {phoneText}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${p.labelType === 'letter' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>
+                      Casillero {p.label}
+                    </span>
+                    <div className="w-5 h-5 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500">
+                      <Check className="w-3 h-3" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Modal Popup para ver Entregados Hoy */}
+      <AnimatePresence>
+        {showEntregadosModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowEntregadosModal(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-md bg-white rounded-[30px] shadow-2xl overflow-hidden flex flex-col max-h-[80vh] font-sans"
+            >
+              {/* Header */}
+              <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-white">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8.5 h-8.5 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-500">
+                    <Package className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-gray-900 uppercase tracking-tight">Entregados hoy</h3>
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">{pedidosEntregadosHoyCount} Pedido{pedidosEntregadosHoyCount !== 1 ? 's' : ''}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowEntregadosModal(false)} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+                  <X className="w-4.5 h-4.5 text-gray-400" />
+                </button>
+              </div>
+
+              {/* List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                {listEntregadosHoy.length === 0 ? (
+                  <div className="text-center py-12 text-gray-300">
+                    <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs font-bold uppercase tracking-wider">No hay entregas registradas hoy</p>
+                  </div>
+                ) : (
+                  listEntregadosHoy.map((p: any, idx: number) => {
+                    const phoneText = formatDisplayPhone(p.customerWhatsApp || p.phone);
+                    return (
+                      <div 
+                        key={`popup-entregado-${p.id}-${idx}`}
+                        onClick={() => {
+                          setShowEntregadosModal(false);
+                          if (p.customerId && onSelectPerson) {
+                            onSelectPerson(p.customerId);
+                          }
+                        }}
+                        className="w-full bg-white border border-gray-100 rounded-2xl p-3 flex items-center justify-between hover:bg-gray-50 transition-colors cursor-pointer"
+                      >
+                        <div className="text-left min-w-0 flex-1 pr-2">
+                          <p className="text-xs font-bold text-gray-900 truncate leading-snug">
+                            {formatName(p.customerName)}
+                          </p>
+                          {phoneText && (
+                            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
+                              {phoneText}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${p.labelType === 'letter' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>
+                            Casillero {p.label}
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-gray-300" />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -3447,25 +3616,32 @@ function PaymentsView({
       <div className="grid grid-cols-3 gap-1">
         <button 
           onClick={onOpenCalendar}
-          className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3.5 px-2 flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3 px-2 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <span className="text-[10px] font-black uppercase tracking-wider text-pink-600 truncate">{dateLabel}</span>
-          <span className="text-[14px] font-black leading-none text-pink-700 flex-shrink-0">Bs {stats.totalSelected}</span>
+          <div className="flex flex-col text-left leading-[1.1] min-w-0 pr-1">
+            <span className="text-[8px] font-bold text-pink-500 uppercase tracking-tight">TOTAL</span>
+            <span className="text-[9.5px] font-black text-pink-600 uppercase truncate">{dateLabel}</span>
+          </div>
+          <span className="text-[13.5px] font-black text-pink-700 flex-shrink-0">Bs {stats.totalSelected}</span>
         </button>
         
-        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3.5 px-2 flex items-center justify-center gap-1.5">
-          <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 truncate">Pagos</span>
-          <span className="text-[14px] font-black text-blue-700 leading-none flex-shrink-0">{stats.count}</span>
+        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3 px-2 flex items-center justify-between">
+          <div className="flex flex-col text-left leading-[1.1] min-w-0 pr-1">
+            <span className="text-[8px] font-bold text-blue-500 uppercase tracking-tight">CANT.</span>
+            <span className="text-[9.5px] font-black text-blue-600 uppercase truncate">PAGOS</span>
+          </div>
+          <span className="text-[13.5px] font-black text-blue-700 leading-none flex-shrink-0">{stats.count}</span>
         </div>
 
         <button 
           onClick={onOpenPeople}
-          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3.5 px-2 flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3 px-2 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 truncate">
-            {stats.people === 1 ? 'Persona' : 'Personas'}
-          </span>
-          <span className="text-[14px] font-black text-emerald-700 leading-none flex-shrink-0">{stats.people}</span>
+          <div className="flex flex-col text-left leading-[1.1] min-w-0 pr-1">
+            <span className="text-[8px] font-bold text-emerald-500 uppercase tracking-tight">TOTAL</span>
+            <span className="text-[9.5px] font-black text-emerald-600 uppercase truncate">PERSONAS</span>
+          </div>
+          <span className="text-[13.5px] font-black text-emerald-700 leading-none flex-shrink-0">{stats.people}</span>
         </button>
       </div>
 
@@ -6035,8 +6211,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     return { view: 'detail' as const, selectedPedido: null };
   }, [dailyOrders]);
 
-  const [view, setView] = useState<'detail' | 'verify'>(forceDetailView ? 'verify' : initialOrder.view);
-  const [selectedPedido, setSelectedPedido] = useState<any>(forceDetailView ? initialOrder.selectedPedido : initialOrder.selectedPedido);
+  const [view, setView] = useState<'detail' | 'verify'>('detail');
+  const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [showAddPedido, setShowAddPedido] = useState(false);
   const [expandedPayments, setExpandedPayments] = useState<string[]>([]);
   // Para PROCESAR: empieza en 0 (el operador cuenta desde cero).
