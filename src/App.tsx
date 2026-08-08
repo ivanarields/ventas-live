@@ -2044,26 +2044,35 @@ function HomeView({ orders, lives, transactions, payments, pedidos, onAdd, isIns
       <div className="grid grid-cols-3 gap-2">
         <button 
           onClick={() => onNavigate?.('payments')}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm"
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
         >
-          <span className="text-xl font-black text-amber-500">{pagosSinProcesar}</span>
-          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Pagos sin<br/>procesar</span>
+          <div className="flex items-center gap-1.5 justify-center mb-1">
+            <AlertCircle className={cn("w-4 h-4 text-amber-500", pagosSinProcesar > 0 && "animate-pulse")} />
+            <span className="text-xl font-black text-amber-500">{pagosSinProcesar}</span>
+          </div>
+          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide leading-none text-center">Pagos sin<br/>procesar</span>
         </button>
 
         <button 
           onClick={() => onNavigate?.('entrega')}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm"
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
         >
-          <span className="text-xl font-black text-[#007AFF]">{pedidosListos}</span>
-          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Listos en<br/>casillero</span>
+          <div className="flex items-center gap-1.5 justify-center mb-1">
+            <Package className="w-4 h-4 text-[#007AFF]" />
+            <span className="text-xl font-black text-[#007AFF]">{pedidosListos}</span>
+          </div>
+          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide leading-none text-center">Listos en<br/>casillero</span>
         </button>
 
         <button 
           onClick={() => setShowEntregadosModal(true)}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm"
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
         >
-          <span className="text-xl font-black text-emerald-600">{pedidosEntregadosHoyCount}</span>
-          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide mt-1 leading-none text-center">Entregados<br/>hoy</span>
+          <div className="flex items-center gap-1.5 justify-center mb-1">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span className="text-xl font-black text-emerald-600">{pedidosEntregadosHoyCount}</span>
+          </div>
+          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide leading-none text-center">Entregados<br/>hoy</span>
         </button>
       </div>
 
@@ -2591,19 +2600,73 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                 );
               })()}
 
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className={cn(
-                  "px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border",
-                  selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB'
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                    : "bg-purple-50 text-purple-700 border-purple-200"
-                )}>
-                  {selectedPedido.source === 'WEB' || selectedPedido.labelType === 'WEB' ? 'Compra Web' : 'Pedido Live'}
-                </span>
-
-                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-gray-100 text-gray-600 border border-gray-200">
-                  {selectedPedido.labelType === 'letter' ? 'Etiqueta Exclusiva' : 'Etiqueta Compartida'}
-                </span>
+              {/* Programador de Entrega Rápido */}
+              <div className="w-full mt-1.5 px-1 relative">
+                <label className="relative flex items-center justify-center gap-1.5 bg-[#F5F9FF] border border-blue-100 hover:bg-[#E3F2FD] rounded-2xl px-4 py-2.5 text-xs font-black text-[#007AFF] cursor-pointer active:scale-95 transition-all shadow-xs">
+                  <Calendar className="w-4 h-4 text-[#007AFF]" />
+                  <span className="uppercase tracking-wider">
+                    {selectedPedido.historical_linked_at 
+                      ? `Entrega: ${(() => {
+                          try {
+                            const d = new Date(selectedPedido.historical_linked_at);
+                            const utcDate = new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+                            return utcDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
+                          } catch (e) {
+                            return '';
+                          }
+                        })()}`
+                      : 'Programar Entrega'}
+                  </span>
+                  <input
+                    type="date"
+                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                    value={selectedPedido.historical_linked_at ? new Date(selectedPedido.historical_linked_at).toISOString().split('T')[0] : ''}
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      if (val) {
+                        try {
+                          const isoDate = new Date(val + 'T12:00:00').toISOString();
+                          await pedidosApi.update(selectedPedido.id, { historical_linked_at: isoDate });
+                          
+                          // Actualizar estado local del modal al instante
+                          const updated = { ...selectedPedido, historical_linked_at: isoDate };
+                          setSelectedPedido(updated);
+                          
+                          // Refrescar lista de pedidos
+                          if (typeof onRefresh === 'function') {
+                            onRefresh();
+                          }
+                        } catch (err) {
+                          console.error('Error al actualizar fecha de entrega:', err);
+                        }
+                      }
+                    }}
+                  />
+                </label>
+                {selectedPedido.historical_linked_at && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await pedidosApi.update(selectedPedido.id, { historical_linked_at: null });
+                        
+                        // Actualizar estado local del modal al instante
+                        const updated = { ...selectedPedido, historical_linked_at: null };
+                        setSelectedPedido(updated);
+                        
+                        if (typeof onRefresh === 'function') {
+                          onRefresh();
+                        }
+                      } catch (err) {
+                        console.error('Error al remover fecha de entrega:', err);
+                      }
+                    }}
+                    className="absolute right-[-6px] top-1/2 -translate-y-1/2 bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 p-1.5 rounded-full shadow-sm transition-all active:scale-90 z-10"
+                    title="Eliminar programación"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -3631,16 +3694,16 @@ function PaymentsView({
           <span className="text-[13.5px] font-black text-pink-700 flex-shrink-0">Bs {stats.totalSelected}</span>
         </button>
         
-        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3 px-2.5 flex items-center justify-between">
-          <span className="text-[10px] font-black uppercase text-blue-600 truncate mr-1">Pagos</span>
+        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-2">
+          <span className="text-[10px] font-black uppercase text-blue-600 truncate">Pagos</span>
           <span className="text-[13.5px] font-black text-blue-700 leading-none flex-shrink-0">{stats.count}</span>
         </div>
 
         <button 
           onClick={onOpenPeople}
-          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3 px-2.5 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <span className="text-[10px] font-black uppercase text-emerald-600 truncate mr-1">
+          <span className="text-[10px] font-black uppercase text-emerald-600 truncate">
             {stats.people === 1 ? 'Persona' : 'Personas'}
           </span>
           <span className="text-[13.5px] font-black text-emerald-700 leading-none flex-shrink-0">{stats.people}</span>
