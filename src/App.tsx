@@ -3447,25 +3447,25 @@ function PaymentsView({
       <div className="grid grid-cols-3 gap-1">
         <button 
           onClick={onOpenCalendar}
-          className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3.5 px-2 flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <span className="text-[9px] font-black uppercase tracking-wider text-pink-600 truncate">{dateLabel}</span>
-          <span className="text-[12.5px] font-black leading-none text-pink-700 flex-shrink-0">Bs {stats.totalSelected}</span>
+          <span className="text-[10px] font-black uppercase tracking-wider text-pink-600 truncate">{dateLabel}</span>
+          <span className="text-[14px] font-black leading-none text-pink-700 flex-shrink-0">Bs {stats.totalSelected}</span>
         </button>
         
-        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-1.5">
-          <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 truncate">Pagos</span>
-          <span className="text-[12.5px] font-black text-blue-700 leading-none flex-shrink-0">{stats.count}</span>
+        <div className="bg-blue-50/50 border border-blue-100/70 rounded-2xl py-3.5 px-2 flex items-center justify-center gap-1.5">
+          <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 truncate">Pagos</span>
+          <span className="text-[14px] font-black text-blue-700 leading-none flex-shrink-0">{stats.count}</span>
         </div>
 
         <button 
           onClick={onOpenPeople}
-          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3.5 px-2 flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 truncate">
+          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 truncate">
             {stats.people === 1 ? 'Persona' : 'Personas'}
           </span>
-          <span className="text-[12.5px] font-black text-emerald-700 leading-none flex-shrink-0">{stats.people}</span>
+          <span className="text-[14px] font-black text-emerald-700 leading-none flex-shrink-0">{stats.people}</span>
         </button>
       </div>
 
