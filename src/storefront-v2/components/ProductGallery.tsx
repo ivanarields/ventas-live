@@ -221,7 +221,7 @@ export function ProductGallery({ onProductSelect, onBack, onOpenCart, onOpenProf
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Buscar producto..."
                 className="flex-1 bg-transparent text-[14px] font-medium outline-none"
-                style={{ color: darkMode ? '#e8d0da' : '#1f2937' }}
+                style={{ color: darkMode ? '#e8d0da' : '#475467' }}
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')} className="transition-colors flex-shrink-0" aria-label="Limpiar busqueda">

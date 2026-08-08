@@ -332,7 +332,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center p-6 text-center" style={{ background: darkMode ? '#1a0c12' : '#fef1f5' }}>
         <div className="text-5xl mb-4">🛍️</div>
-        <h2 className="text-xl font-black mb-2" style={{ color: darkMode ? 'white' : '#1f2937' }}>Tu carrito está vacío</h2>
+        <h2 className="text-xl font-black mb-2" style={{ color: darkMode ? 'white' : '#475467' }}>Tu carrito está vacío</h2>
         <p className="text-sm mb-6" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Agrega prendas para poder pagar.</p>
         <button onClick={onBack} className="px-8 py-3 rounded-2xl font-black text-white"
           style={{ background: BRAND }}>
@@ -351,7 +351,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <h1 className="text-2xl font-black mb-2" style={{ color: darkMode ? 'white' : '#1f2937' }}>¡Pago Verificado!</h1>
+        <h1 className="text-2xl font-black mb-2" style={{ color: darkMode ? 'white' : '#475467' }}>¡Pago Verificado!</h1>
         <p className="text-sm mb-1" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>Pedido <strong>#{orderId}</strong> confirmado.</p>
         <p className="text-xs mb-8" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Tus prendas están apartadas. ✨</p>
         <button onClick={onOrderComplete}
@@ -433,7 +433,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           {/* Monto y Resumen */}
           <div className="mb-3">
             <p className="text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>Total a Pagar</p>
-            <p className="font-black leading-none tracking-tight" style={{ fontSize: 'clamp(38px, 9dvh, 52px)', color: darkMode ? 'white' : '#1f2937' }}>
+            <p className="font-black leading-none tracking-tight" style={{ fontSize: 'clamp(38px, 9dvh, 52px)', color: darkMode ? 'white' : '#475467' }}>
               {payableTotal.toFixed(2)} <span className="text-[20px] text-[#ff2d78]">Bs</span>
             </p>
             <p className="text-[12px] font-medium mt-2" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>
@@ -482,7 +482,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-black uppercase tracking-wider" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Resumen</p>
-                <p className="text-[13px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>
+              <p className="text-[13px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>
                   {primaryItem ? primaryItem.product.title : 'Pedido LeidyCandy'}
                 </p>
                 <p className="text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#6b7280' }}>1 prenda - Retiro coordinado</p>
@@ -500,7 +500,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           {/* Beneficiario */}
           <div className="mb-4">
             <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Beneficiario</p>
-            <p className="text-[14px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Leidy Candy Diaz Sanchez</p>
+            <p className="text-[14px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>Leidy Candy Diaz Sanchez</p>
           </div>
 
           {bankDetected && !verified && (
@@ -570,7 +570,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
           </svg>
         </button>
         <div>
-          <h2 className="text-[17px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Confirmar pedido</h2>
+          <h2 className="text-[17px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>Confirmar pedido</h2>
           <p className="text-[11px]" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Numero y PIN para apartar</p>
         </div>
       </div>
@@ -591,10 +591,10 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
                 <ProductThumb image={item.product.images[0]} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-white" width={40} height={40} />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-[12px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{item.product.title}</p>
+            <p className="text-[12px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>{item.product.title}</p>
                 {item.size && <p className="text-[10px]" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Talla {item.size} · ×{item.quantity}</p>}
               </div>
-              <p className="text-[12px] font-black flex-shrink-0" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>
+              <p className="text-[12px] font-black flex-shrink-0" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>
                 {(item.product.price * item.quantity).toFixed(2)} Bs
               </p>
             </div>
@@ -630,7 +630,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
                 className="flex-1 px-3 py-3.5 text-[15px] font-bold outline-none"
                 style={{
                   background: darkMode ? 'rgba(255,255,255,0.05)' : 'white',
-                  color: darkMode ? '#f0e0e8' : '#1f2937',
+                  color: darkMode ? '#f0e0e8' : '#475467',
                 }}
                 maxLength={8} autoFocus={phone.length !== 8}
               />
@@ -650,7 +650,7 @@ export function Checkout({ items, onBack, onOrderComplete, darkMode }: Props) {
               style={{
                 background: darkMode ? 'rgba(255,255,255,0.05)' : 'white',
                 borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb',
-                color: darkMode ? '#f0e0e8' : '#1f2937',
+                  color: darkMode ? '#f0e0e8' : '#475467',
               }}
               maxLength={4} autoFocus={phone.length === 8}
             />

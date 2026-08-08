@@ -280,7 +280,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
           </button>
           <div>
-            <h1 className="text-[18px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Mi perfil</h1>
+            <h1 className="text-[18px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>Mi perfil</h1>
             <p className="text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>WhatsApp y PIN para entrar</p>
           </div>
         </header>
@@ -316,7 +316,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                   className="flex-1 px-3 py-3.5 text-[15px] font-bold outline-none"
                   style={{
                     background: 'transparent',
-                    color: darkMode ? '#f0e0e8' : '#1f2937',
+                    color: darkMode ? '#f0e0e8' : '#475467',
                   }}
                   placeholder="60001234"
                 />
@@ -333,7 +333,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                 style={{
                   background: darkMode ? 'rgba(255,255,255,0.08)' : 'white',
                   borderColor: darkMode ? 'rgba(255,45,120,0.20)' : '#e5e7eb',
-                  color: darkMode ? '#f0e0e8' : '#1f2937',
+                  color: darkMode ? '#f0e0e8' : '#475467',
                 }}
                 placeholder="••••"
               />
@@ -373,7 +373,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <h1 className="text-[18px] font-black leading-tight truncate" style={{ color: darkMode ? 'white' : '#1f2937' }}>{displayName}</h1>
+              <h1 className="text-[18px] font-black leading-tight truncate" style={{ color: darkMode ? 'white' : '#475467' }}>{displayName}</h1>
               {user?.is_verified_customer && (
                 <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white" title="Cliente verificado">
                   <CheckCircle2 size={14} strokeWidth={3} />
@@ -429,7 +429,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                   <ProductThumb image={product.images[0]} className="w-full h-full object-cover" width={80} height={96} />
                 </button>
                 <div className="min-w-0 flex-1 py-1">
-                  <p className="text-[13px] font-black leading-snug line-clamp-2" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{product.title}</p>
+                  <p className="text-[13px] font-black leading-snug line-clamp-2" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>{product.title}</p>
                   <p className="text-[11px] text-gray-400 font-bold mt-0.5">{product.category}</p>
                   {product.category === 'Descuento' && Number(product.compare_at_price) > Number(product.price) ? (
                     <div className="mt-2 flex items-baseline gap-1.5">
@@ -483,7 +483,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                       </p>
                       <p className="text-[15px] font-black text-[#ff2d78] flex-shrink-0">{Number(order.total).toFixed(2)} Bs</p>
                     </div>
-                    <p className="text-[13px] font-black truncate mt-0.5" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>
+                    <p className="text-[13px] font-black truncate mt-0.5" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>
                       {firstItem?.productName ?? '—'}
                       {firstItem?.size ? ` (${firstItem.size})` : ''}
                       {extraCount > 0 ? <span className="text-gray-400 font-bold"> +{extraCount}</span> : null}
@@ -518,7 +518,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                 <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-500 flex items-center justify-center mx-auto">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-                <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>¡Fecha guardada!</p>
+                <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>¡Fecha guardada!</p>
                 <p className="text-[12px] text-gray-400 font-bold">
                   {selectedPickup
                     ? `${pickupDates.find(d => d.date === selectedPickup.date)?.label ?? selectedPickup.date} — ${selectedPickup.slot}`
@@ -528,7 +528,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
             ) : (
               <div className="rounded-3xl border border-white/60 shadow-sm p-4 space-y-4" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                 <div>
-                  <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>¿Cuándo retirás tu pedido?</p>
+                  <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>¿Cuándo retirás tu pedido?</p>
                   <p className="text-[12px] text-gray-400 font-bold">Elegí una de las fechas disponibles o pedí otro día.</p>
                 </div>
 
@@ -560,7 +560,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                             {isSelected && <div className="w-2.5 h-2.5 rounded-full bg-[#ff2d78]" />}
                           </div>
                           <div>
-                            <p className="text-[13px] font-black capitalize" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{option.label}</p>
+                            <p className="text-[13px] font-black capitalize" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>{option.label}</p>
                             <p className="text-[11px] font-bold text-gray-400">{option.slot}</p>
                           </div>
                         </button>
@@ -631,7 +631,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                 <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-500 flex items-center justify-center mx-auto">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-                <p className="text-[16px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>¡Prendas confirmadas!</p>
+                <p className="text-[16px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>¡Prendas confirmadas!</p>
                 <p className="text-[12px] text-gray-400 font-bold">
                   Confirmaste tu pedido #{nextOrder.id}. Ya estamos preparando todo para vos.
                 </p>
@@ -642,7 +642,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
             ) : (
               <div className="rounded-3xl border border-white/60 shadow-sm p-4 space-y-4" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
                 <div>
-                  <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Confirmá tus prendas</p>
+                  <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>Confirmá tus prendas</p>
                   <p className="text-[12px] text-gray-400 font-bold">Pedido #{nextOrder.id} · {Number(nextOrder.total).toFixed(2)} Bs</p>
                 </div>
                 <div className="space-y-2">
@@ -652,7 +652,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{item.productName}</p>
+                        <p className="text-[13px] font-black truncate" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>{item.productName}</p>
                         {item.size && <p className="text-[11px] font-bold text-gray-400">Talla: {item.size}</p>}
                       </div>
                       <p className="text-[13px] font-black text-[#ff2d78] flex-shrink-0">{item.price.toFixed(2)} Bs</p>
@@ -674,7 +674,7 @@ export function StoreProfile({ onBack, onLogout, onProductSelect, onOpenCart, in
         ) : (
           <section className="space-y-3">
             <div className="rounded-3xl border border-white/60 shadow-sm p-4" style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)' }}>
-              <p className="text-[13px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>Numero de WhatsApp</p>
+              <p className="text-[13px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>Numero de WhatsApp</p>
               <p className="text-[13px] text-gray-500 font-bold mt-1">+591 {user?.phone}</p>
             </div>
             <button onClick={handleLogout} className="w-full h-12 rounded-2xl font-black text-[13px]" style={{ background: 'rgba(255,255,255,0.55)', color: '#9ca3af' }}>Cerrar sesion</button>
@@ -692,7 +692,7 @@ function EmptyState({ title, text, darkMode }: { title: string; text: string; da
       <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-[#fff0f5] text-[#ff2d78] flex items-center justify-center">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
       </div>
-      <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>{title}</p>
+      <p className="text-[15px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>{title}</p>
       <p className="mt-1 text-[12px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>{text}</p>
     </div>
   );

@@ -12,7 +12,7 @@
   
   --color-base-bg: #f8f9fa; /* Light Gray Base */
   --color-base-border: rgba(0, 0, 0, 0.05);
-  --color-base-text: #1a1a1a; /* Dark Gray / Black */
+  --color-base-text: #344054; /* Neutral Gray */
   --color-base-text-muted: #6b7280; /* Medium Gray */
 
   /* Standard Hex Colors for html2canvas compatibility */
@@ -23,9 +23,9 @@
   --color-gray-400: #9ca3af;
   --color-gray-500: #6b7280;
   --color-gray-600: #4b5563;
-  --color-gray-700: #374151;
-  --color-gray-800: #1f2937;
-  --color-gray-900: #111827;
+  --color-gray-700: #475467;
+  --color-gray-800: #475467;
+  --color-gray-900: #344054;
 
   --color-slate-50: #f8fafc;
   --color-slate-100: #f1f5f9;
@@ -303,11 +303,11 @@
 /* --- NEW ORDER DETAIL STYLES --- */
 :root {
   --primary-pink: #E91E8C;
-  --dark-text: #1a1a1a;
+  --dark-text: #475467;
   --gray-text: #94A3B8;
   --bg-soft: #f9fafb;
   --magenta: #E91E8C;
-  --dark: #1a1a1a;
+  --dark: #475467;
   --gray-light: #f9fafb;
   --gray-muted: #9ca3af;
   --border: #f1f5f9;
@@ -360,9 +360,9 @@
 }
 
 .prenda-chip.active {
-  background-color: #1a1a1a;
+  background-color: #475467;
   color: #ffffff;
-  border-color: #1a1a1a;
+  border-color: #475467;
   box-shadow: 0 10px 20px rgba(0,0,0,0.15);
   transform: translateY(-2px);
 }

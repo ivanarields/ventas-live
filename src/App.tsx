@@ -515,6 +515,11 @@ const getScheduledDateKey = (value: any): string => {
   return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : '';
 };
 
+const getDeliveryMarkerType = (order: any): 'single-bag' | 'multiple-bags' => {
+  const isAlphabeticLocker = String(order?.labelType ?? '').toLowerCase() === 'letter';
+  return Number(order?.bagCount ?? 1) > 1 || isAlphabeticLocker ? 'multiple-bags' : 'single-bag';
+};
+
 const formatScheduledDate = (dateKey: string, todayKey = getLocalDateKey()): string => {
   if (dateKey === todayKey) return 'HOY';
   const today = new Date(`${todayKey}T12:00:00`);
@@ -1079,6 +1084,7 @@ export default function App() {
   const [editingPayment, setEditingPayment] = useState<any>(null);
   const [showPeopleModal, setShowPeopleModal] = useState(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [selectedLockerPedidoId, setSelectedLockerPedidoId] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -1202,6 +1208,7 @@ export default function App() {
         status: p.status ?? 'procesar',
         totalAmount: Number(p.total_amount ?? 0),
         date: p.date,
+        updatedAt: p.updated_at ?? p.updatedAt ?? null,
         historical_linked_at: p.historical_linked_at ?? null,
         labelVersion: p.label_version ?? 1,
         source: p.source ?? '',
@@ -1672,10 +1679,21 @@ export default function App() {
               onInstall={handleInstallClick}
               onNavigate={(tab: string) => setCurrentTab(tab as any)}
               onSelectPerson={(id: string) => setSelectedPersonId(id)}
+              onSelectLocker={(pedido: any) => {
+                setSelectedLockerPedidoId(String(pedido.id));
+              }}
               sectionVisibility={sectionVisibility}
             />
           )}
-          {currentTab === 'entrega' && <EntregaView pedidos={pedidos} customers={customers} onSelectPerson={(id) => setSelectedPersonId(id)} onRefresh={loadData} key="entrega" />}
+          {currentTab === 'entrega' && (
+            <EntregaView
+              pedidos={pedidos}
+              customers={customers}
+              onSelectPerson={(id) => setSelectedPersonId(id)}
+              onRefresh={loadData}
+              key="entrega"
+            />
+          )}
 
           {currentTab === 'payments' && (
             <PaymentsView 
@@ -1721,12 +1739,27 @@ export default function App() {
           )}
           {currentTab === 'settings' && <SettingsView payments={payments} customers={customers} onRefresh={loadData} onLogout={handleLogout} userId={user?.id ?? ''} sectionVisibility={sectionVisibility} onSectionVisibilityChange={handleSectionVisibilityChange} key="settings" />}
         </AnimatePresence>
+        {currentTab === 'inicio' && selectedLockerPedidoId && (
+          <EntregaView
+            pedidos={pedidos}
+            customers={customers}
+            onSelectPerson={(id) => {
+              setSelectedLockerPedidoId(null);
+              setSelectedPersonId(id);
+            }}
+            onRefresh={loadData}
+            focusPedidoId={selectedLockerPedidoId}
+            onFocusHandled={() => setSelectedLockerPedidoId(null)}
+            modalOnly
+            key="inicio-locker-sheet"
+          />
+        )}
       </main>
 
       {/* Bottom Nav */}
       <nav className="glass-nav fixed left-1/2 bottom-0 -translate-x-1/2 w-full max-w-[480px] min-w-0 px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-hidden pointer-events-auto">
         <TabButton active={currentTab === 'inicio'} icon={Home} label="Inicio" onClick={() => { setCurrentTab('inicio'); setSelectedPersonId(null); }} />
-        <TabButton active={currentTab === 'entrega'} icon={Package} label="Etiquetas" onClick={() => { setCurrentTab('entrega'); setSelectedPersonId(null); }} />
+        <TabButton active={currentTab === 'entrega'} icon={Package} label="Casilleros" onClick={() => { setCurrentTab('entrega'); setSelectedPersonId(null); }} />
         <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => { setCurrentTab('payments'); setSelectedPersonId(null); }} />
         {!sectionVisibility.dinero && <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Dinero" onClick={() => { setCurrentTab('finance'); setSelectedPersonId(null); }} />}
         {!sectionVisibility.tienda && <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => { setCurrentTab('tienda'); setSelectedPersonId(null); }} />}
@@ -1995,14 +2028,13 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
 
 // --- Views ---
 
-function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate, onSelectPerson, sectionVisibility }: any) {
+function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isInstallable, onInstall, onNavigate, onSelectPerson, onSelectLocker, sectionVisibility }: any) {
   const today = new Date();
   const todayStr = today.toDateString();
-  const [showEntregadosModal, setShowEntregadosModal] = useState(false);
-  const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string | null>(null);
+  const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string | null>(() => getLocalDateKey());
   const todayKey = getLocalDateKey(today);
-  const deliveryCalendarStart = startOfWeek(today, { weekStartsOn: 1 });
-  const deliveryCalendarEndKey = getLocalDateKey(addDays(deliveryCalendarStart, 13));
+  const deliveryCalendarStart = startOfWeek(today, { weekStartsOn: 0 });
+  const deliveryCalendarEndKey = getLocalDateKey(addDays(deliveryCalendarStart, 20));
 
   const upcomingDeliveryGroups = useMemo(() => {
     const grouped = new globalThis.Map<string, any[]>();
@@ -2024,7 +2056,9 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
       }));
   }, [pedidos, todayKey, deliveryCalendarEndKey]);
 
-  const activeDeliveryDate = selectedDeliveryDate ?? upcomingDeliveryGroups[0]?.dateKey ?? null;
+  const activeDeliveryDate = selectedDeliveryDate && selectedDeliveryDate >= todayKey && selectedDeliveryDate <= deliveryCalendarEndKey
+    ? selectedDeliveryDate
+    : todayKey;
   const activeDeliveryGroup = upcomingDeliveryGroups.find(group => group.dateKey === activeDeliveryDate) ?? null;
   const upcomingDeliveryOrders = useMemo(
     () => upcomingDeliveryGroups.flatMap(group => group.orders),
@@ -2068,25 +2102,14 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
     return s === 'listo' || s === 'preparado' || s === 'ready';
   }).length;
 
-  // Pedidos entregados hoy
-  const listEntregadosHoy = (pedidos ?? []).filter((p: any) => {
+  // Pedidos confirmados como entregados
+  const pedidosEntregados = (pedidos ?? []).filter((p: any) => {
     const s = (p.status ?? '').toLowerCase();
-    if (s !== 'entregado') return false;
-    const updatedDate = new Date(p.updatedAt || p.updated_at || p.date || p.fecha);
-    return updatedDate.toDateString() === todayStr;
+    return s === 'entregado';
   });
-  const pedidosEntregadosHoyCount = listEntregadosHoy.length;
+  const pedidosEntregadosCount = pedidosEntregados.length;
 
   // Ocupación de casilleros (Total capacidad física = 126)
-  const activos = (pedidos ?? []).filter((p: any) => {
-    const s = (p.status ?? '').toLowerCase();
-    return s === 'listo' || s === 'preparado' || s === 'ready';
-  });
-  const uniqueLabels = new Set(activos.map((p: any) => p.label).filter(Boolean));
-  const occupiedCount = uniqueLabels.size;
-  const capacity = 126;
-  const occupancyPercent = capacity > 0 ? Math.round((occupiedCount / capacity) * 100) : 0;
-
   // Próximo live
   const nextLive = (lives ?? []).find((l: any) => l.status === 'scheduled');
 
@@ -2146,47 +2169,39 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
           onClick={() => onNavigate?.('payments')}
           className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
         >
-          <div className="flex items-center gap-1.5 justify-center mb-1">
-            <AlertCircle className={cn("w-4 h-4 text-amber-500", pagosSinProcesar > 0 && "animate-pulse")} />
-            <span className="text-xl font-black text-amber-500">{pagosSinProcesar}</span>
+          <div className="flex items-center gap-2 justify-center mb-1.5">
+            <span className="w-8 h-8 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center">
+              <Clock className="w-5 h-5 stroke-[2.25px]" />
+            </span>
+            <span className="text-[26px] leading-none font-extrabold text-orange-500">{pagosSinProcesar}</span>
           </div>
-          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide leading-none text-center">Pagos sin<br/>procesar</span>
+          <span className="mt-1 text-[10px] font-bold text-[#8B95A7] uppercase tracking-wide leading-none text-center">Sin procesar</span>
         </button>
 
         <button 
           onClick={() => onNavigate?.('entrega')}
           className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
         >
-          <div className="flex items-center gap-1.5 justify-center mb-1">
-            <Package className="w-4 h-4 text-[#007AFF]" />
-            <span className="text-xl font-black text-[#007AFF]">{pedidosListos}</span>
+          <div className="flex items-center gap-2 justify-center mb-1.5">
+            <span className="w-8 h-8 rounded-xl bg-blue-50 text-[#1677FF] flex items-center justify-center">
+              <Package className="w-5 h-5 stroke-[2.25px]" />
+            </span>
+            <span className="text-[26px] leading-none font-extrabold text-[#1677FF]">{pedidosListos}</span>
           </div>
-          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide leading-none text-center">Listos en<br/>casillero</span>
+          <span className="mt-1 text-[10px] font-bold text-[#8B95A7] uppercase tracking-wide leading-none text-center">En casillero</span>
         </button>
 
-        <button 
-          onClick={() => setShowEntregadosModal(true)}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
+        <div
+          aria-label="Entregados"
+          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 flex flex-col items-center justify-center shadow-sm relative overflow-hidden select-none"
         >
-          <div className="flex items-center gap-1.5 justify-center mb-1">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span className="text-xl font-black text-emerald-600">{pedidosEntregadosHoyCount}</span>
+          <div className="flex items-center gap-2 justify-center mb-1.5">
+            <span className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <ShoppingBag className="w-5 h-5 stroke-[2.25px]" />
+            </span>
+            <span className="text-[26px] leading-none font-extrabold text-emerald-600">{pedidosEntregadosCount}</span>
           </div>
-          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wide leading-none text-center">Entregados<br/>hoy</span>
-        </button>
-      </div>
-
-      {/* Ocupación de Casilleros */}
-      <div className="bg-white rounded-2xl p-3 border border-gray-100 shadow-sm space-y-1.5">
-        <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-gray-500">
-          <span>Ocupación de Casilleros</span>
-          <span className="text-brand">{occupiedCount} / {capacity} ({occupancyPercent}%)</span>
-        </div>
-        <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-gradient-to-r from-brand to-[#ff6fa3] rounded-full transition-all duration-500" 
-            style={{ width: `${occupancyPercent}%` }}
-          />
+          <span className="mt-1 text-[10px] font-bold text-[#8B95A7] uppercase tracking-wide leading-none text-center">Entregados</span>
         </div>
       </div>
 
@@ -2209,8 +2224,7 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
       <section className="bg-white rounded-[24px] p-4 border border-gray-100 shadow-sm space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.12em]">Próximas entregas</p>
-            <p className="text-[10px] text-gray-400 font-semibold mt-1">Pedidos programados para entregar</p>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.12em]">Entregas próximas</p>
           </div>
           {upcomingDeliveryGroups.length > 0 && (
             <span className="bg-blue-50 text-[#007AFF] font-black text-[9px] px-2.5 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
@@ -2234,13 +2248,13 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
               <button
                 key={pedido.id}
                 type="button"
-                onClick={() => pedido.customerId && onSelectPerson?.(pedido.customerId)}
+                onClick={() => onSelectLocker?.(pedido)}
                 className="w-full py-3 px-2 flex items-center justify-between gap-3 text-left border-b border-gray-100 last:border-b-0 hover:bg-gray-50/70 active:scale-[0.99] transition-all"
               >
                 <span
                   className={cn(
                     'w-2.5 h-2.5 rounded-full flex-shrink-0',
-                    Number(pedido.bagCount ?? 1) > 1 ? 'bg-[#ff2d78]' : 'bg-[#007AFF]'
+                    getDeliveryMarkerType(pedido) === 'multiple-bags' ? 'bg-[#ff2d78]' : 'bg-[#007AFF]'
                   )}
                   aria-hidden="true"
                 />
@@ -2265,90 +2279,19 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
         )}
       </section>
 
-      {/* Modal Popup para ver Entregados Hoy */}
-      <AnimatePresence>
-        {showEntregadosModal && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowEntregadosModal(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-md bg-white rounded-[30px] shadow-2xl overflow-hidden flex flex-col max-h-[80vh] font-sans"
-            >
-              {/* Header */}
-              <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-white">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8.5 h-8.5 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-500">
-                    <Package className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-gray-900 uppercase tracking-tight">Entregados hoy</h3>
-                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">{pedidosEntregadosHoyCount} Pedido{pedidosEntregadosHoyCount !== 1 ? 's' : ''}</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowEntregadosModal(false)} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
-                  <X className="w-4.5 h-4.5 text-gray-400" />
-                </button>
-              </div>
-
-              {/* List */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
-                {listEntregadosHoy.length === 0 ? (
-                  <div className="text-center py-12 text-gray-300">
-                    <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                    <p className="text-xs font-bold uppercase tracking-wider">No hay entregas registradas hoy</p>
-                  </div>
-                ) : (
-                  listEntregadosHoy.map((p: any, idx: number) => {
-                    const phoneText = formatDisplayPhone(p.customerWhatsApp || p.phone);
-                    return (
-                      <div 
-                        key={`popup-entregado-${p.id}-${idx}`}
-                        onClick={() => {
-                          setShowEntregadosModal(false);
-                          if (p.customerId && onSelectPerson) {
-                            onSelectPerson(p.customerId);
-                          }
-                        }}
-                        className="w-full bg-white border border-gray-100 rounded-2xl p-3 flex items-center justify-between hover:bg-gray-50 transition-colors cursor-pointer"
-                      >
-                        <div className="text-left min-w-0 flex-1 pr-2">
-                          <p className="text-xs font-bold text-gray-900 truncate leading-snug">
-                            {formatName(p.customerName)}
-                          </p>
-                          {phoneText && (
-                            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
-                              {phoneText}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${p.labelType === 'letter' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>
-                            Casillero {p.label}
-                          </span>
-                          <ChevronRight className="w-4 h-4 text-gray-300" />
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
 
-function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedidos: any[]; customers: any[]; onSelectPerson: (id: string) => void; onRefresh: () => void }) {
+function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedidoId, onFocusHandled, modalOnly = false }: {
+  pedidos: any[];
+  customers: any[];
+  onSelectPerson: (id: string) => void;
+  onRefresh: () => void;
+  focusPedidoId?: string | null;
+  onFocusHandled?: () => void;
+  modalOnly?: boolean;
+}) {
   const getOccupantPhone = (occupant: any) => {
     if (!occupant) return 'Sin número';
     const c = (customers || []).find(cust => 
@@ -2367,6 +2310,14 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'numeric' | 'alpha'>('numeric');
   const [collapsedLabels, setCollapsedLabels] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!focusPedidoId) return;
+    const focusedPedido = pedidos.find(p => String(p.id) === String(focusPedidoId));
+    if (!focusedPedido) return;
+    setSelectedPedido(focusedPedido);
+    setShowDatePicker(false);
+  }, [focusPedidoId, pedidos]);
 
   const activos = pedidos.filter(p => {
     const s = (p.status ?? '').toLowerCase();
@@ -2411,6 +2362,12 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
     return clean;
   };
 
+  const closeSelectedPedido = () => {
+    setSelectedPedido(null);
+    setShowDatePicker(false);
+    onFocusHandled?.();
+  };
+
   const handleScheduleDate = async (dateKey: string) => {
     if (!selectedPedido || !dateKey) return;
     try {
@@ -2418,6 +2375,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
       await pedidosApi.update(selectedPedido.id, { historical_linked_at: isoDate });
       setShowDatePicker(false);
       setSelectedPedido(null);
+      onFocusHandled?.();
       onRefresh();
     } catch (error) {
       console.error('Error al actualizar fecha de entrega:', error);
@@ -2454,6 +2412,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
         await syncLabelsForCustomer(selectedPedido.customerId, updatedPedidos, customers);
       }
       setSelectedPedido(null);
+      onFocusHandled?.();
       onRefresh();
       confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 }, colors: ['#2E7D32', '#E8F5E9', '#10B981'] });
     } catch (e) {
@@ -2495,16 +2454,25 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
     setCollapsedLabels(prev => ({ ...prev, [code]: !prev[code] }));
   };
 
+  const toggleAllVisibleCollapse = () => {
+    const visibleCodes = (activeTab === 'numeric' ? NUMERIC : ALPHA).filter(code => byLabel(code).length > 0);
+    if (visibleCodes.length === 0) return;
+    const shouldCollapse = visibleCodes.some(code => collapsedLabels[code] !== true);
+    setCollapsedLabels(prev => visibleCodes.reduce((next, code) => ({ ...next, [code]: shouldCollapse }), { ...prev }));
+  };
+
   return (
-    <motion.div
-      key="entrega"
-      {...PAGE_TRANSITION}
-      className="space-y-4 pb-6 max-w-lg md:mx-auto -mx-4 px-4 font-sans"
-    >
+    <>
+      {!modalOnly && (
+        <motion.div
+          key="entrega"
+          {...PAGE_TRANSITION}
+          className="space-y-4 pb-6 max-w-lg md:mx-auto -mx-4 px-4 font-sans"
+        >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-black text-gray-900 tracking-tight">Etiquetas</h2>
+          <h2 className="text-3xl font-black text-gray-900 tracking-tight">Casilleros</h2>
           <p className="text-xs text-gray-400 font-medium mt-0.5">
             {activos.length} pedido{activos.length !== 1 ? 's' : ''} activo{activos.length !== 1 ? 's' : ''}
           </p>
@@ -2544,6 +2512,8 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
         {/* Círculo Azul (Numéricas) */}
         <button
           onClick={() => setActiveTab('numeric')}
+          onDoubleClick={toggleAllVisibleCollapse}
+          aria-label="Casilleros numéricos"
           className={cn(
             "w-8 h-8 rounded-full bg-[#007AFF] transition-all cursor-pointer flex-shrink-0 relative",
             activeTab === 'numeric' ? "ring-2 ring-offset-2 ring-[#007AFF] scale-105" : "opacity-40 hover:opacity-60"
@@ -2553,6 +2523,8 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
         {/* Círculo Rosa (Alfabéticas) */}
         <button
           onClick={() => setActiveTab('alpha')}
+          onDoubleClick={toggleAllVisibleCollapse}
+          aria-label="Casilleros alfabéticos"
           className={cn(
             "w-8 h-8 rounded-full bg-[#FF2D55] transition-all cursor-pointer flex-shrink-0 relative",
             activeTab === 'alpha' ? "ring-2 ring-offset-2 ring-[#FF2D55] scale-105" : "opacity-40 hover:opacity-60"
@@ -2568,8 +2540,11 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           const isCollapsed = collapsedLabels[code] === true;
           return (
             <div key={code} className="border border-blue-100/70 rounded-3xl bg-[#F5F9FF]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
-              <div 
-                onClick={() => toggleCollapse(code)}
+              <div
+                onDoubleClick={() => toggleCollapse(code)}
+                role="button"
+                tabIndex={0}
+                aria-expanded={!isCollapsed}
                 className="flex justify-between items-center px-1 cursor-pointer select-none"
               >
                 <div className="flex items-center gap-1.5">
@@ -2589,7 +2564,10 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                     <button
                       key={p.id ?? i}
                       onClick={() => { setSelectedPedido(p); setShowDatePicker(false); }}
-                      className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
+                      className={cn(
+                        'relative bg-white border border-gray-100 rounded-2xl p-2.5 pb-4 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0',
+                        p.historical_linked_at && 'border-blue-100 bg-blue-50/35'
+                      )}
                     >
                       <p className="font-black text-[12.5px] text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis block">
                         {formatDisplayName(p.customerName)}
@@ -2597,6 +2575,10 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                       <p className="text-[12px] text-emerald-600 font-black mt-1.5 tracking-[0.08em] block">
                         {formatDisplayPhone(getOccupantPhone(p))}
                       </p>
+                      {p.historical_linked_at && (
+                        <span className="absolute bottom-1 right-1.5 rounded-full bg-blue-100/70 p-1 text-[#007AFF]" title="Entrega programada" aria-label="Entrega programada">
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -2611,8 +2593,11 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           const isCollapsed = collapsedLabels[code] === true;
           return (
             <div key={code} className="border border-rose-100/70 rounded-3xl bg-[#FFF5F7]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
-              <div 
-                onClick={() => toggleCollapse(code)}
+              <div
+                onDoubleClick={() => toggleCollapse(code)}
+                role="button"
+                tabIndex={0}
+                aria-expanded={!isCollapsed}
                 className="flex justify-between items-center px-1 cursor-pointer select-none"
               >
                 <div className="flex items-center gap-1.5">
@@ -2632,7 +2617,10 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                     <button
                       key={p.id ?? i}
                       onClick={() => { setSelectedPedido(p); setShowDatePicker(false); }}
-                      className="bg-white border border-gray-100 rounded-2xl p-2.5 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0"
+                      className={cn(
+                        'relative bg-white border border-gray-100 rounded-2xl p-2.5 pb-4 text-left transition-all hover:border-gray-200 active:scale-[0.98] cursor-pointer flex flex-col justify-between min-w-0',
+                        p.historical_linked_at && 'border-rose-100 bg-rose-50/35'
+                      )}
                     >
                       <p className="font-black text-[12.5px] text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis block">
                         {formatDisplayName(p.customerName)}
@@ -2640,6 +2628,10 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
                       <p className="text-[12px] text-emerald-600 font-black mt-1.5 tracking-[0.08em] block">
                         {formatDisplayPhone(getOccupantPhone(p))}
                       </p>
+                      {p.historical_linked_at && (
+                        <span className="absolute bottom-1 right-1.5 rounded-full bg-rose-100/70 p-1 text-[#FF2D55]" title="Entrega programada" aria-label="Entrega programada">
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -2660,11 +2652,14 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
         )}
       </div>
 
+        </motion.div>
+      )}
+
       {/* Modal detalle del pedido (Minimalista) */}
       {selectedPedido && (
         <div
           className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => { setSelectedPedido(null); setShowDatePicker(false); }}
+          onClick={closeSelectedPedido}
         >
           <motion.div
             initial={{ scale: 0.95, opacity: 0, y: 8 }}
@@ -2678,7 +2673,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
             <div className="flex justify-between items-center mb-5">
               <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Ficha de Casillero</span>
               <button
-                onClick={() => { setSelectedPedido(null); setShowDatePicker(false); }}
+                onClick={closeSelectedPedido}
                 className="p-1 hover:bg-gray-100 active:scale-95 rounded-full transition-all text-gray-400 hover:text-gray-700 cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -2825,7 +2820,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh }: { pedido
           )}
         </div>
       )}
-    </motion.div>
+    </>
   );
 }
 
@@ -2872,24 +2867,26 @@ function MinimalCalendar({
   }, [value]);
 
   if (compact) {
-    const compactStart = startOfWeek(new Date(`${minDate}T12:00:00`), { weekStartsOn: 1 });
-    const compactDays = Array.from({ length: 14 }, (_, index) => addDays(compactStart, index));
-    const dayLabels = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
+    const compactStart = startOfWeek(new Date(`${minDate}T12:00:00`), { weekStartsOn: 0 });
+    const compactDays = Array.from({ length: 21 }, (_, index) => addDays(compactStart, index));
 
     return (
       <div className="w-full font-sans select-none">
-        <div className="grid grid-cols-7 gap-1 text-center mb-1">
-          {dayLabels.map(day => (
-            <span key={day} className="text-[9px] font-black text-gray-400 tracking-wide">{day}</span>
+        <div className="grid grid-cols-7 gap-1 mb-1.5 text-center">
+          {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((day, index) => (
+            <span key={`${day}-${index}`} className="text-[9px] font-bold text-gray-400 uppercase leading-none">{day}</span>
           ))}
         </div>
-        <div className="grid grid-cols-7 gap-1 text-center">
+        <div className="grid grid-cols-7 gap-1.5 text-center">
           {compactDays.map(date => {
             const dateKey = getLocalDateKey(date);
             const ordersForDate = scheduledOrdersByDate.get(dateKey) ?? [];
             const isPast = dateKey < minDate;
             const isSelected = dateKey === value;
-            const markers = ordersForDate.slice(0, 3);
+            const markerTypes = [
+              { key: 'single-bag', color: 'bg-[#007AFF]', matches: (order: any) => getDeliveryMarkerType(order) === 'single-bag' },
+              { key: 'multiple-bags', color: 'bg-[#ff2d78]', matches: (order: any) => getDeliveryMarkerType(order) === 'multiple-bags' },
+            ].filter(marker => ordersForDate.some(marker.matches));
 
             return (
               <button
@@ -2898,20 +2895,17 @@ function MinimalCalendar({
                 disabled={isPast}
                 onClick={() => onChange(dateKey)}
                 className={cn(
-                  'h-12 rounded-xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95',
-                  isPast ? 'text-gray-200 cursor-not-allowed' : 'text-[#1f2937] hover:bg-gray-50 cursor-pointer',
+                  'h-10 rounded-xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95',
+                  isPast ? 'text-gray-200 cursor-not-allowed' : 'text-[#475467] hover:bg-gray-50 cursor-pointer',
                   isSelected && 'bg-[#fff0f5] text-[#ff2d78] font-black hover:bg-[#fff0f5]'
                 )}
               >
-                <span className="text-[14px] leading-none font-black">{format(date, 'd')}</span>
+                <span className="text-[13px] leading-none font-bold">{format(date, 'd')}</span>
                 <span className="h-2 flex items-center justify-center gap-1">
-                  {markers.map((order: any, markerIndex: number) => (
+                  {markerTypes.map(marker => (
                     <span
-                      key={`${dateKey}-${order.id ?? markerIndex}`}
-                      className={cn(
-                        'w-1.5 h-1.5 rounded-full',
-                        Number(order.bagCount ?? 1) > 1 ? 'bg-[#ff2d78]' : 'bg-[#007AFF]'
-                      )}
+                      key={`${dateKey}-${marker.key}`}
+                      className={cn('w-1.5 h-1.5 rounded-full', marker.color)}
                       aria-hidden="true"
                     />
                   ))}
@@ -7739,7 +7733,7 @@ function AddPedidoModal({ onClose, customerId, customerName, allPedidos, allCust
                 <p className="text-[10px] font-black text-[#E91E8C] tracking-widest uppercase mb-1">
                   DETALLE DEL PEDIDO
                 </p>
-                <h1 className="text-[26px] font-black text-[#1a1a1a] leading-[1.1] uppercase tracking-tight">
+                <h1 className="text-[26px] font-black text-[#475467] leading-[1.1] uppercase tracking-tight">
                   {customerName.split(' ').slice(0, 2).join(' ')}<br/>
                   {customerName.split(' ').slice(2).join(' ')}
                 </h1>

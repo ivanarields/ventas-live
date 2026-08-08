@@ -28,7 +28,7 @@ export function CartView({ items, onBack, onCheckout, onRemove, darkMode }: Prop
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ff2d78" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
         </button>
         <div className="flex-1 text-center -ml-10">
-          <h2 className="text-[16px] font-black leading-tight" style={{ color: darkMode ? 'white' : '#1f2937' }}>Carrito</h2>
+          <h2 className="text-[16px] font-black leading-tight" style={{ color: darkMode ? 'white' : '#475467' }}>Carrito</h2>
           <p className="text-[11px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>{items.length} prenda{items.length === 1 ? '' : 's'}</p>
         </div>
       </header>
@@ -42,7 +42,7 @@ export function CartView({ items, onBack, onCheckout, onRemove, darkMode }: Prop
                 <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
               </svg>
             </div>
-            <p className="text-[16px] font-black mb-1" style={{ color: darkMode ? 'white' : '#1f2937' }}>Carrito vacio</p>
+            <p className="text-[16px] font-black mb-1" style={{ color: darkMode ? 'white' : '#475467' }}>Carrito vacio</p>
             <p className="text-[12px] font-bold" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>Agrega prendas desde el detalle del producto.</p>
           </div>
         ) : (
@@ -60,7 +60,7 @@ export function CartView({ items, onBack, onCheckout, onRemove, darkMode }: Prop
                   <ProductThumb image={item.product.images[0]} className="w-full h-full object-cover" width={68} height={78} />
                 </div>
                 <div className="min-w-0 flex-1 py-0.5">
-                  <p className="text-[13px] font-black leading-snug line-clamp-2" style={{ color: darkMode ? '#f0e0e8' : '#1f2937' }}>{item.product.title}</p>
+                  <p className="text-[13px] font-black leading-snug line-clamp-2" style={{ color: darkMode ? '#f0e0e8' : '#475467' }}>{item.product.title}</p>
                   <div className="mt-1.5 flex items-center gap-2">
                     <span className="text-[11px] font-black" style={{ color: darkMode ? '#e8d0da' : '#9ca3af' }}>1x</span>
                     <span className="text-[15px] font-black text-[#ff2d78]">{item.product.price.toFixed(2)} Bs</span>
@@ -94,7 +94,7 @@ export function CartView({ items, onBack, onCheckout, onRemove, darkMode }: Prop
               <p className="text-[11px] font-bold" style={{ color: '#ff2d78' }}>Envio no incluido</p>
               <p className="text-[13px] font-black" style={{ color: darkMode ? '#e8d0da' : '#374151' }}>Total</p>
             </div>
-            <p className="text-[21px] font-black" style={{ color: darkMode ? 'white' : '#1f2937' }}>{total.toFixed(2)} Bs</p>
+            <p className="text-[21px] font-black" style={{ color: darkMode ? 'white' : '#475467' }}>{total.toFixed(2)} Bs</p>
           </div>
           <button
             onClick={onCheckout}
