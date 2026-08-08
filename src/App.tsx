@@ -2144,21 +2144,21 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
 
       {/* Tarjeta de Ingresos compacta rediseñada */}
       <div className="rounded-[20px] px-4 py-3.5 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #ff2d78 0%, #ff6fa3 100%)' }}>
-        <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-0.5">Ingresos hoy</p>
-        <h2 className="text-2xl font-black leading-none mb-2.5">Bs {ingresosHoy.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</h2>
-        
+        <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-0.5">Acumulado</p>
+        <h2 className="text-2xl font-black leading-none mb-2.5">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</h2>
+
         <div className="grid grid-cols-3 gap-2.5 border-t border-white/20 pt-2.5 mt-2">
           <div>
-            <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Pagos hoy</p>
-            <p className="text-sm font-black leading-none mt-1">{pagosHoy.length} reg.</p>
+            <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Ingresos hoy</p>
+            <p className="text-sm font-black leading-none mt-1">Bs {ingresosHoy.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
           </div>
           <div>
             <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Mes actual</p>
             <p className="text-sm font-black leading-none mt-1">Bs {ingresosMes.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
           </div>
           <div>
-            <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Acumulado</p>
-            <p className="text-sm font-black leading-none mt-1">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</p>
+            <p className="text-[9px] opacity-80 font-black uppercase tracking-wide">Pagos hoy</p>
+            <p className="text-sm font-black leading-none mt-1">{pagosHoy.length} reg.</p>
           </div>
         </div>
       </div>
@@ -2306,7 +2306,6 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
   const [selectedPedido, setSelectedPedido] = useState<any>(null);
   const [isDelivering, setIsDelivering] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [isCleaningTests, setIsCleaningTests] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'numeric' | 'alpha'>('numeric');
   const [collapsedLabels, setCollapsedLabels] = useState<Record<string, boolean>>({});
@@ -2423,30 +2422,6 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
     }
   };
 
-  const handleTestCleanup = async () => {
-    if (isCleaningTests) return;
-    const command = window.prompt('Pruebas: escribe RESET para limpiar etiquetas y conversaciones WhatsApp.');
-    const normalized = command?.trim().toUpperCase();
-    if (!normalized) return;
-    if (normalized !== 'RESET') {
-      alert('Comando inválido. Usa RESET.');
-      return;
-    }
-    if (!window.confirm('Esto limpiará etiquetas y conversaciones WhatsApp. No borra pagos. ¿Continuar?')) return;
-
-    setIsCleaningTests(true);
-    try {
-      const result = await adminApi.resetLabels();
-      onRefresh();
-      alert(`Listo. ${JSON.stringify(result.deleted ?? result.changed ?? {})}`);
-    } catch (error: any) {
-      console.error('Error limpiando pruebas:', error);
-      alert(error?.message ?? 'Error al limpiar pruebas');
-    } finally {
-      setIsCleaningTests(false);
-    }
-  };
-
   const showNumeric = activeTab === 'numeric';
   const showAlpha   = activeTab === 'alpha';
 
@@ -2478,14 +2453,6 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
           </p>
         </div>
 
-        <button
-          onClick={handleTestCleanup}
-          disabled={isCleaningTests}
-          className="flex items-center gap-1 rounded-full px-3 py-1 bg-[#FDF2E9] hover:bg-[#FBE5D6] text-[#D35400] transition-all disabled:opacity-60 text-xs font-bold border border-[#FADBD8]/40"
-        >
-          <Wrench className="w-3.5 h-3.5 animate-pulse" />
-          <span>Reset</span>
-        </button>
       </div>
 
       {/* Buscador + Círculos de Categoría */}
@@ -2541,7 +2508,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
           return (
             <div key={code} className="border border-blue-100/70 rounded-3xl bg-[#F5F9FF]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
               <div
-                onDoubleClick={() => toggleCollapse(code)}
+                onClick={() => toggleCollapse(code)}
                 role="button"
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
@@ -2594,7 +2561,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
           return (
             <div key={code} className="border border-rose-100/70 rounded-3xl bg-[#FFF5F7]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
               <div
-                onDoubleClick={() => toggleCollapse(code)}
+                onClick={() => toggleCollapse(code)}
                 role="button"
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
@@ -3927,9 +3894,8 @@ function PaymentsView({
           >
             {hideCompletedWork ? <EyeOff size={18} /> : <Eye size={18} />}
           </button>
-          <button onClick={onAdd} className="btn-tertiary-brand text-xs">
+          <button onClick={onAdd} aria-label="Registrar pago" title="Registrar pago" className="btn-tertiary-brand text-xs">
             <Plus className="w-4 h-4" />
-            Registrar
           </button>
         </div>
       </div>
