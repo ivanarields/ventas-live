@@ -3444,28 +3444,28 @@ function PaymentsView({
       </div>
 
       {/* Stats Panel */}
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-3 gap-1">
         <button 
           onClick={onOpenCalendar}
-          className={`bg-white rounded-2xl border border-base-border shadow-sm py-1.5 px-1 flex flex-col items-center justify-center text-center transition-all hover:scale-[1.02] active:scale-[0.98] ${isToday ? '' : 'bg-brand/5 border-brand/20'}`}
+          className={`bg-white rounded-2xl border border-base-border shadow-sm py-2.5 px-2 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98] ${isToday ? '' : 'bg-brand/5 border-brand/20'}`}
         >
-          <span className={`text-[8px] font-bold uppercase tracking-wider mb-0.5 ${isToday ? 'text-base-text-muted' : 'text-brand'} truncate max-w-full px-0.5`}>{dateLabel}</span>
-          <span className={`text-base font-black leading-none ${isToday ? 'text-base-text' : 'text-brand'}`}>Bs {stats.totalSelected}</span>
+          <span className={`text-[9px] font-black uppercase tracking-wider mr-1 truncate ${isToday ? 'text-gray-400' : 'text-brand'}`}>{dateLabel}</span>
+          <span className={`text-[12px] font-black leading-none flex-shrink-0 ${isToday ? 'text-gray-900' : 'text-brand'}`}>Bs {stats.totalSelected}</span>
         </button>
         
-        <div className="bg-white rounded-2xl border border-base-border shadow-sm py-1.5 px-1 flex flex-col items-center justify-center text-center">
-          <span className="text-[8px] font-bold text-base-text-muted uppercase tracking-wider mb-0.5">Pagos</span>
-          <span className="text-base font-black text-base-text leading-none">{stats.count}</span>
+        <div className="bg-white rounded-2xl border border-base-border shadow-sm py-2.5 px-2 flex items-center justify-between">
+          <span className="text-[9px] font-black text-gray-400 uppercase tracking-wider mr-1 truncate">Pagos</span>
+          <span className="text-[12px] font-black text-gray-900 leading-none flex-shrink-0">{stats.count}</span>
         </div>
 
         <button 
           onClick={onOpenPeople}
-          className="bg-white rounded-2xl border border-base-border shadow-sm py-1.5 px-1 flex flex-col items-center justify-center text-center transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-white rounded-2xl border border-base-border shadow-sm py-2.5 px-2 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
-          <span className="text-[8px] font-bold text-base-text-muted uppercase tracking-wider mb-0.5 truncate max-w-full px-0.5">
+          <span className={`text-[9px] font-black text-gray-400 uppercase tracking-wider mr-1 truncate`}>
             {stats.people === 1 ? 'Persona' : 'Personas'}
           </span>
-          <span className="text-base font-black text-base-text leading-none">{stats.people}</span>
+          <span className="text-[12px] font-black text-gray-900 leading-none flex-shrink-0">{stats.people}</span>
         </button>
       </div>
 
