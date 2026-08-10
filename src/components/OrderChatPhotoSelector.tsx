@@ -304,8 +304,8 @@ export function OrderChatPhotoSelector({
 
       {showComprobantes && pendingComprobantes.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] font-extrabold uppercase tracking-widest text-violet-600">
-            COMPROBANTE PARA VERIFICAR ({pendingComprobantes.length})
+          <p className="text-[10px] font-extrabold uppercase tracking-widest text-[#a27dfa]">
+            COMPROBANTES ({pendingComprobantes.length})
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             {pendingComprobantes.map((photo, index) => (
@@ -313,7 +313,7 @@ export function OrderChatPhotoSelector({
                 <button
                   type="button"
                   onClick={() => setLightbox(photo)}
-                  className="relative h-28 w-24 overflow-hidden rounded-2xl border-2 border-violet-200 bg-gray-50"
+                  className="relative h-28 w-24 overflow-hidden rounded-2xl border-2 border-[#e3dbff] bg-gray-50"
                   title="Ver comprobante"
                 >
                   <img

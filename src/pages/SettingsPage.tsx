@@ -113,26 +113,26 @@ function SettingsView({ payments, customers = [], onRefresh, onLogout, userId = 
   return (
     <motion.div
       {...PAGE_TRANSITION}
-      className="space-y-3 pb-12"
+      className="aurora-view aurora-settings-view space-y-4 pb-12"
     >
       {/* Header */}
       <div className="flex justify-between items-center px-1">
-        <h2 className="text-2xl font-extrabold text-base-text tracking-tight">Configuración</h2>
-        <button onClick={onLogout} className="p-2 rounded-full bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
+        <h2 className="text-2xl font-extrabold text-[#ff2d78] tracking-tight">Configuración</h2>
+        <button onClick={onLogout} className="p-2.5 rounded-full bg-white/60 border border-white/40 text-[#ff2d78] shadow-sm hover:bg-white/80 transition-colors">
           <LogOut className="w-5 h-5" />
         </button>
       </div>
 
       {/* ─── Tabs horizontales ─── */}
-      <div className="flex gap-1 bg-gray-100 rounded-2xl p-1">
+      <div className="flex gap-1 bg-white/40 backdrop-blur-md rounded-full p-1 border border-white/30 shadow-sm">
         {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1 py-2.5 rounded-full text-[11px] font-black transition-all ${
               activeTab === tab.id
-                ? 'bg-white text-[#ff2d78] shadow-sm'
-                : 'text-gray-400 hover:text-gray-500'
+                ? 'bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] text-white shadow-md'
+                : 'text-gray-500 hover:text-gray-700'
             }`}
           >
             {tab.icon}
@@ -301,7 +301,7 @@ function TabBaseDatos({ payments, customers, onRefresh }: {
 
   return (
     <div className="space-y-3 pt-2">
-      <div className="rounded-[20px] bg-white border border-gray-100 p-4 space-y-3">
+      <div className="card-modern p-4 space-y-3">
         <div>
           <p className="text-[12px] font-black text-gray-800">Limpieza de pruebas</p>
           <p className="text-[10px] text-gray-400 mt-0.5">Borra un perfil completo o un pago suelto.</p>
@@ -312,7 +312,7 @@ function TabBaseDatos({ payments, customers, onRefresh }: {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Buscar nombre o número..."
-            className="w-full border border-gray-200 rounded-2xl pl-9 pr-3 py-3 text-[13px] font-bold outline-none focus:border-[#ff2d78]"
+            className="w-full border border-gray-200 rounded-2xl pl-9 pr-3 py-3 text-[13px] font-bold outline-none focus:border-[#ff2d78]/60 focus:ring-2 focus:ring-[#ff2d78]/10"
           />
         </div>
       </div>
@@ -323,12 +323,12 @@ function TabBaseDatos({ payments, customers, onRefresh }: {
         ) : profiles.map((profile: any) => {
           const isOpen = openKey === profile.key;
           return (
-          <div key={profile.key} className="rounded-[20px] bg-white border border-gray-100 p-3 space-y-3">
+          <div key={profile.key} className="bg-white/60 backdrop-blur-xs border border-white/30 rounded-3xl p-3 space-y-3 shadow-sm">
             <button
               onClick={() => setOpenKey(isOpen ? null : profile.key)}
               className="w-full flex items-center gap-3 text-left"
             >
-              <div className="w-9 h-9 rounded-2xl bg-pink-50 text-[#ff2d78] flex items-center justify-center font-black text-xs">
+              <div className="w-9 h-9 rounded-2xl bg-white/80 border border-white text-[#ff2d78] flex items-center justify-center font-black text-xs shadow-sm">
                 {String(profile.name || '?').charAt(0)}
               </div>
               <div className="flex-1 min-w-0">
@@ -338,61 +338,61 @@ function TabBaseDatos({ payments, customers, onRefresh }: {
                 </p>
               </div>
               <div className="flex items-center gap-1">
-                {profile.hasStore && <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-600 text-[9px] font-black">Tienda</span>}
-                {profile.hasMain && <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-[9px] font-black">App</span>}
+                {profile.hasStore && <span className="px-2 py-1 rounded-lg bg-blue-50/70 border border-blue-100/50 text-[#4a9ff5] text-[9px] font-black shadow-xs">Tienda</span>}
+                {profile.hasMain && <span className="px-2 py-1 rounded-lg bg-emerald-50/70 border border-emerald-100/50 text-[#10b981] text-[9px] font-black shadow-xs">App</span>}
                 <span className="text-gray-300 text-xs font-black">{isOpen ? '▲' : '▼'}</span>
               </div>
             </button>
 
             {isOpen && (
-              <div className="space-y-3 border-t border-gray-100 pt-3">
+              <div className="space-y-3 border-t border-gray-100/60 pt-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[10px] font-black text-gray-400 uppercase tracking-wider">
                     Bs {profile.total} pagos · Bs {profile.storeTotal ?? 0} tienda
                   </div>
                   <button
-                disabled={loading}
-                onClick={() => setConfirm({ type: 'profile', profile })}
-                className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black disabled:opacity-50"
-              >
-                Borrar todo
-              </button>
+                    disabled={loading}
+                    onClick={() => setConfirm({ type: 'profile', profile })}
+                    className="px-3 py-2 rounded-full bg-red-50/80 border border-red-100 text-red-600 text-[10px] font-black shadow-sm hover:bg-red-100 transition-colors disabled:opacity-50"
+                  >
+                    Borrar todo
+                  </button>
                 </div>
 
                 {profile.payments.length > 0 && (
-              <div className="space-y-1 max-h-44 overflow-y-auto">
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider px-1">Pagos</p>
-                {profile.payments.slice(0, 20).map((payment: Payment) => (
-                  <div key={payment.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-gray-50">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black text-gray-700">Bs {cleanAmount(payment.pago)}</p>
-                      <p className="text-[9px] text-gray-400">
-                        {parseAppDate(payment.date)?.toLocaleString('es-BO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) ?? 'Sin fecha'}
-                      </p>
-                    </div>
-                    <button
-                      disabled={loading}
-                      onClick={() => setConfirm({ type: 'payment', payment })}
-                      className="p-2 rounded-lg text-rose-500 hover:bg-rose-50 disabled:opacity-50"
-                      title="Borrar este pago"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    {profile.payments.slice(0, 20).map((payment: Payment) => (
+                      <div key={payment.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-2xl bg-white/50 border border-white/20 shadow-xs">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black text-[#ff2d78]">Bs {cleanAmount(payment.pago)}</p>
+                          <p className="text-[9px] text-gray-400">
+                            {parseAppDate(payment.date)?.toLocaleString('es-BO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) ?? 'Sin fecha'}
+                          </p>
+                        </div>
+                        <button
+                          disabled={loading}
+                          onClick={() => setConfirm({ type: 'payment', payment })}
+                          className="p-2 rounded-full text-red-500 hover:bg-red-50/80 transition-colors disabled:opacity-50"
+                          title="Borrar este pago"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                )}
 
                 {(profile.storeOrders?.length ?? 0) > 0 && (
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider px-1">Tienda</p>
                     {profile.storeOrders.slice(0, 10).map((order: any) => (
-                      <div key={order.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-blue-50/60">
+                      <div key={order.id} className="flex items-center justify-between px-3 py-2 rounded-2xl bg-white/40 border border-white/20 shadow-xs">
                         <div>
-                          <p className="text-[10px] font-black text-blue-700">Pedido #{order.id}</p>
-                          <p className="text-[9px] text-blue-400">{order.status ?? 'sin estado'}</p>
+                          <p className="text-[10px] font-black text-[#4a9ff5]">Pedido #{order.id}</p>
+                          <p className="text-[9px] text-[#4a9ff5]/70">{order.status ?? 'sin estado'}</p>
                         </div>
-                        <span className="text-[10px] font-black text-blue-700">Bs {cleanAmount(order.total)}</span>
+                        <span className="text-[10px] font-black text-[#4a9ff5]">Bs {cleanAmount(order.total)}</span>
                       </div>
                     ))}
                   </div>
@@ -543,34 +543,34 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
   return (
     <div className="space-y-4 pt-2">
       {/* Exportar */}
-      <div>
-        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-2">Exportar</p>
-        <div className="flex items-center gap-2 mb-2">
+      <div className="card-modern p-4 space-y-3">
+        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1">Exportar</p>
+        <div className="flex items-center gap-2 mb-1">
           <input
             type="date"
-            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-[12px] font-medium outline-none focus:border-pink-400"
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-[12px] font-medium outline-none focus:border-[#ff2d78]/60 focus:ring-2 focus:ring-[#ff2d78]/10"
             value={exportDate}
             onChange={e => setExportDate(e.target.value)}
           />
-          <span className="text-[11px] font-black text-[#ff2d78]">Bs {stats.total}</span>
+          <span className="text-[12px] font-black text-[#ff2d78]">Bs {stats.total}</span>
           <span className="text-[11px] font-bold text-gray-400">{stats.count} pag.</span>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => { setShowReport(true); setTimeout(() => window.print(), 300); }}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[#ff2d78] text-white text-[11px] font-black"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] text-white text-[11px] font-black shadow-md hover:opacity-95 transition-all"
           >
             <Printer size={12} /> PDF
           </button>
           <button
             onClick={handleExportCSV}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-600 text-white text-[11px] font-black"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full bg-gradient-to-r from-[#10b981] to-[#34d399] text-white text-[11px] font-black shadow-md hover:opacity-95 transition-all"
           >
             <FileSpreadsheet size={12} /> Excel
           </button>
           <button
             onClick={() => setShowReport(true)}
-            className="px-3 py-2 rounded-xl bg-gray-100 text-gray-500 text-[11px] font-black flex items-center gap-1"
+            className="px-4 py-2.5 rounded-full bg-white/60 backdrop-blur-md border border-white/40 text-gray-700 text-[11px] font-black flex items-center gap-1 shadow-sm hover:bg-white/80"
           >
             <Eye size={12} />
           </button>
@@ -578,49 +578,51 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
       </div>
 
       {/* Gestión de Pagos */}
-      <div>
-        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-2">Gestión de Pagos</p>
-        <div className="grid grid-cols-2 gap-2 mb-2">
+      <div className="card-modern p-4 space-y-3">
+        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1">Gestión de Pagos</p>
+        <div className="grid grid-cols-2 gap-2 mb-1">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
             <input
               type="text"
               placeholder="Nombre..."
-              className="w-full border border-gray-200 rounded-xl pl-7 pr-3 py-2 text-[12px] outline-none focus:border-pink-400"
+              className="w-full border border-gray-200 rounded-xl pl-7 pr-3 py-2 text-[12px] outline-none focus:border-[#ff2d78]/60 focus:ring-2 focus:ring-[#ff2d78]/10"
               value={searchName}
               onChange={e => setSearchName(e.target.value)}
             />
           </div>
           <input
             type="date"
-            className="border border-gray-200 rounded-xl px-3 py-2 text-[12px] outline-none focus:border-pink-400"
+            className="border border-gray-200 rounded-xl px-3 py-2 text-[12px] outline-none focus:border-[#ff2d78]/60 focus:ring-2 focus:ring-[#ff2d78]/10"
             value={searchDate}
             onChange={e => setSearchDate(e.target.value)}
           />
         </div>
 
         {managedPayments.length > 0 && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex justify-between items-center px-0.5">
               <button onClick={() => {
                 if (selectedIds.size === managedPayments.length) setSelectedIds(new Set());
                 else setSelectedIds(new Set(managedPayments.map(p => p.id)));
-              }} className="text-[10px] font-black text-[#ff2d78]">
+              }} className="text-[10px] font-black text-[#ff2d78] hover:opacity-80">
                 {selectedIds.size === managedPayments.length ? 'Desmarcar todos' : 'Marcar todos'}
               </button>
               {selectedIds.size > 0 && (
                 <button onClick={() => setConfirmDelete({ bulk: true })}
-                  className="flex items-center gap-1 text-[10px] font-black text-rose-500">
+                  className="flex items-center gap-1 text-[10px] font-black text-red-500 hover:opacity-80">
                   <Trash2 size={11} /> Eliminar ({selectedIds.size})
                 </button>
               )}
             </div>
-            <div className="max-h-56 overflow-y-auto space-y-1">
+            <div className="max-h-56 overflow-y-auto space-y-1.5">
               {managedPayments.map((p: any) => (
                 <div
                   key={p.id}
                   onClick={() => !editingPaymentId && toggleSelect(p.id)}
-                  className={`px-3 py-2 rounded-xl border flex items-center gap-2 cursor-pointer transition-all ${selectedIds.has(p.id) ? 'bg-rose-50 border-rose-100' : 'bg-gray-50 border-gray-100'}`}
+                  className={`px-3 py-2.5 rounded-2xl border transition-all flex items-center gap-3 cursor-pointer ${
+                    selectedIds.has(p.id) ? 'bg-white/80 border-[#ff2d78]/40 shadow-sm' : 'bg-white/50 border-white/20 shadow-xs'
+                  }`}
                 >
                   {editingPaymentId === p.id ? (
                     <div className="flex-1 flex gap-1.5">
@@ -633,7 +635,7 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
                         onClick={e => e.stopPropagation()}
                       />
                       <button onClick={e => { e.stopPropagation(); handleSaveName(p.id); }}
-                        className="p-1.5 bg-emerald-500 text-white rounded-lg"><Check size={12} /></button>
+                        className="p-1.5 bg-[#ff2d78] text-white rounded-lg"><Check size={12} /></button>
                       <button onClick={e => { e.stopPropagation(); setEditingPaymentId(null); }}
                         className="p-1.5 bg-gray-200 rounded-lg"><X size={12} /></button>
                     </div>
@@ -649,11 +651,11 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
                     </div>
                   )}
                   {!editingPaymentId && (
-                    <div className="flex gap-1">
+                    <div className="flex gap-1.5">
                       <button onClick={e => { e.stopPropagation(); setEditingPaymentId(p.id); setEditingName(p.nombre); }}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-[#ff2d78]"><Pencil size={12} /></button>
+                        className="p-1.5 rounded-full text-gray-400 hover:text-[#ff2d78] hover:bg-gray-100/50"><Pencil size={12} /></button>
                       <button onClick={e => { e.stopPropagation(); setConfirmDelete({ id: p.id }); }}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-rose-500"><Trash2 size={12} /></button>
+                        className="p-1.5 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50/50"><Trash2 size={12} /></button>
                     </div>
                   )}
                 </div>
@@ -667,15 +669,15 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
       </div>
 
       {/* Conversaciones WhatsApp */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
+      <div className="card-modern p-4 space-y-3">
+        <div className="flex items-center justify-between mb-1">
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider flex items-center gap-1">
             <MessageSquare size={11} /> Conversaciones WhatsApp
           </p>
           <button
             onClick={cargarConversaciones}
             disabled={loadingConv}
-            className="text-[10px] font-bold text-brand flex items-center gap-1"
+            className="text-[10px] font-bold text-[#ff2d78] flex items-center gap-1 hover:opacity-85"
           >
             {loadingConv ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />}
             {conversaciones.length > 0 ? 'Recargar' : 'Ver'}
@@ -684,24 +686,24 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
 
         {conversaciones.length > 0 && (
           <>
-            <div className="flex gap-2 mb-2">
+            <div className="flex gap-2 mb-1">
               <button
                 onClick={() => setSelectedConvIds(new Set(conversaciones.map(c => c.id)))}
-                className="text-[10px] font-bold text-gray-500 px-2 py-1 bg-gray-100 rounded-lg"
+                className="text-[10px] font-bold text-gray-600 px-2.5 py-1 bg-white/70 border border-white/40 rounded-full shadow-xs"
               >Seleccionar todo</button>
               <button
                 onClick={() => setSelectedConvIds(new Set())}
-                className="text-[10px] font-bold text-gray-500 px-2 py-1 bg-gray-100 rounded-lg"
+                className="text-[10px] font-bold text-gray-600 px-2.5 py-1 bg-white/70 border border-white/40 rounded-full shadow-xs"
               >Quitar selección</button>
               {selectedConvIds.size > 0 && (
                 <button
                   onClick={() => setConfirmDeleteConv('selected')}
-                  className="text-[10px] font-bold text-rose-600 px-2 py-1 bg-rose-50 rounded-lg ml-auto"
+                  className="text-[10px] font-bold text-red-600 px-2.5 py-1 bg-red-50/80 border border-red-100 rounded-full shadow-xs ml-auto"
                 >Eliminar ({selectedConvIds.size})</button>
               )}
               <button
                 onClick={() => setConfirmDeleteConv('all')}
-                className="text-[10px] font-bold text-rose-600 px-2 py-1 bg-rose-50 rounded-lg"
+                className="text-[10px] font-bold text-red-600 px-2.5 py-1 bg-red-50/80 border border-red-100 rounded-full shadow-xs"
               >Borrar todo</button>
             </div>
 
@@ -710,14 +712,14 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
                 <div
                   key={c.id}
                   onClick={() => toggleConv(c.id)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-all ${
-                    selectedConvIds.has(c.id) ? 'bg-rose-50 border border-rose-200' : 'bg-gray-50 border border-transparent'
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-2xl cursor-pointer border transition-all ${
+                    selectedConvIds.has(c.id) ? 'bg-white/80 border-[#ff2d78]/40 shadow-sm' : 'bg-white/50 border-white/20 shadow-xs'
                   }`}
                 >
-                  <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center flex-shrink-0 ${
-                    selectedConvIds.has(c.id) ? 'bg-rose-500 border-rose-500' : 'border-gray-300'
+                  <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                    selectedConvIds.has(c.id) ? 'bg-[#ff2d78] border-[#ff2d78]' : 'border-gray-300 bg-white/50'
                   }`}>
-                    {selectedConvIds.has(c.id) && <Check size={9} className="text-white" strokeWidth={3} />}
+                    {selectedConvIds.has(c.id) && <Check size={10} className="text-white" strokeWidth={3} />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-bold text-gray-700 truncate">{c.nombre ?? 'Sin nombre'}</p>
@@ -755,11 +757,11 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white w-full max-w-md rounded-[28px] overflow-hidden relative z-10"
+              className="bg-white/90 backdrop-blur-md w-full max-w-md rounded-[28px] overflow-hidden relative z-10 border border-white/50"
               style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.12)' }}
             >
-              <div ref={reportRef} className="bg-white">
-                <div className="p-5 bg-[#ff2d78] text-white flex justify-between items-center">
+              <div className="bg-transparent">
+                <div className="p-5 bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] text-white flex justify-between items-center">
                   <div>
                     <h3 className="text-lg font-black uppercase tracking-tight">Reporte Diario</h3>
                     <p className="text-[10px] font-bold opacity-80 mt-0.5">{exportDate}</p>
@@ -783,7 +785,7 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
                       : filteredPayments.map((p, i) => {
                         const d = parseAppDate(p.date);
                         return (
-                          <div key={`${p.id}-${i}`} className="flex justify-between items-center p-2.5 bg-gray-50 rounded-xl">
+                          <div key={`${p.id}-${i}`} className="flex justify-between items-center p-2.5 bg-white/50 rounded-xl border border-white/20">
                             <div>
                               <p className="text-[11px] font-black uppercase text-gray-800">{cleanName(p.nombre)}</p>
                               <p className="text-[9px] text-gray-400">{d ? d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' }) : ''}</p>
@@ -797,11 +799,11 @@ function TabDatos({ payments, onRefresh, userId }: { payments: Payment[]; onRefr
               </div>
               <div className="p-3 bg-gray-50 border-t border-gray-100 flex gap-2">
                 <button onClick={() => setShowReport(false)}
-                  className="flex-1 py-2.5 bg-white border border-gray-200 text-gray-400 rounded-xl text-[11px] font-black">
+                  className="flex-1 py-2.5 bg-white border border-gray-200 text-gray-400 rounded-full text-[11px] font-black">
                   Cerrar
                 </button>
                 <button onClick={() => window.print()}
-                  className="flex-1 py-2.5 bg-[#ff2d78] text-white rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5">
+                  className="flex-1 py-2.5 bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] text-white rounded-full text-[11px] font-black flex items-center justify-center gap-1.5 shadow-md">
                   <Calendar size={12} /> Imprimir
                 </button>
               </div>
@@ -879,7 +881,7 @@ function TabSistema({
       {/* WhatsApp */}
       <WhatsappConnectionPanel />
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      <div className="card-modern p-4 space-y-3">
         <div>
           <p className="text-sm font-black text-gray-800">Número oficial de WhatsApp</p>
           <p className="text-[11px] text-gray-400 font-medium">
@@ -891,19 +893,19 @@ function TabSistema({
           value={officialPhone}
           onChange={e => setOfficialPhone(e.target.value.replace(/\D/g, ''))}
           placeholder="59160000000"
-          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-[13px] font-bold outline-none focus:border-pink-400"
+          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-[13px] font-bold outline-none focus:border-[#ff2d78]/60 focus:ring-2 focus:ring-[#ff2d78]/10"
         />
         <button
           onClick={saveOfficialPhone}
           disabled={phoneSaving}
-          className="w-full h-10 rounded-xl bg-[#ff2d78] text-[12px] font-black text-white shadow-sm disabled:opacity-50"
+          className="w-full h-10 rounded-full bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] text-[12px] font-black text-white shadow-md disabled:opacity-50 hover:opacity-95 transition-all"
         >
           {phoneSaving ? 'Guardando...' : 'Guardar número'}
         </button>
       </div>
 
       {/* Etiquetas */}
-      <div className="flex items-center justify-between py-1">
+      <div className="card-modern p-4 flex items-center justify-between">
         <div>
           <p className="text-[12px] font-black text-gray-700">Capacidad de etiquetas</p>
           <p className="text-[10px] text-gray-400">Bolsas máx por etiqueta</p>
@@ -912,7 +914,7 @@ function TabSistema({
           <button
             onClick={() => adjust(-1)}
             disabled={numericCapacity <= 1 || saving}
-            className="w-7 h-7 rounded-xl bg-gray-100 flex items-center justify-center text-gray-500 disabled:opacity-30"
+            className="w-7.5 h-7.5 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 disabled:opacity-30 border border-gray-200"
           >
             <Minus size={13} />
           </button>
@@ -920,23 +922,23 @@ function TabSistema({
           <button
             onClick={() => adjust(1)}
             disabled={saving}
-            className="w-7 h-7 rounded-xl bg-[#ff2d78] flex items-center justify-center text-white disabled:opacity-40"
+            className="w-7.5 h-7.5 rounded-full bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] flex items-center justify-center text-white disabled:opacity-40 shadow-sm hover:opacity-95 transition-all"
           >
             <Plus size={13} />
           </button>
-          {saved && <CheckCircle2 size={14} className="text-emerald-500" />}
+          {saved && <CheckCircle2 size={14} className="text-[#10b981]" />}
         </div>
       </div>
 
       {/* Info */}
-      <div className="space-y-1.5 pt-1 border-t border-gray-100">
+      <div className="card-modern p-4 space-y-1.5 pt-1">
         <div className="flex justify-between">
           <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Versión</span>
           <span className="text-[11px] font-bold text-gray-600">2.1.0</span>
         </div>
         <div className="flex justify-between">
           <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Base de Datos</span>
-          <span className="text-[11px] font-bold text-emerald-600">Conectado</span>
+          <span className="text-[11px] font-bold text-[#10b981]">Conectado</span>
         </div>
         <div className="flex justify-between">
           <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Soporte IA</span>

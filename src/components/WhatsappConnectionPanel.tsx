@@ -49,11 +49,11 @@ export function WhatsappConnectionPanel() {
   }, [fetchStatus, status?.connected]);
 
   return (
-    <div className="bg-white rounded-[20px] border border-gray-100 flex flex-col h-full overflow-hidden">
-      <div className="flex items-center justify-between border-b border-gray-50 px-4 pt-4 pb-2">
+    <div className="card-modern flex flex-col h-full overflow-hidden">
+      <div className="flex items-center justify-between border-b border-gray-100/50 px-4 pt-4 pb-2">
         <div className="flex gap-2">
-          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold bg-[#ff2d78] text-white">
-            <Settings2 size={13} /> Conexion
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] text-white shadow-sm">
+            <Settings2 size={13} /> Conexión
           </span>
         </div>
         <WhatsappHealthBadge className="hidden sm:inline-flex" />
@@ -77,7 +77,7 @@ export function WhatsappConnectionPanel() {
                 </p>
                 <button
                   onClick={fetchStatus}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-orange-50 text-orange-600 text-xs font-bold hover:bg-orange-100 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-orange-50/80 border border-orange-100 text-orange-600 text-xs font-bold hover:bg-orange-100 transition-colors shadow-sm"
                 >
                   <RefreshCw size={12} /> Reintentar
                 </button>
@@ -90,12 +90,12 @@ export function WhatsappConnectionPanel() {
                 </div>
                 <p className="text-xs text-gray-500">El bridge esta activo y recibiendo mensajes.</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-xl bg-green-50 px-3 py-2">
+                  <div className="rounded-2xl bg-green-50/70 border border-green-100/50 px-3 py-2">
                     <p className="text-[9px] font-black uppercase tracking-wide text-green-600">Hoy</p>
                     <p className="text-lg font-black text-green-700">{stats?.todayCount ?? 0}</p>
                     <p className="text-[10px] font-bold text-green-500">mensajes</p>
                   </div>
-                  <div className="rounded-xl bg-gray-50 px-3 py-2">
+                  <div className="rounded-2xl bg-white/50 border border-white/20 px-3 py-2 shadow-xs">
                     <p className="text-[9px] font-black uppercase tracking-wide text-gray-400">Ultimo</p>
                     <p className="text-xs font-black text-gray-700">
                       {stats?.lastMessageAt
@@ -112,7 +112,7 @@ export function WhatsappConnectionPanel() {
                 </div>
                 <button
                   onClick={fetchStatus}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-50 text-gray-400 text-[10px] font-bold hover:bg-gray-100 transition-colors"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/60 border border-white/40 text-gray-500 text-[10px] font-bold hover:bg-white/80 transition-colors shadow-xs"
                 >
                   <RefreshCw size={11} /> Forzar actualizacion
                 </button>

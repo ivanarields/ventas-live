@@ -12,8 +12,11 @@ function cn(...inputs: ClassValue[]) {
 
 import { 
   Menu,
-  Home,
+  House,
   Wallet,
+  CircleDollarSign,
+  Box,
+  BadgeCheck,
   Trophy, 
   LayoutGrid, 
   BarChart3, 
@@ -1047,12 +1050,12 @@ const Logo = () => (
 const TabButton = ({ active, icon: Icon, label, onClick }: any) => (
   <button
     onClick={onClick}
-    className={`flex flex-col items-center justify-center flex-1 py-0.5 transition-all relative ${active ? 'text-brand' : 'text-base-text-muted'}`}
+    aria-label={label}
+    className={`aurora-tab-button flex flex-col items-center justify-center flex-1 py-0.5 transition-all relative ${active ? 'text-brand' : 'text-base-text-muted'}`}
   >
-    <div className={`p-1 rounded-xl transition-all ${active ? 'bg-brand/10' : ''}`}>
+    <div className={`aurora-tab-icon p-1 rounded-xl transition-all ${active ? 'bg-brand/10' : ''}`}>
       <Icon className={`w-5 h-5 ${active ? 'scale-105' : 'scale-100'}`} />
     </div>
-    {label && <span className="text-[8px] font-black uppercase tracking-wide mt-0.5">{label}</span>}
   </button>
 );
 
@@ -1558,7 +1561,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="app-container flex items-center justify-center">
+      <div className="app-container aurora-app flex items-center justify-center">
         <Loader2 className="w-10 h-10 text-brand animate-spin" />
       </div>
     );
@@ -1566,7 +1569,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="app-container flex flex-col items-center justify-center p-8 text-center min-h-screen" style={{ background: 'radial-gradient(circle at 50% 18%, #ffd4e4 0%, #fff0f5 34%, #fff8fb 62%, #ffffff 100%)' }}>
+      <div className="app-container aurora-app aurora-login flex flex-col items-center justify-center p-8 text-center min-h-screen" style={{ background: 'radial-gradient(circle at 50% 18%, #ffd4e4 0%, #fff0f5 34%, #fff8fb 62%, #ffffff 100%)' }}>
         <motion.div 
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -1662,9 +1665,9 @@ export default function App() {
   }
 
   return (
-    <div className="app-container">
+    <div className="app-container aurora-app">
       {/* Content */}
-      <main className="min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto hide-scrollbar p-4 space-y-6 pb-24 pt-4" style={{ background: '#f8f9fa' }}>
+      <main className="aurora-main min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto hide-scrollbar p-4 space-y-6 pb-24 pt-4" style={{ background: '#f8f9fa' }}>
         <AnimatePresence mode="wait" initial={false}>
           {currentTab === 'inicio' && (
             <InicioView
@@ -1757,13 +1760,13 @@ export default function App() {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="glass-nav fixed left-1/2 bottom-0 -translate-x-1/2 w-full max-w-[480px] min-w-0 px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-hidden pointer-events-auto">
-        <TabButton active={currentTab === 'inicio'} icon={Home} label="Inicio" onClick={() => { setCurrentTab('inicio'); setSelectedPersonId(null); }} />
-        <TabButton active={currentTab === 'entrega'} icon={Package} label="Casilleros" onClick={() => { setCurrentTab('entrega'); setSelectedPersonId(null); }} />
-        <TabButton active={currentTab === 'payments'} icon={Wallet} label="Pagos" onClick={() => { setCurrentTab('payments'); setSelectedPersonId(null); }} />
+      <nav className="aurora-bottom-nav glass-nav fixed left-1/2 bottom-0 -translate-x-1/2 w-full max-w-[480px] min-w-0 px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-hidden pointer-events-auto">
+        <TabButton active={currentTab === 'inicio'} icon={House} label="Inicio" onClick={() => { setCurrentTab('inicio'); setSelectedPersonId(null); }} />
+        <TabButton active={currentTab === 'payments'} icon={CircleDollarSign} label="Pagos" onClick={() => { setCurrentTab('payments'); setSelectedPersonId(null); }} />
+        <TabButton active={currentTab === 'entrega'} icon={Box} label="Casilleros" onClick={() => { setCurrentTab('entrega'); setSelectedPersonId(null); }} />
+        <TabButton active={currentTab === 'settings'} icon={Settings} label="Configuración" onClick={() => { setCurrentTab('settings'); setSelectedPersonId(null); }} />
         {!sectionVisibility.dinero && <TabButton active={currentTab === 'finance'} icon={TrendingUp} label="Dinero" onClick={() => { setCurrentTab('finance'); setSelectedPersonId(null); }} />}
         {!sectionVisibility.tienda && <TabButton active={currentTab === 'tienda'} icon={Store} label="Tienda" onClick={() => { setCurrentTab('tienda'); setSelectedPersonId(null); }} />}
-        <TabButton active={currentTab === 'settings'} icon={Settings} label="Config" onClick={() => { setCurrentTab('settings'); setSelectedPersonId(null); }} />
       </nav>
 
       {/* Add Modals */}
@@ -1927,43 +1930,43 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className="aurora-payment-overlay fixed inset-0 z-[100] flex items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="aurora-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-sm"
       />
       <motion.div 
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="relative w-full max-w-[340px] bg-white rounded-[26px] p-4 shadow-xl overflow-hidden"
+        className="aurora-modal aurora-date-payment-modal relative w-full max-w-[340px] bg-white rounded-[26px] p-4 shadow-xl overflow-hidden"
       >
-        <div className="flex justify-between items-center mb-3">
+        <div className="aurora-modal-head flex justify-between items-center mb-3">
           <div>
-            <h3 className="text-base font-extrabold text-base-text tracking-tight">Seleccionar fecha</h3>
+            <h3 className="aurora-modal-title text-base font-extrabold text-base-text tracking-tight">Seleccionar fecha</h3>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+          <button type="button" onClick={onClose} className="aurora-modal-close p-1.5 hover:bg-gray-100 rounded-full transition-colors">
             <X className="w-4.5 h-4.5 text-base-text-muted" />
           </button>
         </div>
 
-        <div className="space-y-3">
-          <div className="flex justify-between items-center bg-gray-50 p-2 rounded-xl">
-            <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-1 rounded-lg hover:bg-white">
+        <div className="aurora-date-payment-body space-y-3">
+          <div className="aurora-date-payment-nav flex justify-between items-center bg-gray-50 p-2 rounded-xl">
+            <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="aurora-date-payment-arrow p-1 rounded-lg hover:bg-white">
               <ChevronLeft className="w-4.5 h-4.5 text-base-text-muted" />
             </button>
-            <span className="text-[10px] font-black text-base-text uppercase tracking-widest">
+            <span className="aurora-date-payment-title text-[10px] font-black text-base-text uppercase tracking-widest">
               {viewDate.toLocaleString('es', { month: 'long', year: 'numeric' })}
             </span>
-            <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-1 rounded-lg hover:bg-white">
+            <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="aurora-date-payment-arrow p-1 rounded-lg hover:bg-white">
               <ChevronRight className="w-4.5 h-4.5 text-base-text-muted" />
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-y-1 text-center">
+          <div className="aurora-date-payment-grid grid grid-cols-7 gap-y-1 text-center">
             {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => (
               <span key={`${d}-${i}`} className="text-[9px] font-bold text-base-text-muted mb-1">{d}</span>
             ))}
@@ -1983,7 +1986,7 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
                   key={day} 
                   onClick={() => toggleDate(new Date(viewDate.getFullYear(), viewDate.getMonth(), day))}
                   type="button"
-                  className={`h-8 w-8 mx-auto rounded-lg flex flex-col items-center justify-center relative transition-all ${isSelected ? 'bg-brand text-white shadow-md shadow-brand/20' : isToday ? 'bg-brand/5 border border-brand/20' : 'hover:bg-gray-50'}`}
+                  className={`aurora-date-payment-day h-8 w-8 mx-auto rounded-lg flex flex-col items-center justify-center relative transition-all ${isSelected ? 'aurora-date-payment-day-selected bg-brand text-white shadow-md shadow-brand/20' : isToday ? 'bg-brand/5 border border-brand/20' : 'hover:bg-gray-50'}`}
                 >
                   <span className={`text-[10px] font-bold ${isSelected ? 'text-white' : isToday ? 'text-brand' : 'text-base-text'}`}>{day}</span>
                   {hasPayments && (
@@ -1994,29 +1997,27 @@ function PaymentCalendarModal({ selectedDates: initialDates, selectedTime: initi
             })}
           </div>
 
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="text-[8px] font-bold text-base-text-muted uppercase tracking-widest ml-1 mb-1 block">Filtrar por hora</label>
+          <div className="aurora-date-payment-time flex gap-2">
+            <label className="aurora-date-payment-time-label text-[8px] font-bold text-base-text-muted uppercase tracking-widest">Filtrar<br />por hora</label>
+            <div className="aurora-date-payment-time-field">
               <input 
                 type="time" 
                 value={selectedTime}
                 onChange={(e) => setSelectedTime(e.target.value)}
-                className="w-full p-2.5 bg-gray-50 rounded-xl text-xs font-bold text-base-text outline-none focus:bg-gray-100 transition-all"
+                className="aurora-date-payment-time-input w-full p-2.5 bg-gray-50 rounded-xl text-xs font-bold text-base-text outline-none focus:bg-gray-100 transition-all"
               />
             </div>
-            <div className="flex-1 flex items-end">
-              <button type="button"
-                onClick={() => setSelectedDates([new Date()])}
-                className="w-full py-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl text-[10px] font-bold text-base-text uppercase tracking-widest transition-colors"
-              >
-                Hoy
-              </button>
-            </div>
+            <button type="button"
+              onClick={() => setSelectedDates([new Date()])}
+              className="aurora-date-payment-today py-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl text-[10px] font-bold text-base-text uppercase tracking-widest transition-colors"
+            >
+              Hoy
+            </button>
           </div>
 
           <button type="button"
             onClick={() => onSelect(selectedDates, selectedTime)}
-            className="w-full py-3 bg-brand text-white rounded-xl text-[11px] font-bold uppercase tracking-widest shadow-md shadow-brand/20 active:scale-95 transition-all"
+            className="aurora-date-payment-apply w-full py-3 bg-brand text-white rounded-xl text-[11px] font-bold uppercase tracking-widest shadow-md shadow-brand/20 active:scale-95 transition-all"
           >
             Aplicar Selección ({selectedDates.length})
           </button>
@@ -2123,7 +2124,7 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
   return (
     <motion.div
       {...PAGE_TRANSITION}
-      className="space-y-4 -mx-4 -mt-4 px-4 pt-4 pb-4 font-sans"
+      className="aurora-view aurora-inicio-view space-y-4 -mx-4 -mt-4 px-4 pt-4 pb-4 font-sans"
       style={{ background: 'linear-gradient(180deg, #fff0f5 0%, #f8f9fa 120px)' }}
     >
       {/* Banner PWA compacto */}
@@ -2143,7 +2144,7 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
       )}
 
       {/* Tarjeta de Ingresos compacta rediseñada */}
-      <div className="rounded-[20px] px-4 py-3.5 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #ff2d78 0%, #ff6fa3 100%)' }}>
+      <div className="aurora-hero rounded-[20px] px-4 py-3.5 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #ff2d78 0%, #ff6fa3 100%)' }}>
         <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-0.5">Acumulado</p>
         <h2 className="text-2xl font-black leading-none mb-2.5">Bs {totalIngresos.toLocaleString('es-BO', { minimumFractionDigits: 0 })}</h2>
 
@@ -2164,50 +2165,49 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
       </div>
 
       {/* Resumen del Dashboard Funcional */}
-      <div className="grid grid-cols-3 gap-2">
-        <button 
+      <div className="aurora-home-stats grid grid-cols-3 gap-2">
+        <button
           onClick={() => onNavigate?.('payments')}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
+          aria-label="Pagos sin procesar"
+          className="aurora-stat aurora-stat-pink bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
         >
           <div className="flex items-center gap-2 justify-center mb-1.5">
             <span className="w-8 h-8 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center">
-              <Clock className="w-5 h-5 stroke-[2.25px]" />
+              <CircleDollarSign className="w-5 h-5 stroke-[2.25px]" />
             </span>
             <span className="text-[26px] leading-none font-extrabold text-orange-500">{pagosSinProcesar}</span>
           </div>
-          <span className="mt-1 text-[10px] font-bold text-[#8B95A7] uppercase tracking-wide leading-none text-center">Sin procesar</span>
         </button>
 
-        <button 
+        <button
           onClick={() => onNavigate?.('entrega')}
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
+          aria-label="Casilleros listos"
+          className="aurora-stat aurora-stat-sky bg-white rounded-2xl p-2.5 text-center border border-gray-100 hover:border-gray-200 active:scale-95 transition-all flex flex-col items-center justify-center shadow-sm relative overflow-hidden group"
         >
           <div className="flex items-center gap-2 justify-center mb-1.5">
             <span className="w-8 h-8 rounded-xl bg-blue-50 text-[#1677FF] flex items-center justify-center">
-              <Package className="w-5 h-5 stroke-[2.25px]" />
+              <Box className="w-5 h-5 stroke-[2.25px]" />
             </span>
             <span className="text-[26px] leading-none font-extrabold text-[#1677FF]">{pedidosListos}</span>
           </div>
-          <span className="mt-1 text-[10px] font-bold text-[#8B95A7] uppercase tracking-wide leading-none text-center">En casillero</span>
         </button>
 
         <div
           aria-label="Entregados"
-          className="bg-white rounded-2xl p-2.5 text-center border border-gray-100 flex flex-col items-center justify-center shadow-sm relative overflow-hidden select-none"
+          className="aurora-stat aurora-stat-mint bg-white rounded-2xl p-2.5 text-center border border-gray-100 flex flex-col items-center justify-center shadow-sm relative overflow-hidden select-none"
         >
           <div className="flex items-center gap-2 justify-center mb-1.5">
             <span className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <ShoppingBag className="w-5 h-5 stroke-[2.25px]" />
+              <BadgeCheck className="w-5 h-5 stroke-[2.25px]" />
             </span>
             <span className="text-[26px] leading-none font-extrabold text-emerald-600">{pedidosEntregadosCount}</span>
           </div>
-          <span className="mt-1 text-[10px] font-bold text-[#8B95A7] uppercase tracking-wide leading-none text-center">Entregados</span>
         </div>
       </div>
 
       {/* Próximo live */}
       {nextLive && (
-        <div className="bg-white rounded-2xl p-3 flex items-center gap-3 border border-gray-100 shadow-sm">
+        <div className="aurora-live-card bg-white rounded-2xl p-3 flex items-center gap-3 border border-gray-100 shadow-sm">
           <div className="w-8.5 h-8.5 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#fff0f5' }}>
             <Video className="w-4 h-4" style={{ color: '#ff2d78' }} />
           </div>
@@ -2221,7 +2221,7 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
       )}
 
       {/* Próximas entregas programadas */}
-      <section className="bg-white rounded-[24px] p-4 border border-gray-100 shadow-sm space-y-3">
+      <section className="aurora-deliveries-card bg-white rounded-[24px] p-4 border border-gray-100 shadow-sm space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.12em]">Entregas próximas</p>
@@ -2249,7 +2249,7 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
                 key={pedido.id}
                 type="button"
                 onClick={() => onSelectLocker?.(pedido)}
-                className="w-full py-3 px-2 flex items-center justify-between gap-3 text-left border-b border-gray-100 last:border-b-0 hover:bg-gray-50/70 active:scale-[0.99] transition-all"
+                className="w-full py-3 px-3 flex items-center justify-between gap-3 text-left border-b border-gray-100/50 last:border-b-0 hover:bg-white/50 hover:rounded-full hover:shadow-xs active:scale-[0.98] focus:outline-none transition-all"
               >
                 <span
                   className={cn(
@@ -2272,7 +2272,7 @@ function InicioView({ orders, lives, transactions, payments, pedidos, onAdd, isI
           </div>
         ) : (
           <div className="text-center py-4 text-gray-300">
-            <Package className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
+            <Box className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
             <p className="text-[11px] font-bold uppercase tracking-wider">Sin entregas programadas</p>
             <p className="text-[10px] font-medium mt-1">Las fechas aparecerán aquí al programar un pedido</p>
           </div>
@@ -2422,15 +2422,18 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
     }
   };
 
-  const showNumeric = activeTab === 'numeric';
-  const showAlpha   = activeTab === 'alpha';
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const searchActive = normalizedSearch.length > 0;
+  const showNumeric = activeTab === 'numeric' || searchActive;
+  const showAlpha   = activeTab === 'alpha' || searchActive;
 
   const toggleCollapse = (code: string) => {
     setCollapsedLabels(prev => ({ ...prev, [code]: !prev[code] }));
   };
 
   const toggleAllVisibleCollapse = () => {
-    const visibleCodes = (activeTab === 'numeric' ? NUMERIC : ALPHA).filter(code => byLabel(code).length > 0);
+    const visibleCodes = (searchActive ? [...NUMERIC, ...ALPHA] : activeTab === 'numeric' ? NUMERIC : ALPHA)
+      .filter(code => byLabel(code).length > 0);
     if (visibleCodes.length === 0) return;
     const shouldCollapse = visibleCodes.some(code => collapsedLabels[code] !== true);
     setCollapsedLabels(prev => visibleCodes.reduce((next, code) => ({ ...next, [code]: shouldCollapse }), { ...prev }));
@@ -2442,21 +2445,38 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
         <motion.div
           key="entrega"
           {...PAGE_TRANSITION}
-          className="space-y-4 pb-6 max-w-lg md:mx-auto -mx-4 px-4 font-sans"
+          className="aurora-view aurora-casilleros-view space-y-4 pb-6 max-w-lg md:mx-auto -mx-4 px-4 font-sans"
         >
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="aurora-locker-header flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-black text-gray-900 tracking-tight">Casilleros</h2>
           <p className="text-xs text-gray-400 font-medium mt-0.5">
             {activos.length} pedido{activos.length !== 1 ? 's' : ''} activo{activos.length !== 1 ? 's' : ''}
           </p>
         </div>
-
+        <div className="aurora-locker-type-buttons flex items-center gap-2">
+          <button
+            onClick={() => setActiveTab('numeric')}
+            onDoubleClick={toggleAllVisibleCollapse}
+            aria-label="Casilleros numéricos"
+            className="aurora-locker-type-button aurora-locker-type-numeric w-7 h-7 rounded-full text-white transition-all cursor-pointer flex-shrink-0 relative flex items-center justify-center focus:outline-none"
+          >
+            <Box className="w-4 h-4" strokeWidth={2.25} />
+          </button>
+          <button
+            onClick={() => setActiveTab('alpha')}
+            onDoubleClick={toggleAllVisibleCollapse}
+            aria-label="Casilleros alfabéticos"
+            className="aurora-locker-type-button aurora-locker-type-alpha w-7 h-7 rounded-full text-white transition-all cursor-pointer flex-shrink-0 relative flex items-center justify-center focus:outline-none"
+          >
+            <Box className="w-4 h-4" strokeWidth={2.25} />
+          </button>
+        </div>
       </div>
 
       {/* Buscador + Círculos de Categoría */}
-      <div className="flex items-center gap-2.5">
+      <div className="aurora-locker-tools flex items-center gap-2.5">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
@@ -2476,46 +2496,25 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
           )}
         </div>
 
-        {/* Círculo Azul (Numéricas) */}
-        <button
-          onClick={() => setActiveTab('numeric')}
-          onDoubleClick={toggleAllVisibleCollapse}
-          aria-label="Casilleros numéricos"
-          className={cn(
-            "w-8 h-8 rounded-full bg-[#007AFF] transition-all cursor-pointer flex-shrink-0 relative",
-            activeTab === 'numeric' ? "ring-2 ring-offset-2 ring-[#007AFF] scale-105" : "opacity-40 hover:opacity-60"
-          )}
-        />
-
-        {/* Círculo Rosa (Alfabéticas) */}
-        <button
-          onClick={() => setActiveTab('alpha')}
-          onDoubleClick={toggleAllVisibleCollapse}
-          aria-label="Casilleros alfabéticos"
-          className={cn(
-            "w-8 h-8 rounded-full bg-[#FF2D55] transition-all cursor-pointer flex-shrink-0 relative",
-            activeTab === 'alpha' ? "ring-2 ring-offset-2 ring-[#FF2D55] scale-105" : "opacity-40 hover:opacity-60"
-          )}
-        />
       </div>
 
       {/* Lista de Casilleros */}
-      <div className="space-y-3">
+      <div className="aurora-locker-groups space-y-3">
         {/* NUMÉRICAS */}
         {showNumeric && NUMERIC.filter(code => byLabel(code).length > 0).map(code => {
           const occupants = byLabel(code);
-          const isCollapsed = collapsedLabels[code] === true;
+          const isCollapsed = !searchActive && collapsedLabels[code] === true;
           return (
-            <div key={code} className="border border-blue-100/70 rounded-3xl bg-[#F5F9FF]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
+            <div key={code} className="aurora-locker-group aurora-locker-group-sky border border-blue-100/70 rounded-3xl bg-[#F5F9FF]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
               <div
                 onClick={() => toggleCollapse(code)}
                 role="button"
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
-                className="flex justify-between items-center px-1 cursor-pointer select-none"
+                className="aurora-locker-group-head flex justify-between items-center px-1 cursor-pointer select-none"
               >
                 <div className="flex items-center gap-1.5">
-                  {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-[#007AFF]" /> : <ChevronDown className="w-3.5 h-3.5 text-[#007AFF]" />}
+                  <Box className="w-3.5 h-3.5 text-[#8A87A0]" />
                   <span className="text-[#007AFF] font-black text-sm uppercase tracking-wider">
                     Casillero {code}
                   </span>
@@ -2526,7 +2525,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
               </div>
 
               {!isCollapsed && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="aurora-occupant-grid grid grid-cols-2 gap-2">
                   {occupants.map((p: any, i: number) => (
                     <button
                       key={p.id ?? i}
@@ -2557,18 +2556,18 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
         {/* ALFABÉTICAS */}
         {showAlpha && ALPHA.filter(code => byLabel(code).length > 0).map(code => {
           const occupants = byLabel(code);
-          const isCollapsed = collapsedLabels[code] === true;
+          const isCollapsed = !searchActive && collapsedLabels[code] === true;
           return (
-            <div key={code} className="border border-rose-100/70 rounded-3xl bg-[#FFF5F7]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
+            <div key={code} className="aurora-locker-group aurora-locker-group-pink border border-rose-100/70 rounded-3xl bg-[#FFF5F7]/20 px-2.5 py-3 space-y-3 -mx-2 md:mx-0">
               <div
                 onClick={() => toggleCollapse(code)}
                 role="button"
                 tabIndex={0}
                 aria-expanded={!isCollapsed}
-                className="flex justify-between items-center px-1 cursor-pointer select-none"
+                className="aurora-locker-group-head flex justify-between items-center px-1 cursor-pointer select-none"
               >
                 <div className="flex items-center gap-1.5">
-                  {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-[#FF2D55]" /> : <ChevronDown className="w-3.5 h-3.5 text-[#FF2D55]" />}
+                  <Box className="w-3.5 h-3.5 text-[#8A87A0]" />
                   <span className="text-[#FF2D55] font-black text-sm uppercase tracking-wider">
                     Casillero {code}
                   </span>
@@ -2579,7 +2578,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
               </div>
 
               {!isCollapsed && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="aurora-occupant-grid grid grid-cols-2 gap-2">
                   {occupants.map((p: any, i: number) => (
                     <button
                       key={p.id ?? i}
@@ -2611,7 +2610,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
         {activos.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center bg-white rounded-3xl border border-gray-100">
             <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mb-3 border border-gray-100">
-              <Package className="w-6 h-6 text-gray-300" />
+              <Box className="w-6 h-6 text-gray-300" />
             </div>
             <p className="text-xs font-bold text-gray-600">Sin etiquetas asignadas</p>
             <p className="text-[11px] text-gray-400 mt-0.5">Las etiquetas se asignan automáticamente al marcar un pedido como listo</p>
@@ -2625,7 +2624,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
       {/* Modal detalle del pedido (Minimalista) */}
       {selectedPedido && (
         <div
-          className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+          className="aurora-overlay fixed inset-0 z-[200] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
           onClick={closeSelectedPedido}
         >
           <motion.div
@@ -2634,31 +2633,31 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
             exit={{ scale: 0.95, opacity: 0, y: 8 }}
             transition={{ type: "spring", duration: 0.25 }}
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-[340px] bg-white rounded-[26px] p-4 border border-gray-100 relative overflow-hidden shadow-xl"
+            className="aurora-modal aurora-locker-modal w-full max-w-[340px] bg-white rounded-[26px] p-4 border border-gray-100 relative overflow-hidden shadow-xl"
           >
-            {/* Header Modal */}
-            <div className="flex justify-between items-center mb-5">
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Ficha de Casillero</span>
-              <button
-                onClick={closeSelectedPedido}
-                className="p-1 hover:bg-gray-100 active:scale-95 rounded-full transition-all text-gray-400 hover:text-gray-700 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Ficha Principal */}
-            <div className="flex flex-col items-center text-center mb-5">
+            {/* Cabecera del Modal con Casillero y Botón Cerrar en el mismo renglón */}
+            <div className="flex items-center justify-between w-full mb-4 px-1">
+              <div className="w-8" /> {/* Espaciador para centrar el badge */}
               <div className={cn(
-                'px-4 py-2.5 rounded-2xl flex items-center justify-center text-white font-black text-base mb-3 uppercase tracking-wide',
+                'aurora-locker-badge px-4 py-2.5 rounded-2xl flex items-center justify-center text-white font-black text-base uppercase tracking-wide shadow-xs',
                 selectedPedido.labelType === 'letter' 
                   ? 'bg-rose-600' 
                   : 'bg-blue-600'
               )}>
                 Casillero {selectedPedido.label}
               </div>
+              <button
+                onClick={closeSelectedPedido}
+                className="p-1.5 hover:bg-gray-100/80 active:scale-95 rounded-full transition-all text-gray-400 hover:text-gray-700 cursor-pointer"
+                title="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Ficha Principal */}
+            <div className="aurora-locker-identity flex flex-col items-center text-center mb-5">
 
-              <h3 className="font-black text-lg text-gray-900 leading-snug uppercase px-2 mb-1">
+              <h3 className="aurora-locker-name font-black text-lg text-gray-900 leading-snug uppercase px-2 mb-1">
                 {selectedPedido.customerName}
               </h3>
 
@@ -2669,7 +2668,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
                     href={`https://wa.me/${phone.replace(/\D/g, '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm font-bold text-[#007AFF] hover:underline tracking-wide mb-3 flex items-center gap-1 cursor-pointer"
+                    className="aurora-locker-phone text-sm font-bold text-[#007AFF] hover:underline tracking-wide mb-3 flex items-center gap-1 cursor-pointer"
                   >
                     <Phone className="w-3.5 h-3.5" />
                     <span>{formatDisplayPhone(phone)}</span>
@@ -2680,11 +2679,11 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
               })()}
 
               {/* Programador de Entrega Rápido */}
-              <div className="w-full mt-1.5 px-1 relative">
+              <div className="aurora-locker-delivery-wrap w-full mt-1.5 px-1 relative">
                 <button
                   type="button"
                   onClick={() => setShowDatePicker(prev => !prev)}
-                  className="w-full relative flex items-center justify-center gap-1.5 bg-[#F5F9FF] border border-blue-100 hover:bg-[#E3F2FD] rounded-2xl px-4 py-2.5 text-xs font-black text-[#007AFF] cursor-pointer active:scale-95 transition-all shadow-xs"
+                  className="aurora-locker-delivery w-full relative flex items-center justify-center gap-1.5 bg-[#F5F9FF] border border-blue-100 hover:bg-[#E3F2FD] rounded-2xl px-4 py-2.5 text-xs font-black text-[#007AFF] cursor-pointer active:scale-95 transition-all shadow-xs"
                 >
                   <Calendar className="w-4 h-4 text-[#007AFF]" />
                   <span className="uppercase tracking-wider">
@@ -2705,7 +2704,7 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
                   <button
                     type="button"
                     onClick={handleClearSchedule}
-                    className="absolute right-[-6px] top-1/2 -translate-y-1/2 bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 p-1.5 rounded-full shadow-sm transition-all active:scale-90 z-10"
+                    className="aurora-locker-delivery-clear absolute right-[-6px] top-1/2 -translate-y-1/2 bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 p-1.5 rounded-full shadow-sm transition-all active:scale-90 z-10"
                     title="Eliminar programación"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -2715,23 +2714,25 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
             </div>
 
             {/* Contadores Bolsas / Prendas */}
-            <div className="grid grid-cols-2 gap-3 mb-5">
-              <div className="bg-gray-50 border border-gray-200/60 rounded-2xl p-3 text-center">
-                <span className="text-xl font-black text-gray-900 block leading-none">{selectedPedido.bagCount}</span>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1 block">Bolsa(s)</span>
+            <div className="aurora-locker-stats grid grid-cols-2 gap-3 mb-5">
+              <div className="aurora-locker-stat bg-gray-50 border border-gray-200/60 rounded-2xl p-3 text-center">
+                <span className="aurora-locker-stat-icon aurora-locker-stat-sky"><ShoppingBag size={16} /></span>
+                <span className="aurora-locker-stat-value text-xl font-black text-gray-900 block leading-none">{selectedPedido.bagCount}</span>
+                <span className="sr-only">Bolsa(s)</span>
               </div>
-              <div className="bg-gray-50 border border-gray-200/60 rounded-2xl p-3 text-center">
-                <span className="text-xl font-black text-gray-900 block leading-none">{selectedPedido.itemCount ?? 0}</span>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1 block">Prenda(s)</span>
+              <div className="aurora-locker-stat bg-gray-50 border border-gray-200/60 rounded-2xl p-3 text-center">
+                <span className="aurora-locker-stat-icon aurora-locker-stat-pink"><Shirt size={16} /></span>
+                <span className="aurora-locker-stat-value text-xl font-black text-gray-900 block leading-none">{selectedPedido.itemCount ?? 0}</span>
+                <span className="sr-only">Prenda(s)</span>
               </div>
             </div>
 
             {/* Acciones */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="aurora-locker-actions grid grid-cols-2 gap-2">
               <button
                 onClick={handleDeliver}
                 disabled={isDelivering}
-                className="py-3 px-1 rounded-2xl font-extrabold text-[11px] uppercase tracking-wider text-white disabled:opacity-60 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1 cursor-pointer"
+                className="aurora-btn-mint py-3 px-1 rounded-2xl font-extrabold text-[11px] uppercase tracking-wider text-white disabled:opacity-60 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1 cursor-pointer"
               >
                 {isDelivering ? (
                   <>
@@ -2740,8 +2741,8 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
                   </>
                 ) : (
                   <>
-                    <Check className="w-3.5 h-3.5 stroke-[3px]" />
-                    <span>Marcar entregado</span>
+                    <BadgeCheck className="w-3.5 h-3.5 stroke-[3px]" />
+                    <span>Entregado</span>
                   </>
                 )}
               </button>
@@ -2749,30 +2750,30 @@ function EntregaView({ pedidos, customers, onSelectPerson, onRefresh, focusPedid
               {selectedPedido.customerId && (
                 <button
                   onClick={() => { setSelectedPedido(null); onSelectPerson(selectedPedido.customerId); }}
-                  className="py-3 px-1 rounded-2xl font-bold text-[11px] uppercase tracking-wider bg-gray-100 hover:bg-gray-200 text-gray-700 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1"
+                  className="aurora-btn-ghost py-3 px-1 rounded-2xl font-bold text-[11px] uppercase tracking-wider bg-gray-100 hover:bg-gray-200 text-gray-700 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1"
                 >
                   <UserIcon className="w-3.5 h-3.5" />
-                  <span>Ver pedido</span>
+                  <span>Ver perfil</span>
                 </button>
               )}
             </div>
           </motion.div>
           {showDatePicker && (
             <div
-              className="absolute inset-0 z-[260] flex items-center justify-center p-3"
+              className="aurora-date-picker-overlay absolute inset-0 z-[260] flex items-center justify-center p-3"
               onClick={() => setShowDatePicker(false)}
             >
-              <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
+              <div className="aurora-date-picker-backdrop absolute inset-0 bg-black/45 backdrop-blur-sm" />
               <motion.div
                 initial={{ scale: 0.94, opacity: 0, y: 8 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.94, opacity: 0, y: 8 }}
-                className="relative w-full max-w-[340px] bg-white rounded-[26px] p-4 shadow-xl"
+                className="aurora-modal aurora-calendar-modal relative w-full max-w-[340px] bg-white rounded-[26px] p-4 shadow-xl"
                 onClick={event => event.stopPropagation()}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Seleccionar fecha</span>
-                  <button type="button" onClick={() => setShowDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+                <div className="aurora-modal-head flex items-center justify-between mb-2">
+                  <span className="aurora-modal-label text-[10px] font-black text-gray-400 uppercase tracking-wider">Seleccionar fecha</span>
+                  <button type="button" onClick={() => setShowDatePicker(false)} className="aurora-modal-close p-1.5 hover:bg-gray-100 rounded-full transition-colors">
                     <X className="w-4 h-4 text-gray-400" />
                   </button>
                 </div>
@@ -2834,18 +2835,49 @@ function MinimalCalendar({
   }, [value]);
 
   if (compact) {
-    const compactStart = startOfWeek(new Date(`${minDate}T12:00:00`), { weekStartsOn: 0 });
-    const compactDays = Array.from({ length: 21 }, (_, index) => addDays(compactStart, index));
+    const compactYear = currentDate.getFullYear();
+    const compactMonth = currentDate.getMonth();
+    const compactTotalDays = new Date(compactYear, compactMonth + 1, 0).getDate();
+    const compactFirstDay = new Date(compactYear, compactMonth, 1).getDay();
+    const compactDays = Array.from(
+      { length: compactFirstDay + compactTotalDays },
+      (_, index) => index < compactFirstDay ? null : new Date(compactYear, compactMonth, index - compactFirstDay + 1)
+    );
+    const compactPreviousMonth = new Date(compactYear, compactMonth - 1, 1);
+    const compactNextMonth = new Date(compactYear, compactMonth + 1, 1);
+    const compactPreviousKey = getLocalDateKey(compactPreviousMonth);
+    const compactMonthName = currentDate.toLocaleDateString('es-BO', { month: 'long', year: 'numeric' }).toUpperCase();
 
     return (
       <div className="w-full font-sans select-none">
-        <div className="grid grid-cols-7 gap-1 mb-1.5 text-center">
+        <div className="aurora-calendar-nav flex items-center justify-between mb-2">
+          <button
+            type="button"
+            aria-label="Mes anterior"
+            disabled={compactPreviousKey < minDate}
+            onClick={() => setCurrentDate(compactPreviousMonth)}
+            className="aurora-calendar-arrow"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="aurora-calendar-title">{compactMonthName}</span>
+          <button
+            type="button"
+            aria-label="Mes siguiente"
+            onClick={() => setCurrentDate(compactNextMonth)}
+            className="aurora-calendar-arrow"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="aurora-calendar-dows grid grid-cols-7 gap-1 mb-1.5 text-center">
           {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((day, index) => (
             <span key={`${day}-${index}`} className="text-[9px] font-bold text-gray-400 uppercase leading-none">{day}</span>
           ))}
         </div>
-        <div className="grid grid-cols-7 gap-1.5 text-center">
-          {compactDays.map(date => {
+        <div className="aurora-calendar-grid grid grid-cols-7 gap-1.5 text-center">
+          {compactDays.map((date, index) => {
+            if (!date) return <div key={`empty-${index}`} className="aurora-calendar-cell" />;
             const dateKey = getLocalDateKey(date);
             const ordersForDate = scheduledOrdersByDate.get(dateKey) ?? [];
             const isPast = dateKey < minDate;
@@ -2856,28 +2888,29 @@ function MinimalCalendar({
             ].filter(marker => ordersForDate.some(marker.matches));
 
             return (
-              <button
-                key={dateKey}
-                type="button"
-                disabled={isPast}
-                onClick={() => onChange(dateKey)}
-                className={cn(
-                  'h-10 rounded-xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95',
-                  isPast ? 'text-gray-200 cursor-not-allowed' : 'text-[#475467] hover:bg-gray-50 cursor-pointer',
-                  isSelected && 'bg-[#fff0f5] text-[#ff2d78] font-black hover:bg-[#fff0f5]'
-                )}
-              >
-                <span className="text-[13px] leading-none font-bold">{format(date, 'd')}</span>
-                <span className="h-2 flex items-center justify-center gap-1">
+              <div key={dateKey} className="aurora-calendar-cell">
+                <button
+                  type="button"
+                  disabled={isPast}
+                  onClick={() => onChange(dateKey)}
+                  className={cn(
+                    'aurora-calendar-day transition-all active:scale-95',
+                    isPast ? 'text-gray-200 cursor-not-allowed' : 'text-[#475467] cursor-pointer',
+                    isSelected && 'aurora-calendar-day-selected'
+                  )}
+                >
+                  {format(date, 'd')}
+                </button>
+                <span className="aurora-calendar-dots flex items-center justify-center gap-1">
                   {markerTypes.map(marker => (
                     <span
                       key={`${dateKey}-${marker.key}`}
-                      className={cn('w-1.5 h-1.5 rounded-full', marker.color)}
+                      className={cn('aurora-calendar-dot rounded-full', marker.color)}
                       aria-hidden="true"
                     />
                   ))}
                 </span>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -2896,35 +2929,35 @@ function MinimalCalendar({
   const canGoPrevious = `${year}-${String(month + 1).padStart(2, '0')}-01` > minDate;
 
   return (
-    <div className="w-full font-sans select-none">
-      <div className="flex items-center justify-between bg-[#F8F9FA] rounded-2xl p-2.5 mb-4 border border-gray-100/40">
+    <div className="aurora-schedule-calendar w-full font-sans select-none">
+      <div className="aurora-schedule-nav flex items-center justify-between bg-[#F8F9FA] rounded-2xl p-2.5 mb-4 border border-gray-100/40">
         <button
           type="button"
           disabled={!canGoPrevious}
           onClick={() => setCurrentDate(previousMonth)}
-          className="p-1 rounded-full transition-all text-gray-500 hover:bg-gray-200/60 active:scale-90 disabled:opacity-20 disabled:pointer-events-none"
+          className="aurora-schedule-arrow p-1 rounded-full transition-all text-gray-500 hover:bg-gray-200/60 active:scale-90 disabled:opacity-20 disabled:pointer-events-none"
           aria-label="Mes anterior"
         >
           <ChevronLeft className="w-5 h-5 stroke-[2.5px]" />
         </button>
-        <span className="text-xs font-black text-gray-700 tracking-wider">{monthName}</span>
+        <span className="aurora-schedule-title text-xs font-black text-gray-700 tracking-wider">{monthName}</span>
         <button
           type="button"
           onClick={() => setCurrentDate(new Date(year, month + 1, 1))}
-          className="p-1 rounded-full transition-all text-gray-500 hover:bg-gray-200/60 active:scale-90"
+          className="aurora-schedule-arrow p-1 rounded-full transition-all text-gray-500 hover:bg-gray-200/60 active:scale-90"
           aria-label="Mes siguiente"
         >
           <ChevronRight className="w-5 h-5 stroke-[2.5px]" />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-y-2 mb-2 text-center">
+      <div className="aurora-schedule-dows grid grid-cols-7 gap-y-2 mb-2 text-center">
         {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((day, index) => (
           <span key={`${day}-${index}`} className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{day}</span>
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-y-2.5 text-center">
+      <div className="aurora-schedule-grid grid grid-cols-7 gap-y-2.5 text-center">
         {days.map((day, index) => {
           if (!day) return <div key={`empty-${index}`} className="h-9" />;
           const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -2938,9 +2971,9 @@ function MinimalCalendar({
               disabled={isPast}
               onClick={() => onChange(dateKey)}
               className={cn(
-                'w-9 h-9 mx-auto flex flex-col items-center justify-center relative rounded-2xl text-xs font-bold transition-all duration-200',
+                'aurora-schedule-day w-9 h-9 mx-auto flex flex-col items-center justify-center relative rounded-2xl text-xs font-bold transition-all duration-200',
                 isPast ? 'text-gray-200 cursor-not-allowed' : 'text-gray-800 hover:bg-gray-100 active:scale-95 cursor-pointer',
-                isSelected && 'bg-[#ff2d78] text-white shadow-sm font-black scale-105 hover:bg-[#ff2d78]'
+                isSelected && 'aurora-schedule-day-selected bg-[#ff2d78] text-white shadow-sm font-black scale-105 hover:bg-[#ff2d78]'
               )}
             >
               <span>{day}</span>
@@ -3160,7 +3193,8 @@ function ConfirmModal({
   message, 
   confirmText = "Eliminar", 
   cancelText = "Cancelar",
-  isDanger = true 
+  isDanger = true,
+  compact = false
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
@@ -3169,26 +3203,29 @@ function ConfirmModal({
   message: string, 
   confirmText?: string, 
   cancelText?: string,
-  isDanger?: boolean
+  isDanger?: boolean,
+  compact?: boolean
 }) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div className={cn("aurora-confirm-overlay fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm", compact && "aurora-confirm-overlay-compact")}>
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-white w-full max-w-[320px] rounded-[24px] p-6 shadow-2xl text-center"
+        className={cn("aurora-modal aurora-confirm-modal bg-white w-full max-w-[320px] rounded-[24px] p-6 shadow-2xl text-center", compact && "aurora-confirm-modal-compact")}
       >
-        <div className={cn(
-          "w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4",
-          isDanger ? "bg-rose-50 text-rose-500" : "bg-blue-50 text-blue-500"
-        )}>
-          {isDanger ? <Trash2 size={24} /> : <AlertCircle size={24} />}
-        </div>
+        {!compact && (
+          <div className={cn(
+            "w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4",
+            isDanger ? "bg-rose-50 text-rose-500" : "bg-blue-50 text-blue-500"
+          )}>
+            {isDanger ? <Trash2 size={24} /> : <AlertCircle size={24} />}
+          </div>
+        )}
         <h3 className="text-lg font-bold text-base-text mb-2">{title}</h3>
-        <p className="text-xs text-base-text-muted mb-6">{message}</p>
+        {!compact && <p className="text-xs text-base-text-muted mb-6">{message}</p>}
         <div className="flex flex-col gap-2">
           <button 
             onClick={() => { onConfirm(); onClose(); }}
@@ -3828,9 +3865,6 @@ function PaymentsView({
 
   const activeLiveSession = liveSessionState?.active ?? null;
   const liveButtonLabel = 'Live';
-  const liveButtonStyle = activeLiveSession
-    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-600"
-    : "bg-gray-100 text-gray-500 hover:bg-gray-200";
   const liveButtonTitle = activeLiveSession
     ? 'Cerrar el bloque de Live con hora real de cierre'
     : 'Iniciar bloque de Live desde este momento';
@@ -3838,9 +3872,9 @@ function PaymentsView({
   return (
     <motion.div
       {...PAGE_TRANSITION}
-      className="space-y-4"
+      className="aurora-view aurora-pagos-view space-y-4"
     >
-      <div className="flex justify-between items-center px-1">
+      <div className="aurora-payment-header flex justify-between items-center px-1">
         <div className="flex-1">
           <h2 className="text-2xl font-extrabold text-base-text tracking-tight uppercase">Pagos</h2>
         </div>
@@ -3848,10 +3882,8 @@ function PaymentsView({
           <button
             onClick={() => setShowOnlyWithPhone(!showOnlyWithPhone)}
             className={cn(
-              "w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90",
-              showOnlyWithPhone 
-                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
-                : "bg-gray-100 text-gray-400 hover:bg-gray-200"
+              "aurora-payment-control aurora-payment-control-whatsapp w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90",
+              showOnlyWithPhone && "is-active"
             )}
             title={showOnlyWithPhone ? "Mostrando solo con WhatsApp" : "Filtrar por WhatsApp"}
           >
@@ -3861,10 +3893,9 @@ function PaymentsView({
             onClick={handleLiveButton}
             disabled={procesandoLive}
             className={cn(
-              "h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 px-2.5 gap-1.5 text-xs font-semibold",
-              procesandoLive
-                ? "bg-purple-100 text-purple-600 cursor-not-allowed"
-                : liveButtonStyle
+              "aurora-payment-control aurora-payment-control-live h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 px-2.5 gap-1.5 text-xs font-semibold",
+              activeLiveSession && "is-active",
+              procesandoLive && "is-loading"
             )}
             title={liveButtonTitle}
           >
@@ -3885,22 +3916,20 @@ function PaymentsView({
           <button
             onClick={onToggleHideCompleted}
             className={cn(
-              "w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90",
-              hideCompletedWork
-                ? "bg-brand text-white shadow-lg shadow-brand/20"
-                : "bg-gray-100 text-gray-400 hover:bg-gray-200"
+              "aurora-payment-control aurora-payment-control-completed w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90",
+              hideCompletedWork && "is-active"
             )}
             title={hideCompletedWork ? "Mostrando solo pendientes" : "Filtrar completados"}
           >
             {hideCompletedWork ? <EyeOff size={18} /> : <Eye size={18} />}
           </button>
-          <button onClick={onAdd} aria-label="Registrar pago" title="Registrar pago" className="btn-tertiary-brand text-xs">
+          <button onClick={onAdd} aria-label="Registrar pago" title="Registrar pago" className="aurora-payment-control aurora-payment-control-add btn-tertiary-brand text-xs">
             <Plus className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr] gap-1">
+      <div className="aurora-payment-stats grid grid-cols-[1.4fr_0.8fr_0.8fr] gap-1">
         <button 
           onClick={onOpenCalendar}
           className="bg-pink-50/50 border border-pink-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -3933,7 +3962,7 @@ function PaymentsView({
         </button>
       </div>
 
-      <div className="space-y-2">
+      <div className="aurora-payment-list space-y-2">
         {paymentChannel === 'web' && webProfilesForDate.map((profile: any) => {
           const needsReview = (profile.orders ?? []).some((o: any) => {
             const paymentRef = String(o.payment_ref ?? '');
@@ -4012,7 +4041,7 @@ function PaymentsView({
 
         {paymentChannel === 'web' && webProfilesForDate.length === 0 && (
           <div className="text-center py-24 opacity-20">
-            <Wallet className="w-16 h-16 mx-auto mb-4" />
+            <CircleDollarSign className="w-16 h-16 mx-auto mb-4" />
             <p className="text-sm font-bold uppercase tracking-[0.2em]">
               Sin pagos web para esta fecha
             </p>
@@ -4209,7 +4238,7 @@ function PaymentsView({
 
         {paymentChannel === 'normal' && (groupedPayments.length === 0 ? (
           <div className="text-center py-24 opacity-20">
-            <Wallet className="w-16 h-16 mx-auto mb-4" />
+            <CircleDollarSign className="w-16 h-16 mx-auto mb-4" />
             <p className="text-sm font-bold uppercase tracking-[0.2em]">
               Sin pagos para esta fecha
             </p>
@@ -4219,7 +4248,7 @@ function PaymentsView({
             const palette = verificationPalette(group.verificationOrigin ?? 'other');
             const isWebPayment = group.history.some((p: any) => p.method === 'Tienda Online');
             return (
-            <div key={`${group.nombre}-${groupIdx}`} className="card-modern p-0 overflow-hidden">
+            <div key={`${group.nombre}-${groupIdx}`} className="aurora-payment-row card-modern p-0 overflow-hidden">
               {/* Header Card */}
               <div
                 onClick={() => {
@@ -4229,29 +4258,29 @@ function PaymentsView({
                     onSelectPerson(group.id);
                   }
                 }}
-                className="w-full pl-2 pr-4 py-2.5 flex items-center justify-between active:bg-gray-50 transition-colors gap-2 cursor-pointer"
+                className="aurora-payment-row-content w-full pl-2 pr-4 py-2.5 flex items-center justify-between active:bg-gray-50 transition-colors gap-2 cursor-pointer"
               >
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
                   <div
-                    className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center"
+                    className="aurora-payment-row-icon flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center"
                     style={{
                       backgroundColor: palette.bg,
                       color: palette.fg,
                     }}
                   >
-                    <CheckCircle2 className="w-4 h-4" />
+                    <BadgeCheck className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col items-start min-w-0">
                     {isWebPayment && (
                       <span className="text-[9px] font-black bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-md uppercase tracking-wider mb-0.5">WEB</span>
                     )}
-                    <span className="font-bold text-base-text text-sm text-left leading-tight uppercase tracking-tight truncate w-full">
+                    <span className="aurora-payment-row-name font-bold text-base-text text-sm text-left leading-tight uppercase tracking-tight truncate w-full">
                       {showOnlyWithPhone ? group.phone.replace('+591', '').trim() : group.nombre}
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
-                  <span className="font-extrabold text-brand text-base">Bs {group.totalAmount}</span>
+                  <span className="aurora-payment-row-amount font-extrabold text-brand text-base">Bs {group.totalAmount}</span>
                 </div>
               </div>
             </div>
@@ -4289,6 +4318,18 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+  const paymentDateRef = useRef<HTMLInputElement>(null);
+
+  const openPaymentDatePicker = () => {
+    const input = paymentDateRef.current;
+    if (!input) return;
+    input.focus();
+    try {
+      input.showPicker?.();
+    } catch {
+      // Algunos navegadores móviles abren el selector al enfocar el input.
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -4423,18 +4464,18 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-base-text/20 backdrop-blur-sm" onClick={onClose} />
+    <div className="aurora-payment-overlay fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="aurora-modal-backdrop absolute inset-0 bg-base-text/20 backdrop-blur-sm" onClick={onClose} />
       <motion.div 
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white w-full max-w-sm rounded-[32px] p-8 relative z-10 shadow-2xl"
+        className="aurora-modal aurora-payment-modal bg-white w-full max-w-sm rounded-[32px] p-8 relative z-10 shadow-2xl"
       >
-        <div className="flex justify-between items-center mb-8">
-          <h3 className="text-xl font-extrabold text-base-text tracking-tight uppercase">
+        <div className="aurora-modal-head flex justify-between items-center mb-8">
+          <h3 className="aurora-modal-title text-xl font-extrabold text-base-text tracking-tight uppercase">
             {editingPayment ? 'Editar Pago' : 'Registrar Pago'}
           </h3>
-          <button onClick={onClose} className="p-2 rounded-full bg-gray-50 text-base-text-muted">
+          <button onClick={onClose} className="aurora-modal-close p-2 rounded-full bg-gray-50 text-base-text-muted">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -4499,12 +4540,21 @@ function AddPaymentModal({ onClose, editingPayment, defaultDate, customers = [],
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold text-base-text-muted uppercase tracking-wider ml-1">Fecha de Pago</label>
             <div className="relative">
-              <input 
-                type="date" 
-                className="input-modern pr-10"
-                value={date} onChange={e => setDate(e.target.value)} required
+              <input
+                ref={paymentDateRef}
+                type="date"
+                className="input-modern aurora-payment-date-input pr-16"
+                value={date} onChange={e => setDate(e.target.value)} onClick={openPaymentDatePicker} required
               />
-              <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-base-text-muted pointer-events-none" />
+              <button
+                type="button"
+                aria-label="Abrir calendario de fecha de pago"
+                onClick={openPaymentDatePicker}
+                className="aurora-payment-date-icons absolute right-3 top-1/2 -translate-y-1/2"
+              >
+                <Calendar className="w-4 h-4" />
+                <CalendarIcon className="w-4 h-4" />
+              </button>
             </div>
           </div>
           <button 
@@ -5656,7 +5706,7 @@ function AddCategoryModal({ onClose, categories }: { onClose: () => void, catego
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+    <div className="aurora-people-overlay fixed inset-0 z-[110] flex items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -5992,24 +6042,24 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
   });
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+    <div className="aurora-people-overlay fixed inset-0 z-[110] flex items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        className="aurora-people-backdrop absolute inset-0 bg-black/40 backdrop-blur-sm"
       />
       <motion.div 
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="relative w-full max-w-lg bg-white rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="aurora-people-sheet relative w-full max-w-lg bg-white rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Header */}
-        <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
+        <div className="aurora-people-head p-6 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-brand/10 flex items-center justify-center text-brand">
+            <div className="aurora-people-icon w-10 h-10 rounded-2xl bg-brand/10 flex items-center justify-center text-brand">
               <Users className="w-5 h-5" />
             </div>
             <div>
@@ -6017,13 +6067,13 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
               <p className="text-[10px] font-bold text-base-text-muted uppercase tracking-wider">{people.length} Registradas</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+          <button onClick={onClose} className="aurora-modal-close p-2 hover:bg-gray-100 rounded-full transition-colors">
             <X className="w-5 h-5 text-base-text-muted" />
           </button>
         </div>
 
         {/* Search */}
-        <div className="p-4 bg-gray-50/50">
+        <div className="aurora-people-search p-4 bg-gray-50/50">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input 
@@ -6037,7 +6087,7 @@ function PeopleModal({ people, onClose, onSelectPerson, onLinkNumber }: any) {
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto px-4 py-1 divide-y divide-gray-100/60">
+        <div className="aurora-people-list flex-1 overflow-y-auto px-4 py-1 divide-y divide-gray-100/60">
           {filteredPeople.length === 0 ? (
             <div className="text-center py-12 opacity-20">
               <Users className="w-12 h-12 mx-auto mb-3" />
@@ -6065,7 +6115,7 @@ filteredPeople.map((person: any, idx: number) => {
                 <div 
                   key={`${person.id || person.nombre}-${idx}`}
                   onClick={() => onSelectPerson(person.id)}
-                  className="w-full py-2.5 px-1 flex items-center justify-between hover:bg-gray-50/50 transition-colors group cursor-pointer"
+                  className="aurora-people-row w-full py-2.5 px-1 flex items-center justify-between hover:bg-gray-50/50 transition-colors group cursor-pointer"
                 >
                   <div className="text-left min-w-0 flex-1 pr-2">
                     <p className="text-[12.5px] font-semibold text-gray-800 leading-snug truncate">
@@ -6131,35 +6181,6 @@ const OrderItemCard: React.FC<OrderItemCardProps> = ({
   const isListo = s === 'LISTO' || s === 'PREPARADO' || s === 'READY';
   const isPago = s === 'PAGO' || isOnlyPayment;
   
-  // Softer, more pastel palette
-  const colors = isPago
-    ? {
-        main: '#64748b', // Slate
-        bg: '#f8fafc',   // Slate 50
-        border: '#f1f5f9', // Slate 100
-        btnBorder: '#e2e8f0'
-      }
-    : isProcesar 
-    ? { 
-        main: '#92400E', // Muted Amber
-        bg: '#FFFBEB',   // Very light Amber
-        border: '#FEF3C7', // Soft Amber border
-        btnBorder: '#FDE68A' 
-      } 
-    : isListo 
-    ? { 
-        main: '#1E40AF', // Muted Blue (not "chillón")
-        bg: '#F0F7FF',   // Very light Blue
-        border: '#E0F2FE', // Soft Blue border
-        btnBorder: '#BAE6FD'
-      } 
-    : { 
-        main: '#065F46', // Muted Green
-        bg: '#F0FDF4',   // Very light Green
-        border: '#DCFCE7', // Soft Green border
-        btnBorder: '#BBF7D0'
-      };
-
   const getStatusText = () => {
     if (isPago) return 'PAGO';
     if (isProcesar) return 'PROCESAR';
@@ -6167,111 +6188,63 @@ const OrderItemCard: React.FC<OrderItemCardProps> = ({
     return 'ENTREGADO';
   };
 
-  // Neutral slate for secondary data that blends better
-  const secondaryColor = '#64748b';
+  const statusClass = isPago
+    ? 'aurora-status-pago'
+    : isProcesar
+      ? 'aurora-status-procesar'
+      : isListo
+        ? 'aurora-status-listo'
+        : 'aurora-status-entregado';
 
   return (
-    <motion.div 
+    <motion.div
       whileTap={{ scale: 0.98 }}
-      className="order-card-container"
+      className={cn('order-card-container aurora-profile-order-card', statusClass)}
       onClick={onClick}
-      style={{ 
-        padding: '12px', 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '12px',
-        backgroundColor: '#ffffff',
-        borderColor: colors.border,
-        borderWidth: '1.5px',
-        borderStyle: 'solid',
-        borderRadius: '28px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
-        marginBottom: '12px'
-      }}
     >
-      {/* Icono Principal */}
-      <div style={{ 
-        width: '48px', 
-        height: '48px', 
-        borderRadius: '14px', 
-        backgroundColor: colors.bg, 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        color: colors.main,
-        flexShrink: 0
-      }}>
-        {isPago ? <Wallet size={22} /> : <ShoppingBag size={22} />}
-      </div>
-
-      {/* Grupo de Datos */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: secondaryColor }}>
-        {!isPago && quantity !== undefined && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <Shirt size={15} />
-            <span style={{ fontSize: '10px', fontWeight: 800, marginTop: '1px' }}>{quantity}</span>
-          </div>
-        )}
+      <div className="aurora-profile-order-icons">
         {!isPago && bags !== undefined && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <ShoppingBag size={15} />
-            <span style={{ fontSize: '10px', fontWeight: 800, marginTop: '1px' }}>{bags}</span>
+          <div className="aurora-profile-order-icon">
+            <ShoppingBag size={16} />
+            <span>{bags}</span>
           </div>
         )}
-        {!isPago && tag && (
-          tag.toUpperCase().startsWith('WEB')
+        {!isPago && quantity !== undefined && (
+          <div className="aurora-profile-order-icon">
+            <Shirt size={16} />
+            <span>{quantity}</span>
+          </div>
+        )}
+        {!isPago && (
+          <div className="aurora-profile-order-icon">
+            {tag.toUpperCase().startsWith('WEB')
             ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }} title="Compra por tienda web">
-                <ShoppingCart size={15} />
-              </div>
+                <ShoppingCart size={16} />
             )
             : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <Tag size={15} />
-                <span style={{ fontSize: '10px', fontWeight: 800, marginTop: '1px' }}>{tag}</span>
-              </div>
-            )
+                <Tag size={16} />
+              )}
+            <span>{tag.toUpperCase().startsWith('WEB') ? '' : tag}</span>
+          </div>
         )}
         {isPago && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Historial</span>
-            <span style={{ fontSize: '8px', fontWeight: 600, opacity: 0.6 }}>Solo pagos registrados</span>
+          <div className="aurora-profile-order-icon">
+            <Wallet size={16} />
+            <span>Pago</span>
           </div>
         )}
       </div>
 
-      {/* Monto */}
-      <div style={{ marginLeft: 'auto', textAlign: 'right', paddingRight: '4px' }}>
-        <span style={{ fontSize: '15px', fontWeight: 800, color: secondaryColor }}>
-          Bs {amount}
-        </span>
-      </div>
+      <div className="aurora-profile-order-amount">Bs {amount}</div>
 
-      {/* Botón de Estado */}
-      <button 
+      <button
         onClick={(e) => {
           if (onStatusClick && !isPago) {
             e.stopPropagation();
             onStatusClick(e);
           }
         }}
-        style={{ 
-          padding: '8px 16px', 
-          borderRadius: '999px', 
-          backgroundColor: colors.bg, 
-          border: `1.5px solid ${colors.btnBorder}`,
-          color: colors.main,
-          fontSize: '11px',
-          fontWeight: 800,
-          cursor: isPago ? 'default' : 'pointer',
-          transition: 'all 0.2s',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minWidth: '100px',
-          letterSpacing: '0.02em',
-          opacity: isPago ? 0.7 : 1
-        }}
+        className="aurora-profile-order-status"
       >
         {getStatusText()}
       </button>
@@ -6663,14 +6636,6 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     setIsSaving(false);
   };
 
-  const getSmartButtonText = () => {
-    if (!selectedPedido) return '';
-    const status = selectedPedido.status.toUpperCase();
-    if (status === 'PROCESAR' || status === 'VERIFICADO' || status === 'PENDING') return 'MARCAR COMO LISTO';
-    if (status === 'LISTO' || status === 'PREPARADO' || status === 'READY') return 'GUARDAR CAMBIOS';
-    return 'PEDIDO ENTREGADO';
-  };
-
   const handleDeletePedido = async (pedidoId: string) => {
     setConfirmDeletePedido(pedidoId);
   };
@@ -6789,17 +6754,14 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
     return (
       <motion.div
         {...PAGE_TRANSITION}
-        className="fixed inset-0 z-[120] w-full max-w-[480px] mx-auto bg-white flex flex-col overflow-x-hidden no-scrollbar"
+        className="aurora-person-detail aurora-order-detail fixed inset-0 z-[120] w-full max-w-[480px] mx-auto bg-white flex flex-col overflow-x-hidden no-scrollbar"
       >
-        <div className="clone-header-container">
-          <div className="flex items-start gap-3">
-            <button onClick={() => forceDetailView ? onClose() : setView('detail')} className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
+        <div className="clone-header-container aurora-person-header">
+          <div className="aurora-person-topbar flex items-start gap-3">
+            <button onClick={() => forceDetailView ? onClose() : setView('detail')} className="aurora-person-back p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
               <ChevronLeft size={24} />
             </button>
-            <div className="flex-1">
-              <p className="text-[10px] font-black text-brand tracking-widest uppercase mb-1">
-                DETALLE DEL PEDIDO
-              </p>
+            <div className="aurora-person-heading flex-1">
               <h1 className="clone-name-title leading-tight">{getVisualName(person.nombre)}</h1>
               <div className="mt-1">
                 {person.waNumber ? (
@@ -6847,7 +6809,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             {!selectedPedido.id.startsWith('temp-') && (
               <button 
                 onClick={() => handleDeletePedido(selectedPedido.id)}
-                className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
+                className="aurora-person-trash p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
                 title="Eliminar Pedido"
               >
                 <Trash2 size={20} />
@@ -6856,27 +6818,31 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5 flex flex-col gap-6 pb-20">
-          <div className="grid grid-cols-2 gap-3 mb-2">
-            <div className="bg-[#FFF1F2] rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
-              <span className="text-[9px] font-extrabold text-[#BE185D] uppercase tracking-widest block mb-1">Total del Pedido</span>
+        <div className="aurora-order-body flex-1 overflow-y-auto no-scrollbar px-5 pt-5 flex flex-col gap-6 pb-20">
+          <div className="aurora-person-stats grid grid-cols-2 gap-3 mb-2">
+            <div className="aurora-person-stat aurora-person-stat-pink bg-[#FFF1F2] rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
+              <span className="text-[9px] font-extrabold text-[#BE185D] uppercase tracking-widest block mb-1">Total Pedido</span>
               <span className="text-xl font-black text-[#BE185D]">Bs {selectedPedido.orderAmount || selectedPedido.totalAmount || 0}</span>
             </div>
-            <div className="bg-slate-50 rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
+            <div className="aurora-person-stat aurora-person-stat-mint bg-slate-50 rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
               <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest block mb-1">Pagos Realizados</span>
               <span className="text-xl font-black text-[#1E293B]">{selectedPedido.paymentCount || 0}</span>
             </div>
           </div>
 
-          <div>
-            <PaymentHistoryTape
-              payments={dayPayments}
-              onPaymentClick={(p: any) => {
-                if (p.livePaymentId && (p.verificationOrigin === 'whatsapp_pending' || p.verificationOrigin === 'macrodroid_only' || p.verificationOrigin === 'other')) {
-                  setVerifyPaymentPopup({ id: p.id, livePaymentId: p.livePaymentId, amount: p.amount });
-                }
-              }}
-            />
+          <div className="aurora-order-tape">
+            {dayPayments.length > 0 ? (
+              <PaymentHistoryTape
+                payments={dayPayments}
+                onPaymentClick={(p: any) => {
+                  if (p.livePaymentId && (p.verificationOrigin === 'whatsapp_pending' || p.verificationOrigin === 'macrodroid_only' || p.verificationOrigin === 'other')) {
+                    setVerifyPaymentPopup({ id: p.id, livePaymentId: p.livePaymentId, amount: p.amount });
+                  }
+                }}
+              />
+            ) : (
+              <div className="aurora-payment-tape-empty">CARRUSEL<br />PAGOS</div>
+            )}
 
             {/* Popup de verificación manual desde el carrusel */}
             {verifyPaymentPopup && (
@@ -6889,7 +6855,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
                     <button onClick={() => setVerifyPaymentPopup(null)} className="flex-1 py-3 bg-gray-100 rounded-xl text-xs font-bold text-gray-600">
                       Cancelar
                     </button>
-                    <button onClick={handleVerifyPaymentFromTape} disabled={isVerifyingPayment} className="flex-1 py-3 bg-violet-500 text-white rounded-xl text-xs font-bold disabled:opacity-50">
+                    <button onClick={handleVerifyPaymentFromTape} disabled={isVerifyingPayment} className="flex-1 py-3 bg-[#a27dfa] text-white rounded-xl text-xs font-bold disabled:opacity-50">
                       {isVerifyingPayment ? '...' : 'Verificar'}
                     </button>
                   </div>
@@ -6898,19 +6864,21 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             )}
           </div>
 
-          <OrderChatPhotoSelector
-            phone={person.waNumber || person.phone || ''}
-            orderDate={selectedPedido.date}
-            mainPedidoId={selectedPedido.id}
-            days={4}
-            editable={!selectedPedido.id.startsWith('temp-')}
-            showComprobantes={showComprobanteSection}
-            onSelectionChange={(photos) => {
-              setChatPhotosForPedido(photos);
-            }}
-          />
+          <div className="aurora-order-photos">
+            <OrderChatPhotoSelector
+              phone={person.waNumber || person.phone || ''}
+              orderDate={selectedPedido.date}
+              mainPedidoId={selectedPedido.id}
+              days={4}
+              editable={!selectedPedido.id.startsWith('temp-')}
+              showComprobantes={showComprobanteSection}
+              onSelectionChange={(photos) => {
+                setChatPhotosForPedido(photos);
+              }}
+            />
+          </div>
 
-          <div className="clone-kit-container">
+          <div className="clone-kit-container aurora-order-kit">
               <>
                 {/* Botón de Reseteo Maestro */}
                 <button 
@@ -7012,17 +6980,18 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             const st = selectedPedido.status.toUpperCase();
             const isProcesar = st === 'PROCESAR' || st === 'VERIFICADO' || st === 'PENDING';
             const isListo = st === 'LISTO' || st === 'PREPARADO' || st === 'READY';
-            if (!isProcesar && !isListo) return null;
+            const canSave = isProcesar || isListo;
             return (
               <button
                 onClick={handleSmartAction}
-                disabled={isSaving}
+                disabled={isSaving || !canSave}
+                aria-label={canSave ? 'Guardar cambios' : 'Pedido entregado; sin cambios pendientes'}
                 className={cn(
-                  "w-max mx-auto px-8 py-3.5 rounded-[24px] font-black uppercase tracking-[0.1em] flex items-center justify-center gap-3 transition-all active:scale-95 text-[14px] disabled:opacity-60",
-                  isProcesar ? "bg-[#FFF9C4] text-[#F57F17]" : "bg-[#E3F2FD] text-[#1976D2]"
+                  "aurora-order-save w-max mx-auto px-8 py-3.5 rounded-[24px] font-black uppercase tracking-[0.1em] flex items-center justify-center gap-3 transition-all active:scale-95 text-[14px] disabled:opacity-60",
+                  !canSave ? "aurora-order-save-disabled" : isProcesar ? "bg-[#FFF9C4] text-[#F57F17]" : "bg-[#E3F2FD] text-[#1976D2]"
                 )}
               >
-                <span>{isSaving ? '...' : getSmartButtonText()}</span>
+                <span>{isSaving ? '...' : 'GUARDAR CAMBIOS'}</span>
                 <div className={cn(
                   "w-7 h-7 rounded-full flex items-center justify-center border-2",
                   isProcesar ? "border-[#F57F17]/30" : "border-[#1976D2]/30"
@@ -7040,17 +7009,14 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   return (
     <motion.div
       {...PAGE_TRANSITION}
-      className="fixed inset-0 z-[120] w-full max-w-[480px] mx-auto bg-white flex flex-col overflow-x-hidden no-scrollbar"
+      className="aurora-person-detail aurora-profile-page fixed inset-0 z-[120] w-full max-w-[480px] mx-auto bg-white flex flex-col overflow-x-hidden no-scrollbar"
     >
-      <div className="clone-header-container">
-        <div className="flex items-start gap-3">
-          <button onClick={onClose} className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
+      <div className="clone-header-container aurora-person-header">
+        <div className="aurora-person-topbar flex items-start gap-3">
+          <button onClick={onClose} className="aurora-person-back p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
             <ChevronLeft size={24} />
           </button>
-          <div className="flex-1">
-            <p className="text-[10px] font-black text-brand tracking-widest uppercase mb-1">
-              PERFIL DE CLIENTE
-            </p>
+          <div className="aurora-person-heading flex-1">
             <h1 className="clone-name-title leading-tight">{getVisualName(person.nombre)}</h1>
             <div className="mt-1">
               {person.waNumber ? (
@@ -7098,7 +7064,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           <button 
             onClick={() => setConfirmDeleteProfile(true)}
 
-            className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
+            className="aurora-person-trash p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
             title="Eliminar Perfil Completo"
           >
             <Trash2 size={20} />
@@ -7106,20 +7072,20 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-5 pb-20">
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="bg-[#FFF1F2] rounded-[20px] p-4 border border-[#FFE4E6] flex flex-col justify-center">
-            <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">Total Acumulado</span>
+      <div className="aurora-profile-body flex-1 overflow-y-auto no-scrollbar px-5 pt-5 pb-20">
+        <div className="aurora-person-stats grid grid-cols-2 gap-3 mb-6">
+          <div className="aurora-person-stat aurora-person-stat-pink bg-[#FFF1F2] rounded-[20px] p-4 border border-[#FFE4E6] flex flex-col justify-center">
+            <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">Total</span>
             <span className="text-xl font-black text-[#BE185D]">Bs {stats.totalPayments}</span>
           </div>
-          <div className="bg-emerald-50 rounded-[20px] p-4 border border-emerald-100 flex flex-col justify-center">
+          <div className="aurora-person-stat aurora-person-stat-mint bg-emerald-50 rounded-[20px] p-4 border border-emerald-100 flex flex-col justify-center">
             <span className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest block mb-1">Total Pedidos</span>
             <span className="text-xl font-black text-emerald-700">{stats.orderCount}</span>
           </div>
         </div>
 
         {person.customerId && (
-          <div className="mb-6">
+          <div className="aurora-profile-notes mb-6">
             <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Notas del operador</p>
             <textarea
               value={noteText}
@@ -7148,7 +7114,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           </div>
         )}
 
-        <div className="space-y-8 pb-24">
+        <div className="aurora-profile-orders space-y-8 pb-24">
           {dailyOrders.length === 0 ? (
             <div className="text-center py-12 opacity-20">
               <History className="w-12 h-12 mx-auto mb-3" />
@@ -7160,9 +7126,8 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
               const hasPayments = (order.paymentsList?.length ?? 0) > 0;
               return (
               <div key={`${order.dateKey}-${idx}`}>
-                <div className="flex items-center gap-2 mb-4">
+                <div className="aurora-order-date mb-4">
                   <h3 className="text-[10px] font-black text-brand uppercase tracking-[0.15em]">PEDIDO - {order.dateKey}</h3>
-                  <div className="h-[1px] flex-1 bg-brand/10" />
                 </div>
                 <OrderItemCard
                   amount={order.orderAmount || order.paymentAmount}
@@ -7220,12 +7185,13 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         message="¿Estás seguro de que deseas eliminar este pedido permanentemente?"
       />
 
-      <ConfirmModal 
+      <ConfirmModal
         isOpen={confirmDeleteProfile}
         onClose={() => setConfirmDeleteProfile(false)}
         onConfirm={handleDeleteProfile}
         title="Eliminar Perfil Completo"
         message={`¿Estás seguro de que deseas eliminar permanentemente a ${person.nombre} y TODOS sus datos (pagos y pedidos)? Esta acción no se puede deshacer.`}
+        compact
       />
 
       <ConfirmModal 

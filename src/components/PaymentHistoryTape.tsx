@@ -44,18 +44,11 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
           display: flex;
           flex-direction: column;
           align-items: center;
-          background: white;
+          background: transparent;
         }
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        .fade-overlay {
-          position: absolute;
-          top: 0; bottom: 0; width: 40px; z-index: 10; pointer-events: none;
-        }
-        .fade-left { left: 0; background: linear-gradient(to right, white, transparent); }
-        .fade-right { right: 0; background: linear-gradient(to left, white, transparent); }
 
         .tape-container {
           display: flex;
@@ -66,29 +59,26 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
           width: 100%;
         }
 
+        .tape-container.has-mask {
+          mask-image: linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent);
+          -webkit-mask-image: linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent);
+        }
+
         .divider-tape {
           width: 1px;
           height: 16px;
-          background-color: rgba(226, 232, 240, 0.4);
+          background-color: rgba(255, 255, 255, 0.35);
         }
 
         .dot-line {
           position: absolute;
           top: 50%; left: 8px; right: 8px;
           height: 1px;
-          background-color: #f8fafc;
+          background-color: rgba(156, 112, 248, 0.25);
           transform: translateY(-50%);
         }
       `}</style>
 
-      {/* Sombras de desvanecimiento */}
-      {isLargeList && (
-        <>
-          <div className="fade-overlay fade-left" />
-          <div className="fade-overlay fade-right" />
-        </>
-      )}
-      
       {/* Contenedor de Scroll */}
       <div 
         onScroll={(e) => {
@@ -101,7 +91,7 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
             setActivePaymentIndex(index);
           }
         }}
-        className="tape-container no-scrollbar"
+        className={`tape-container no-scrollbar ${isLargeList ? 'has-mask' : ''}`}
         style={{ 
           paddingLeft: isLargeList ? '40%' : '12px',
           paddingRight: isLargeList ? '40%' : '12px',
@@ -129,16 +119,19 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
           
           const isActive = isLargeList ? activePaymentIndex === index : true;
           const origin = payment.verificationOrigin ?? 'other';
+          
+          // Color lila suave (#a27dfa) y verde de la app (#10b981)
           const accentColor = origin === 'automatic'
             ? '#10b981'
             : origin === 'manual' || origin === 'whatsapp_pending'
-              ? '#a855f7'
+              ? '#a27dfa'
               : '#94a3b8';
           const mutedColor = origin === 'automatic'
             ? '#34d399'
             : origin === 'manual' || origin === 'whatsapp_pending'
-              ? '#d8b4fe'
+              ? '#beb2fa'
               : '#cbd5e1';
+              
           const label = origin === 'whatsapp_pending'
             ? 'Verificar'
             : origin === 'manual'
@@ -167,14 +160,38 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
                   opacity: isActive ? 1 : 0.4
                 }}
               >
-                <span style={{ fontSize: '16px', fontWeight: 900, color: isActive ? accentColor : '#94a3b8', lineHeight: 1 }}>
+                <span style={{ 
+                  fontSize: '16px', 
+                  fontWeight: 900, 
+                  color: isActive ? accentColor : '#94a3b8', 
+                  lineHeight: 1,
+                  textShadow: isActive ? '0 1px 2px rgba(255, 255, 255, 0.8), 0 0 4px rgba(255, 255, 255, 0.5)' : 'none'
+                }}>
                   {payment.amount}
                 </span>
-                <span style={{ fontSize: '9px', color: isActive ? mutedColor : '#cbd5e1', marginTop: '4px', fontWeight: 700, textTransform: 'uppercase' }}>
+                <span style={{ 
+                  fontSize: '9px', 
+                  color: isActive ? accentColor : '#cbd5e1', 
+                  marginTop: '4px', 
+                  fontWeight: 900, 
+                  textTransform: 'uppercase',
+                  textShadow: isActive ? '0 1px 2px rgba(255, 255, 255, 0.8), 0 0 4px rgba(255, 255, 255, 0.5)' : 'none'
+                }}>
                   {formattedTime}
                 </span>
                 {payment.method === 'Tienda Online' && (
-                  <span style={{ marginTop: '4px', fontSize: '8px', fontWeight: 900, color: '#16a34a', background: '#dcfce7', padding: '2px 6px', borderRadius: '999px', textTransform: 'uppercase' }}>
+                  <span style={{ 
+                    marginTop: '4px', 
+                    fontSize: '8px', 
+                    fontWeight: 900, 
+                    color: '#10b981', 
+                    background: 'rgba(255, 255, 255, 0.8)', 
+                    padding: '2px 6px', 
+                    borderRadius: '999px', 
+                    textTransform: 'uppercase',
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                  }}>
                     WEB
                   </span>
                 )}
@@ -187,7 +204,8 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
                     borderRadius: '50%',
                     backgroundColor: isActive ? accentColor : '#e2e8f0',
                     marginTop: '5px',
-                    display: 'block'
+                    display: 'block',
+                    boxShadow: isActive ? '0 0 2px white' : 'none'
                   }}
                 />
               </button>
@@ -207,14 +225,14 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
               key={idx}
               animate={{ 
                 scale: activePaymentIndex === idx ? 1.3 : 1,
-                backgroundColor: activePaymentIndex === idx ? '#94a3b8' : '#f1f5f9'
+                backgroundColor: activePaymentIndex === idx ? '#a27dfa' : 'rgba(156, 112, 248, 0.35)'
               }}
               style={{
                 width: '5px',
                 height: '5px',
                 borderRadius: '50%',
-                border: '1.5px solid white',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+                border: activePaymentIndex === idx ? '1.5px solid white' : '1.5px solid rgba(156, 112, 248, 0.20)',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                 position: 'relative',
                 zIndex: 10
               }}

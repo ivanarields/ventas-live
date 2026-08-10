@@ -15,7 +15,7 @@ import {
   Zap,
 } from 'lucide-react';
 
-const BRAND = '#ff2d78';
+const BRAND = 'rgba(255, 45, 120, 0.5)';
 const DEFAULT_MODEL = 'google/gemini-2.5-flash-lite';
 
 type FeatureConfig = Record<string, { enabled: boolean; model: string }>;
@@ -207,17 +207,17 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
   return (
     <div className="space-y-4 pb-8">
       <div className="flex items-center gap-2">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}>
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm"
+          style={{ background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.5), rgba(236, 72, 153, 0.5))' }}>
           <Zap size={18} className="text-white" />
         </div>
         <div>
           <h3 className="text-lg font-black text-gray-900">Inteligencia Artificial</h3>
-          <p className="text-[10px] text-gray-400 font-medium">Proveedor unico: OpenRouter</p>
+          <p className="text-[10px] text-gray-400 font-medium">Proveedor único: OpenRouter</p>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      <div className="card-modern p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Key size={13} style={{ color: BRAND }} />
@@ -238,18 +238,17 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
             placeholder="Ej: LEIDY CANDY DIAZ SANCHEZ"
             value={ownerName}
             onChange={e => setOwnerName(e.target.value.toUpperCase())}
-            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-[11px] font-mono outline-none focus:border-purple-400 h-9 uppercase"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-[11px] font-mono outline-none focus:border-[#ff2d78]/60 focus:ring-2 focus:ring-[#ff2d78]/10 h-9 uppercase"
           />
         </div>
         <button onClick={saveOwnerName} disabled={savingOwner}
-          className="w-full h-9 rounded-xl font-black text-[11px] text-white disabled:opacity-40 transition-all active:scale-95"
-          style={{ background: `linear-gradient(135deg, ${BRAND}, #ff6fa3)` }}>
+          className="w-full h-10 rounded-full font-black text-[11px] text-white disabled:opacity-40 bg-gradient-to-r from-[#ff2d78] to-[#ff6fa3] shadow-md hover:opacity-95 transition-all active:scale-95">
           {savingOwner ? 'Guardando...' : 'Guardar nombre'}
         </button>
         {ownerMsg && <span className="text-[11px] font-bold text-gray-600">{ownerMsg}</span>}
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      <div className="card-modern p-4 space-y-3">
         <h4 className="text-sm font-black text-gray-800 flex items-center gap-2">
           <Zap size={14} style={{ color: BRAND }} /> Funciones de IA
         </h4>
@@ -259,24 +258,24 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
           const count = usage?.byFeature?.[key] ?? 0;
           return (
             <div key={key}
-              className="flex items-center gap-3 p-3 rounded-xl border transition-all"
-              style={{ borderColor: feat.enabled ? '#d1fae5' : '#f3f4f6', background: feat.enabled ? '#f0fdf4' : '#fafafa' }}>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                style={{ background: feat.enabled ? 'linear-gradient(135deg, #a855f7, #ec4899)' : '#e5e7eb' }}>
+              className="flex items-center gap-3 p-3 rounded-2xl border transition-all"
+              style={{ borderColor: feat.enabled ? 'rgba(255, 45, 120, 0.1)' : 'rgba(255,255,255,0.2)', background: feat.enabled ? 'rgba(255, 45, 120, 0.025)' : 'rgba(255,255,255,0.4)' }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-xs"
+                style={{ background: feat.enabled ? 'linear-gradient(135deg, rgba(168, 85, 247, 0.5), rgba(236, 72, 153, 0.5))' : '#e5e7eb' }}>
                 <span className={feat.enabled ? 'text-white' : 'text-gray-400'}>{meta.icon}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[12px] font-black text-gray-800">{meta.label}</p>
                 <p className="text-[10px] text-gray-400 leading-tight">{meta.desc}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[9px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full truncate max-w-[150px]">
+                  <span className="text-[9px] font-bold text-gray-500 bg-white/70 border border-white/50 px-1.5 py-0.5 rounded-full truncate max-w-[150px]">
                     {modelInput || DEFAULT_MODEL}
                   </span>
                   {count > 0 && <span className="text-[9px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full">{count} llamadas</span>}
                 </div>
               </div>
               <button onClick={() => toggleFeature(key)} className="flex-shrink-0" disabled={savingFeature === key}>
-                <div className="w-10 h-5 rounded-full transition-all flex items-center px-0.5" style={{ background: feat.enabled ? '#10b981' : '#d1d5db' }}>
+                <div className="w-10 h-5 rounded-full transition-all flex items-center px-0.5" style={{ background: feat.enabled ? 'rgba(255, 45, 120, 0.5)' : '#d1d5db' }}>
                   <div className="w-4 h-4 rounded-full bg-white shadow-sm transition-all" style={{ transform: feat.enabled ? 'translateX(20px)' : 'translateX(0)' }} />
                 </div>
               </button>
@@ -286,20 +285,20 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
         {featureMsg && <p className="text-[11px] font-bold text-center text-gray-600">{featureMsg}</p>}
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      <div className="card-modern p-4 space-y-3">
         <h4 className="text-sm font-black text-gray-800 flex items-center gap-2">
           <FileText size={14} style={{ color: BRAND }} /> Prompts de comprobantes
         </h4>
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => saveComprobanteMode('simple')} disabled={savingMode}
             className="p-3 rounded-xl border-2 text-left transition-all disabled:opacity-50"
-            style={{ borderColor: comprobanteMode === 'simple' ? '#3b82f6' : '#e5e7eb', background: comprobanteMode === 'simple' ? '#eff6ff' : '#fafafa' }}>
+            style={{ borderColor: comprobanteMode === 'simple' ? '#4a9ff5' : 'rgba(255,255,255,0.3)', background: comprobanteMode === 'simple' ? 'rgba(74,159,245,0.08)' : 'rgba(255,255,255,0.4)' }}>
             <p className="text-[11px] font-black text-gray-800">Prompt simple</p>
             <p className="text-[9px] text-gray-500 leading-tight mt-1">Directo y eficiente.</p>
           </button>
           <button onClick={() => saveComprobanteMode('completo')} disabled={savingMode}
             className="p-3 rounded-xl border-2 text-left transition-all disabled:opacity-50"
-            style={{ borderColor: comprobanteMode === 'completo' ? '#a855f7' : '#e5e7eb', background: comprobanteMode === 'completo' ? '#faf5ff' : '#fafafa' }}>
+            style={{ borderColor: comprobanteMode === 'completo' ? '#a855f7' : 'rgba(255,255,255,0.3)', background: comprobanteMode === 'completo' ? 'rgba(168,85,247,0.08)' : 'rgba(255,255,255,0.4)' }}>
             <p className="text-[11px] font-black text-gray-800">Prompt completo</p>
             <p className="text-[9px] text-gray-500 leading-tight mt-1">Mas robusto en casos dificiles.</p>
           </button>
@@ -307,7 +306,7 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
         {promptMsg && <p className="text-[11px] font-bold text-center text-gray-600">{promptMsg}</p>}
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      <div className="card-modern p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="text-sm font-black text-gray-800 flex items-center gap-2">
             <BarChart3 size={14} style={{ color: BRAND }} /> Uso de IA
@@ -316,15 +315,15 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-3 text-center">
+          <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-100/40 rounded-xl p-3 text-center">
             <p className="text-xl font-black text-purple-600">{usage?.total ?? 0}</p>
             <p className="text-[9px] font-black text-gray-400 uppercase">7 dias</p>
           </div>
-          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl p-3 text-center">
+          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100/40 rounded-xl p-3 text-center">
             <p className="text-xl font-black text-blue-600">{usage?.today ?? 0}</p>
             <p className="text-[9px] font-black text-gray-400 uppercase">Hoy</p>
           </div>
-          <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-3 text-center">
+          <div className="bg-gradient-to-br from-red-50 to-orange-50 border border-red-100/40 rounded-xl p-3 text-center">
             <p className="text-xl font-black text-red-500">{usage?.errors ?? 0}</p>
             <p className="text-[9px] font-black text-gray-400 uppercase">Errores</p>
           </div>
@@ -341,8 +340,8 @@ export function AiSettingsPanel({ userId }: { userId: string }) {
               const meta = FEATURE_META[entry.feature];
               const time = new Date(entry.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
               return (
-                <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-gray-50 text-[10px]">
-                  {entry.success ? <CheckCircle2 size={12} className="text-green-500 flex-shrink-0" /> : <XCircle size={12} className="text-red-500 flex-shrink-0" />}
+                <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-white/50 border border-white/10 text-[10px]">
+                  {entry.success ? <CheckCircle2 size={12} className="text-[#10b981] flex-shrink-0" /> : <XCircle size={12} className="text-red-500 flex-shrink-0" />}
                   <span className="text-gray-400 font-mono w-10 flex-shrink-0">{time}</span>
                   <span className="font-bold text-gray-600 truncate flex-1">{meta?.label ?? entry.feature}</span>
                   <span className="text-gray-400 font-mono">{entry.latency_ms}ms</span>
