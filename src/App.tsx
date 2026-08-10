@@ -3611,8 +3611,8 @@ function PaymentsView({
 
   const isToday = selectedDates.length === 1 && selectedDates[0].toDateString() === new Date().toDateString();
   const dateLabel = selectedDates.length > 1 
-    ? `TOTAL - ${selectedDates.length} DÍAS`
-    : isToday ? 'TOTAL HOY' : `TOTAL - ${selectedDates[0].toLocaleDateString('es', { day: '2-digit', month: 'short' }).toUpperCase()}`;
+    ? `${selectedDates.length} DÍAS`
+    : isToday ? 'TOTAL' : `TOTAL - ${selectedDates[0].toLocaleDateString('es', { day: '2-digit', month: 'short' }).toUpperCase()}`;
 
   const filteredPayments = useMemo(() => {
     return payments.filter(p => {
@@ -3938,7 +3938,9 @@ function PaymentsView({
             const displaySubLabel = String(dateLabel).toUpperCase().replace(/^TOTAL[\s-]*/, '');
             return (
               <div className="flex flex-col text-left leading-[1.05] min-w-0 pr-1">
-                <span className="text-[8px] font-bold text-pink-500 uppercase tracking-tight">TOTAL</span>
+                {selectedDates.length === 1 && (
+                  <span className="text-[8px] font-bold text-pink-500 uppercase tracking-tight">TOTAL</span>
+                )}
                 <span className="text-[9.5px] font-black text-pink-600 uppercase">{displaySubLabel}</span>
               </div>
             );
@@ -3956,7 +3958,7 @@ function PaymentsView({
           className="bg-emerald-50/50 border border-emerald-100/70 rounded-2xl py-3 px-2 flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
           <span className="text-[10px] font-black uppercase text-emerald-600 truncate">
-            {stats.people === 1 ? 'Persona' : 'Personas'}
+            {stats.people === 1 ? 'Cliente' : 'Clientes'}
           </span>
           <span className="text-[13.5px] font-black text-emerald-700 leading-none flex-shrink-0">{stats.people}</span>
         </button>
@@ -6809,7 +6811,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
             {!selectedPedido.id.startsWith('temp-') && (
               <button 
                 onClick={() => handleDeletePedido(selectedPedido.id)}
-                className="aurora-person-trash p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
+                className="aurora-person-trash p-2 text-rose-300 opacity-50 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
                 title="Eliminar Pedido"
               >
                 <Trash2 size={20} />
@@ -6821,11 +6823,10 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
         <div className="aurora-order-body flex-1 overflow-y-auto no-scrollbar px-5 pt-5 flex flex-col gap-6 pb-20">
           <div className="aurora-person-stats grid grid-cols-2 gap-3 mb-2">
             <div className="aurora-person-stat aurora-person-stat-pink bg-[#FFF1F2] rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
-              <span className="text-[9px] font-extrabold text-[#BE185D] uppercase tracking-widest block mb-1">Total Pedido</span>
               <span className="text-xl font-black text-[#BE185D]">Bs {selectedPedido.orderAmount || selectedPedido.totalAmount || 0}</span>
             </div>
             <div className="aurora-person-stat aurora-person-stat-mint bg-slate-50 rounded-[16px] py-3.5 px-4 flex flex-col justify-center">
-              <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest block mb-1">Pagos Realizados</span>
+              <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest block mb-1">Pagos</span>
               <span className="text-xl font-black text-[#1E293B]">{selectedPedido.paymentCount || 0}</span>
             </div>
           </div>
@@ -7064,7 +7065,7 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
           <button 
             onClick={() => setConfirmDeleteProfile(true)}
 
-            className="aurora-person-trash p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
+            className="aurora-person-trash p-2 text-rose-300 opacity-50 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all"
             title="Eliminar Perfil Completo"
           >
             <Trash2 size={20} />
@@ -7075,11 +7076,11 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
       <div className="aurora-profile-body flex-1 overflow-y-auto no-scrollbar px-5 pt-5 pb-20">
         <div className="aurora-person-stats grid grid-cols-2 gap-3 mb-6">
           <div className="aurora-person-stat aurora-person-stat-pink bg-[#FFF1F2] rounded-[20px] p-4 border border-[#FFE4E6] flex flex-col justify-center">
-            <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">Total</span>
+            <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">TOTAL</span>
             <span className="text-xl font-black text-[#BE185D]">Bs {stats.totalPayments}</span>
           </div>
           <div className="aurora-person-stat aurora-person-stat-mint bg-emerald-50 rounded-[20px] p-4 border border-emerald-100 flex flex-col justify-center">
-            <span className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest block mb-1">Total Pedidos</span>
+            <span className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest block mb-1">Pedidos</span>
             <span className="text-xl font-black text-emerald-700">{stats.orderCount}</span>
           </div>
         </div>
@@ -7270,13 +7271,11 @@ function CalendarModal({
   const [tempSelectedDate, setTempSelectedDate] = useState(selectedDate);
   
   const days = useMemo(() => {
-    const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 0 });
-    const end = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 0 });
+    const today = new Date();
+    const start = startOfWeek(today, { weekStartsOn: 0 });
+    const end = endOfWeek(addDays(today, 14), { weekStartsOn: 0 });
     return eachDayOfInterval({ start, end });
-  }, [currentMonth]);
-
-  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
+  }, []);
 
   const handleConfirm = () => {
     onSelect(tempSelectedDate);
@@ -7285,7 +7284,6 @@ function CalendarModal({
   const handleToday = () => {
     const now = new Date();
     setTempSelectedDate(now);
-    setCurrentMonth(startOfMonth(now));
   };
 
   return (
@@ -7311,16 +7309,10 @@ function CalendarModal({
         </div>
 
         {/* Month Navigation */}
-        <div className="flex items-center justify-between bg-gray-50 rounded-2xl p-2">
-          <button onClick={prevMonth} className="p-2 hover:bg-white hover:shadow-sm rounded-xl transition-all text-gray-400">
-            <ChevronLeft size={20} />
-          </button>
+        <div className="flex items-center justify-center bg-gray-50 rounded-2xl p-2">
           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-base-text">
-            {format(currentMonth, "MMMM 'de' yyyy", { locale: es })}
+            {format(new Date(), "MMMM 'de' yyyy", { locale: es })}
           </span>
-          <button onClick={nextMonth} className="p-2 hover:bg-white hover:shadow-sm rounded-xl transition-all text-gray-400">
-            <ChevronRight size={20} />
-          </button>
         </div>
 
         {/* Day Headers */}
@@ -7676,11 +7668,10 @@ function AddPedidoModal({ onClose, customerId, customerName, allPedidos, allCust
           {/* 2. SUMMARY CARDS */}
           <div className="px-6 py-4 grid grid-cols-2 gap-3">
             <div className="bg-[#FFF1F2] rounded-[20px] p-4 border border-[#FFE4E6] flex flex-col justify-center">
-              <span className="text-[8px] font-bold text-[#BE185D] uppercase tracking-widest block mb-1">TOTAL PEDIDO</span>
               <span className="text-xl font-black text-[#BE185D]">Bs {totalAmount}</span>
             </div>
             <div className="order-card-bg p-4 flex flex-col justify-center">
-              <span className="text-[8px] font-bold text-[#94A3B8] uppercase tracking-widest block mb-1">PAGOS REALIZADOS</span>
+              <span className="text-[8px] font-bold text-[#94A3B8] uppercase tracking-widest block mb-1">Pagos</span>
               <span className="text-xl font-black text-[#1E293B]">{paymentCount}</span>
             </div>
           </div>
