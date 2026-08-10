@@ -1393,7 +1393,9 @@ export default function App() {
       }
 
       const amount = cleanAmount(p.pago);
-      groups[groupKey].total += amount;
+      if (isCountablePayment(p)) {
+        groups[groupKey].total += amount;
+      }
       groups[groupKey].count += 1;
       groups[groupKey].payments.push({ ...p, pago: amount, date: p.fecha || p.date });
       
@@ -3533,8 +3535,8 @@ function PaymentsView({
   }, []);
 
   const verificationPalette = (origin: VerificationOrigin) => {
-    if (origin === 'automatic') return { bg: '#ecfdf5', fg: '#10b981' };
-    if (origin === 'manual' || origin === 'whatsapp_pending') return { bg: '#faf5ff', fg: '#a855f7' };
+    if (origin === 'automatic' || origin === 'manual') return { bg: '#ecfdf5', fg: '#10b981' };
+    if (origin === 'whatsapp_pending') return { bg: '#faf5ff', fg: '#a855f7' };
     return { bg: '#f8fafc', fg: '#94a3b8' };
   };
 
@@ -3731,12 +3733,13 @@ function PaymentsView({
       };
     }
     const visiblePayments = filteredPayments.filter(paymentBelongsToChannel);
-    const totalSelected = visiblePayments.reduce((acc, p) => acc + cleanAmount(p.pago), 0);
-    const uniquePeople = new Set(visiblePayments.map(p => cleanName(p.nombre).toLowerCase())).size;
+    const countablePayments = visiblePayments.filter(isCountablePayment);
+    const totalSelected = countablePayments.reduce((acc, p) => acc + cleanAmount(p.pago), 0);
+    const uniquePeople = new Set(countablePayments.map(p => cleanName(p.nombre).toLowerCase())).size;
 
     return {
       totalSelected,
-      count: visiblePayments.length,
+      count: countablePayments.length,
       people: uniquePeople
     };
   }, [filteredPayments, paymentChannel, webProfilesForDate]);
@@ -3787,7 +3790,9 @@ function PaymentsView({
         };
       }
       if (!groups[groupKey].phone && p.phone) groups[groupKey].phone = p.phone;
-      groups[groupKey].totalAmount += amount;
+      if (isCountablePayment(p)) {
+        groups[groupKey].totalAmount += amount;
+      }
       groups[groupKey].history.push({ ...p, pago: amount });
     });
 
@@ -6520,7 +6525,9 @@ function PersonDetailModal({ person, pedidos: allPedidos, customers, onClose, on
   const stats = useMemo(() => {
     const payments = (person.payments || [])
       .filter((p: any) => String(p?.method ?? '').trim().toLowerCase() !== 'tienda online');
-    const totalPayments = payments.reduce((acc: number, p: any) => acc + cleanAmount(p.pago), 0);
+    const totalPayments = payments
+      .filter(isCountablePayment)
+      .reduce((acc: number, p: any) => acc + cleanAmount(p.pago), 0);
     const livePedidos = (person.pedidos || []).filter((p: any) =>
       String(p?.source ?? '').toUpperCase() !== 'WEB' &&
       String(p?.labelType ?? '').toUpperCase() !== 'WEB' &&

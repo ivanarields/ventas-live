@@ -121,14 +121,14 @@ export const PaymentHistoryTape: React.FC<PaymentHistoryTapeProps> = ({ payments
           const origin = payment.verificationOrigin ?? 'other';
           
           // Color lila suave (#a27dfa) y verde de la app (#10b981)
-          const accentColor = origin === 'automatic'
+          const accentColor = origin === 'automatic' || origin === 'manual'
             ? '#10b981'
-            : origin === 'manual' || origin === 'whatsapp_pending'
+            : origin === 'whatsapp_pending'
               ? '#a27dfa'
               : '#94a3b8';
-          const mutedColor = origin === 'automatic'
+          const mutedColor = origin === 'automatic' || origin === 'manual'
             ? '#34d399'
-            : origin === 'manual' || origin === 'whatsapp_pending'
+            : origin === 'whatsapp_pending'
               ? '#beb2fa'
               : '#cbd5e1';
               

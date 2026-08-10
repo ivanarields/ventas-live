@@ -1457,8 +1457,8 @@ body:has(.aurora-app) {
   background: linear-gradient(135deg, rgba(94, 220, 181, .22) 0%, rgba(240, 253, 248, .55) 100%) !important;
 }
 
-.aurora-payment-stats span { font-size: 8px !important; font-weight: 800 !important; letter-spacing: .07em !important; }
-.aurora-payment-stats b { font-size: 14px !important; font-weight: 800 !important; }
+.aurora-payment-stats span { font-size: 10px !important; font-weight: 800 !important; letter-spacing: .07em !important; }
+.aurora-payment-stats b { font-size: 16px !important; font-weight: 800 !important; }
 .aurora-payment-stats > :first-child span,
 .aurora-payment-stats > :first-child b { color: var(--aurora-pink) !important; }
 .aurora-payment-stats > :nth-child(2) span,
@@ -1972,11 +1972,11 @@ body:has(.aurora-app) {
 }
 .aurora-payment-stats > :first-child > div { display: flex !important; flex-direction: column !important; text-align: center !important; }
 .aurora-payment-stats > :nth-child(2) span,
-.aurora-payment-stats > :nth-child(3) span { font-size: 8px !important; }
+.aurora-payment-stats > :nth-child(3) span { font-size: 10px !important; }
 .aurora-payment-stats > :first-child > span:last-child,
 .aurora-payment-stats > :nth-child(2) > span:last-child,
 .aurora-payment-stats > :nth-child(3) > span:last-child {
-  font-size: 14px !important;
+  font-size: 16px !important;
   font-weight: 800 !important;
   white-space: nowrap !important;
 }
@@ -2263,8 +2263,8 @@ body:has(.aurora-app) {
   background: linear-gradient(135deg, rgba(94,220,181,.22), rgba(240,253,248,.55)) !important;
   color: var(--aurora-mint-tx) !important;
 }
-.aurora-person-stat span { margin: 0 !important; color: inherit !important; font-size: 8px !important; font-weight: 800 !important; letter-spacing: .07em !important; }
-.aurora-person-stat span:last-child { color: inherit !important; font-size: 14px !important; font-weight: 800 !important; white-space: nowrap !important; }
+.aurora-person-stat span { margin: 0 !important; color: inherit !important; font-size: 10px !important; font-weight: 800 !important; letter-spacing: .07em !important; }
+.aurora-person-stat span:last-child { color: inherit !important; font-size: 16px !important; font-weight: 800 !important; white-space: nowrap !important; }
 .aurora-profile-notes { margin: 0 !important; }
 .aurora-profile-notes > p {
   margin: 0 0 6px !important;
