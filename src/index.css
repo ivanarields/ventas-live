@@ -842,6 +842,10 @@
     #FDF6F9;
 }
 
+@media (max-width: 480px) {
+  .aurora-app { max-width: 100%; }
+}
+
 body:has(.aurora-app) {
   background: #F3EFF7 !important;
 }
