@@ -1760,7 +1760,7 @@ export default function App() {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="aurora-bottom-nav glass-nav fixed left-1/2 bottom-0 -translate-x-1/2 w-full max-w-[480px] min-w-0 px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-hidden pointer-events-auto">
+      <nav className="aurora-bottom-nav glass-nav fixed left-1/2 bottom-0 w-full max-w-[480px] min-w-0 px-2 py-0.5 flex justify-between items-center z-[500] gap-1 overflow-x-hidden pointer-events-auto">
         <TabButton active={currentTab === 'inicio'} icon={House} label="Inicio" onClick={() => { setCurrentTab('inicio'); setSelectedPersonId(null); }} />
         <TabButton active={currentTab === 'payments'} icon={CircleDollarSign} label="Pagos" onClick={() => { setCurrentTab('payments'); setSelectedPersonId(null); }} />
         <TabButton active={currentTab === 'entrega'} icon={Box} label="Casilleros" onClick={() => { setCurrentTab('entrega'); setSelectedPersonId(null); }} />
