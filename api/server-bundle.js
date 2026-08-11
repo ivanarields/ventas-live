@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 // src/lib/supabaseServer.ts
+import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 var url = process.env.SUPABASE_URL;
 var serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -19,6 +20,7 @@ var supabaseServer = createClient(url ?? "", serviceKey ?? "", {
 });
 
 // src/lib/supabaseStore.ts
+import "dotenv/config";
 import { createClient as createClient2 } from "@supabase/supabase-js";
 var url2 = process.env.VITE_STORE_SUPABASE_URL;
 var serviceKey2 = process.env.STORE_SUPABASE_SERVICE_ROLE_KEY;
@@ -32,6 +34,7 @@ var supabaseStore = createClient2(url2 ?? "", serviceKey2 ?? "", {
 });
 
 // src/lib/supabasePanel.ts
+import "dotenv/config";
 import { createClient as createClient3 } from "@supabase/supabase-js";
 var url3 = process.env.PANEL_SUPABASE_URL;
 var serviceKey3 = process.env.PANEL_SUPABASE_SERVICE_KEY;
@@ -2841,7 +2844,7 @@ function createIdentityRouter(supabase, supabaseStore2, supabasePanel2) {
         const to2 = new Date(pivot2.getTime() + rangeMs2).toISOString();
         const [{ data: mensajes2, error: mensajesError }, { data: pagos, error: pagosError }] = await Promise.all([
           supabasePanel2.from("panel_mensajes").select("id, media_url, media_type, direction, created_at, content").eq("cliente_id", cliente.id).eq("direction", "in").eq("has_media", true).not("media_url", "is", null).gte("created_at", from2).lte("created_at", to2).order("created_at", { ascending: false }).limit(30),
-          supabasePanel2.from("pagos_venta_live").select("panel_mensaje_id, comprobante_media_url, comprobante_texto, estado, created_at").eq("cliente_id", cliente.id).order("created_at", { ascending: false }).limit(30)
+          supabasePanel2.from("pagos_venta_live").select("panel_mensaje_id, comprobante_media_url, comprobante_texto, estado, created_at").eq("cliente_id", cliente.id).in("estado", ["pendiente_whatsapp", "revision_manual"]).gte("created_at", from2).lte("created_at", to2).order("created_at", { ascending: false }).limit(30)
         ]);
         if (mensajesError) throw mensajesError;
         if (pagosError) throw pagosError;
@@ -2864,7 +2867,9 @@ function createIdentityRouter(supabase, supabaseStore2, supabasePanel2) {
             selected_final: false,
             selection_source: null
           };
-        });
+        }).filter(
+          (photo) => photo.payment_status === "pendiente_whatsapp" || photo.payment_status === "revision_manual"
+        );
         return res.json({
           photos: photos2,
           cliente_found: true,
@@ -3357,7 +3362,8 @@ async function analyzeLiveReceipt(panelDb, mainDb, input) {
     mainCustomerId: updatedOrder.main_customer_id,
     windowMinutes: 5
   });
-  await recomputeLiveOrderTotals(panelDb, order.id);
+  updatedOrder = await recomputeLiveOrderTotals(panelDb, order.id);
+  await syncMainPedidoForLiveOrder(panelDb, mainDb, input.userId, updatedOrder);
   return {
     ok: true,
     created: true,
@@ -5352,6 +5358,7 @@ app.get("/api/pagos-lista", async (req, res) => {
   const [linkedLiveResult, pendingLiveResult] = await Promise.all([linkedLiveRequest, pendingLiveRequest]);
   const liveByPagoId = /* @__PURE__ */ new Map();
   if (!linkedLiveResult.error) {
+    liveByPagoId.clear();
     for (const livePago of linkedLiveResult.data ?? []) {
       liveByPagoId.set(Number(livePago.main_pago_id), livePago);
     }
