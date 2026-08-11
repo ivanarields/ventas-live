@@ -392,7 +392,8 @@ export async function analyzeLiveReceipt(
   });
 
   // 11. Recalcular después del match
-  await recomputeLiveOrderTotals(panelDb, order.id);
+  updatedOrder = await recomputeLiveOrderTotals(panelDb, order.id);
+  await syncMainPedidoForLiveOrder(panelDb, mainDb, input.userId, updatedOrder);
 
   return {
     ok: true,

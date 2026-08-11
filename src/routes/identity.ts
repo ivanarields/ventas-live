@@ -474,6 +474,9 @@ export function createIdentityRouter(
             .from('pagos_venta_live')
             .select('panel_mensaje_id, comprobante_media_url, comprobante_texto, estado, created_at')
             .eq('cliente_id', cliente.id)
+            .in('estado', ['pendiente_whatsapp', 'revision_manual'])
+            .gte('created_at', from)
+            .lte('created_at', to)
             .order('created_at', { ascending: false })
             .limit(30),
         ]);
@@ -502,7 +505,9 @@ export function createIdentityRouter(
             selected_final: false,
             selection_source: null,
           };
-        });
+        }).filter((photo: any) =>
+          photo.payment_status === 'pendiente_whatsapp' || photo.payment_status === 'revision_manual'
+        );
 
         return res.json({
           photos,
